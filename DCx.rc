@@ -1,0 +1,293 @@
+// Microsoft Visual C++ generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// German (Germany) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_DEU)
+LANGUAGE LANG_GERMAN, SUBLANG_GERMAN
+#pragma code_page(1252)
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE 
+BEGIN
+    "#define _AFX_NO_SPLITTER_RESOURCES\r\n"
+    "#define _AFX_NO_OLE_RESOURCES\r\n"
+    "#define _AFX_NO_TRACKER_RESOURCES\r\n"
+    "#define _AFX_NO_PROPERTY_RESOURCES\r\n"
+    "\r\n"
+    "#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)\r\n"
+    "#ifdef _WIN32\r\n"
+    "LANGUAGE 9, 1\r\n"
+    "#pragma code_page(1252)\r\n"
+    "#endif //_WIN32\r\n"
+    "#include ""res\\uc480Live.rc2""  // non-Microsoft Visual C++ edited resources\r\n"
+    "#include ""afxres.rc""         // Standard components\r\n"
+    "#endif\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+IDB_LOGO                BITMAP                  "res\\OEM_LOGO_GREY_93_40.bmp"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDR_MAINFRAME           ICON                    "res\\uc480Live.ico"
+#endif    // German (Germany) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+/////////////////////////////////////////////////////////////////////////////
+// English (United States) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+DCX_DIALOG DIALOGEX 0, 0, 397, 363
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "DCx Camera Interface"
+FONT 8, "MS Sans Serif", 0, 0, 0x1
+BEGIN
+    LTEXT           "Last Compile Date and Time which needs to be much",IDT_COMPILE_VERSION,5,354,155,8
+    GROUPBOX        "Camera",IDC_STATIC,7,3,133,41
+    COMBOBOX        IDC_CAMERA_LIST,9,12,130,45,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Camera Info ...",IDB_CAMERA_DETAILS,9,26,50,14
+    GROUPBOX        "Image Size",IDC_STATIC,7,44,133,24
+    COMBOBOX        IDC_CAMERA_MODES,9,53,130,101,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "Video On",IDB_LIVE,"Button",BS_AUTOCHECKBOX | BS_PUSHLIKE | WS_TABSTOP,148,6,42,17
+    PUSHBUTTON      "Float ...",IDB_UNDOCK,198,6,42,17,BS_MULTILINE
+    PUSHBUTTON      "Capture",IDB_CAPTURE,255,6,42,17
+    PUSHBUTTON      "Save ...",IDB_SAVE,317,6,42,17,BS_MULTILINE
+    CONTROL         "",IDC_DISPLAY,"Static",SS_BLACKFRAME | SS_SUNKEN,148,26,211,141
+    GROUPBOX        "Color Corrections",IDC_STATIC,7,70,113,82
+    CONTROL         "Disable",IDR_COLOR_DISABLE,"Button",BS_AUTORADIOBUTTON,15,79,38,10
+    CONTROL         "Enable",IDR_COLOR_ENABLE,"Button",BS_AUTORADIOBUTTON,15,91,36,10
+    CONTROL         "Enable BG40 Enhanced",IDR_COLOR_BG40,"Button",BS_AUTORADIOBUTTON,15,103,95,10
+    CONTROL         "Enable HQ Enhanced",IDR_COLOR_HQ,"Button",BS_AUTORADIOBUTTON,15,115,95,10
+    CONTROL         "Enable Auto IR type",IDR_COLOR_AUTO_IR,"Button",BS_AUTORADIOBUTTON,15,127,95,10
+    LTEXT           "Strength (0-1):",IDC_STATIC,15,139,52,8
+    EDITTEXT        IDV_COLOR_CORRECT_FACTOR,68,138,35,12,ES_CENTER | ES_AUTOHSCROLL
+    GROUPBOX        "Electronic Gain",IDC_STATIC,6,255,135,95
+    LTEXT           "Master",IDC_STATIC,9,266,21,8
+    EDITTEXT        IDV_MASTER_GAIN,8,336,20,12,ES_CENTER | ES_AUTOHSCROLL
+    CONTROL         "",IDS_MASTER_GAIN,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | WS_TABSTOP,14,274,13,61
+    CTEXT           "Red",IDC_STATIC,38,266,18,8
+    EDITTEXT        IDV_RED_GAIN,35,336,20,12,ES_CENTER | ES_AUTOHSCROLL
+    CONTROL         "",IDS_RED_GAIN,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | WS_TABSTOP,41,274,13,61
+    CTEXT           "Green",IDC_STATIC,56,266,24,8
+    EDITTEXT        IDV_GREEN_GAIN,57,336,20,12,ES_CENTER | ES_AUTOHSCROLL
+    CONTROL         "",IDS_GREEN_GAIN,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | WS_TABSTOP,63,274,13,61
+    CTEXT           "Blue",IDC_STATIC,80,266,19,8
+    EDITTEXT        IDV_BLUE_GAIN,79,336,20,12,ES_CENTER | ES_AUTOHSCROLL
+    CONTROL         "",IDS_BLUE_GAIN,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | WS_TABSTOP,84,274,13,61
+    GROUPBOX        "Frame Rate",IDC_STATIC,150,203,209,34
+    LTEXT           "1 fps",IDC_STATIC,196,227,15,8
+    LTEXT           "15 fps",IDC_STATIC,305,225,19,8
+    EDITTEXT        IDV_FRAME_RATE,155,213,40,14,ES_CENTER | ES_AUTOHSCROLL
+    CONTROL         "",IDS_FRAME_RATE,"msctls_trackbar32",TBS_AUTOTICKS | TBS_TOP | WS_TABSTOP,195,210,127,15
+    EDITTEXT        IDT_FRAMERATE,326,212,30,14,ES_CENTER | ES_AUTOHSCROLL
+    GROUPBOX        "Exposure Time",IDC_STATIC,150,238,177,34
+    LTEXT           "1 ms",IDC_STATIC,196,262,15,8
+    LTEXT           "1000 ms",IDC_STATIC,295,262,31,8
+    EDITTEXT        IDV_EXPOSURE_TIME,155,249,40,14,ES_CENTER | ES_AUTOHSCROLL
+    CONTROL         "",IDS_EXPOSURE_TIME,"msctls_trackbar32",TBS_AUTOTICKS | TBS_TOP | WS_TABSTOP,195,247,127,15
+    GROUPBOX        "Gamma",IDC_STATIC,150,273,177,34
+    LTEXT           "1.0",IDC_STATIC,196,297,10,8
+    LTEXT           "10.0",IDC_STATIC,281,297,14,8
+    EDITTEXT        IDV_GAMMA,155,283,40,14,ES_CENTER | ES_AUTOHSCROLL
+    CONTROL         "",IDS_GAMMA,"msctls_trackbar32",TBS_AUTOTICKS | TBS_TOP | WS_TABSTOP,195,282,100,15
+    PUSHBUTTON      "Reset",IDB_GAMMA_NEUTRAL,297,283,25,16,BS_MULTILINE
+    CONTROL         "Custom",IDG_VERT_PROFILE,"GraphClass",WS_TABSTOP,358,26,35,140
+    GROUPBOX        "Saturated",IDC_STATIC,102,268,36,74
+    CTEXT           "Red",IDC_STATIC,108,277,28,12
+    EDITTEXT        IDT_RED_SATURATE,108,285,28,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    CTEXT           "Green",IDC_STATIC,108,298,28,12
+    EDITTEXT        IDT_GREEN_SATURATE,108,306,28,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    CTEXT           "Blue",IDC_STATIC,108,319,28,12
+    EDITTEXT        IDT_BLUE_SATURATE,108,327,28,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    GROUPBOX        "Camera Configurations",IDC_STATIC,287,323,106,36
+    PUSHBUTTON      "&Save Config",IDB_SAVE_PARAMETERS,290,334,45,20
+    PUSHBUTTON      "&Load Config",IDB_LOAD_PARAMETERS,343,334,45,20
+    CONTROL         "Custom",IDG_HORZ_PROFILE,"GraphClass",WS_TABSTOP,148,166,210,30
+    CONTROL         "Custom",IDG_HISTOGRAMS,"GraphClass",WS_TABSTOP,6,176,135,79
+END
+
+IDD_ABOUTBOX DIALOGEX 0, 0, 207, 71
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About DCx Live"
+FONT 8, "MS Sans Serif", 0, 0, 0x0
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,171,49,32,14,WS_GROUP
+    LTEXT           "Version 4.80.0.0",IDC_STATIC,7,18,78,8,SS_NOPREFIX
+    LTEXT           "Copyright © 2019",IDC_STATIC,7,31,87,8
+    LTEXT           "DCx Live",IDC_STATIC_ABOUT_APPNAME,7,7,126,8
+END
+
+IDD_CAMERA_INFO DIALOGEX 0, 0, 237, 113
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Camera Information"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,180,92,50,14
+    RTEXT           "Camera ID:",IDC_STATIC,1,8,54,8
+    EDITTEXT        IDT_CAMERA_ID,57,7,54,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    RTEXT           "Manufacturer:",IDC_STATIC,1,23,54,8
+    EDITTEXT        IDT_CAMERA_MANUFACTURER,57,22,54,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    RTEXT           "Model:",IDC_STATIC,1,38,54,8
+    EDITTEXT        IDT_CAMERA_MODEL,57,37,54,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    RTEXT           "S/N:",IDC_STATIC,1,53,54,8
+    EDITTEXT        IDT_CAMERA_SERIAL_NO,57,52,54,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    RTEXT           "Version:",IDC_STATIC,1,69,54,8
+    EDITTEXT        IDT_CAMERA_VERSION,57,68,54,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    RTEXT           "Date:",IDC_STATIC,1,83,54,8
+    EDITTEXT        IDT_CAMERA_DATE,57,82,54,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    RTEXT           "Color Mode:",IDC_STATIC,120,8,54,8
+    EDITTEXT        IDT_CAMERA_COLOR_MODE,176,7,54,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    RTEXT           "Image Size:",IDC_STATIC,120,23,54,8
+    EDITTEXT        IDT_CAMERA_IMAGE_SIZE,176,22,54,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+    RTEXT           "Pixel pitch (um):",IDC_STATIC,120,38,54,8
+    EDITTEXT        IDT_CAMERA_PIXEL_PITCH,176,37,54,12,ES_CENTER | ES_AUTOHSCROLL | ES_READONLY
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 4,80,0,0
+ PRODUCTVERSION 4,80,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x4L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "Comments", "Small sample programm showing how to setup a live image display"
+            VALUE "FileDescription", "uc480Live (32-Bit)"
+            VALUE "FileVersion", "4, 80, 0, 0"
+            VALUE "InternalName", "uc480Live"
+            VALUE "LegalCopyright", "Copyright © 2003 - 2016"
+            VALUE "OriginalFilename", "uc480Live.EXE"
+            VALUE "ProductName", "uc480Live"
+            VALUE "ProductVersion", "4, 80, 0, 0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO
+BEGIN
+    "DCX_DIALOG", DIALOG
+    BEGIN
+        LEFTMARGIN, 5
+        RIGHTMARGIN, 393
+        TOPMARGIN, 3
+        BOTTOMMARGIN, 362
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// String Table
+//
+
+STRINGTABLE
+BEGIN
+    IDS_ABOUTBOX            "&About uc480Live..."
+END
+
+#endif    // English (United States) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+#define _AFX_NO_SPLITTER_RESOURCES
+#define _AFX_NO_OLE_RESOURCES
+#define _AFX_NO_TRACKER_RESOURCES
+#define _AFX_NO_PROPERTY_RESOURCES
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE 9, 1
+#pragma code_page(1252)
+#endif //_WIN32
+#include "res\uc480Live.rc2"  // non-Microsoft Visual C++ edited resources
+#include "afxres.rc"         // Standard components
+#endif
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+
