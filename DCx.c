@@ -55,7 +55,7 @@
 /* ------------------------------- */
 #define	LinkDate	(__DATE__ "  "  __TIME__)
 
-#define	nint(x)	((int) ((x)>0)?((x)+0.5):((x)-0.5))
+#define	nint(x)	(((x)>0) ? ( (int) (x+0.5)) : ( (int) (x-0.5)) )
 
 #define	WMP_SET_FRAMERATE			(WM_APP+2)
 #define	WMP_SET_EXPOSURE			(WM_APP+3)
@@ -69,12 +69,13 @@
 #define	MIN_FPS		(0.5)
 #define	MAX_FPS		(15)
 
-#define	MIN_EXPOSURE	(0.01)
-#define	MAX_EXPOSURE	(2.0)
+#define	MAX_EXPOSURE	(2000.0)
 
 typedef struct _DCX_WND_INFO {
 	HWND main_hdlg;							/* Handle to primary dialog box */
 	HANDLE FrameEvent;
+	BOOL RenderImageThreadActive;
+	BOOL LiveVideo;							/* Are we in free-run mode? */
 
 	/* Associated with opening a camera */
 	HCAM hCam;
@@ -84,7 +85,8 @@ typedef struct _DCX_WND_INFO {
 	int NumImageFormats;						/* Number of image formats available */
 	IMAGE_FORMAT_LIST *ImageFormatList;	/* List of formats for the active camera */
 	int ImageFormatID;						/* Currently selected Image Format */
-	
+	BOOL EnableErrorReports;				/* Do we want error reports as message boxes? */
+
 	/* Associated with the selected resolution */
 	IMAGE_FORMAT_INFO *ImageFormatInfo;
 	int height, width;
@@ -94,7 +96,11 @@ typedef struct _DCX_WND_INFO {
 	double Image_Aspect;
 
 	HWND thumbnail;
-	GRAPH_CURVE *red_hist, *green_hist, *blue_hist, *vert_hist, *horz_hist;
+	double x_image_target, y_image_target;
+
+	GRAPH_CURVE *red_hist, *green_hist, *blue_hist;
+	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b;
+	GRAPH_CURVE *horz_w, *horz_r, *horz_g, *horz_b;
 } DCX_WND_INFO;
 
 /* ------------------------------- */
@@ -106,12 +112,14 @@ typedef struct _DCX_WND_INFO {
 /* ------------------------------- */
 int  DCx_Init_Driver(void);
 void DCx_Final_Closeout(void);
-int  DCx_Enum_Camera_List(HWND hdlg, DCX_WND_INFO *dcx, int *nAvailable, int *nFirstID);
+int  DCx_Enum_Camera_List(int *pcount, UC480_CAMERA_INFO **pinfo);
 int  DCx_Select_Camera(HWND hdlg, DCX_WND_INFO *dcx, int CameraID, int *nBestFormat);
 int  DCx_Select_Resolution(HWND hdlg, DCX_WND_INFO *dcx, HCAM hCam, int ImageFormatID);
 
 int InitializeScrollBars(HWND hdlg, DCX_WND_INFO *dcx);
 int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx);
+int Init_Known_Resolution(HWND hdlg, DCX_WND_INFO *dcx, HCAM hCam);
+void FreeCurve(GRAPH_CURVE *cv);
 
 static void show_camera_info_thread(void *arglist);
 BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -128,7 +136,7 @@ HWND DCx_main_hdlg = NULL;											/* Global identifier of my window handle */
 
 /* Global information about the cameras in the system */
 static int CameraCount = 0;										/* How many cameras are on the system */
-static UC480_CAMERA_LIST *CameraList = NULL;					/* Enumerated set of cameras and information */
+static UC480_CAMERA_INFO *CameraDetails = NULL;				/* Enumerated set of cameras and information */
 
 static HINSTANCE hInstance=NULL;
 static HWND float_image_hwnd;										/* Handle to free-floating image window */
@@ -141,43 +149,58 @@ int ColorCorrectionModes[] = { IS_CCOR_DISABLE, IS_CCOR_ENABLE_NORMAL, IS_CCOR_E
 
 #define	ID_NULL			(-1)
 
+/* List of information about the exposure radio buttons */
+struct {
+	int wID;
+	double exp_min, exp_max;
+	char *str_min, *str_mid, *str_max;
+} ExposureList[] = {
+	{IDR_EXPOSURE_100US,   0.1,    10.0, "100 us", "1 ms",   "10 ms"},
+	{IDR_EXPOSURE_1MS,     1.0,   100.0, "1 ms",   "10 ms",  "100 ms"},
+	{IDR_EXPOSURE_10MS,   10.0,  1000.0, "10 ms",  "100 ms", "1000 ms"},
+	{IDR_EXPOSURE_100MS, 100.0, 10000.0, "100 ms",  "1 s",   "10 ms"}
+};
+#define N_EXPOSURE_LIST	(sizeof(ExposureList)/sizeof(ExposureList[0]))
+
 /* List of all camera controls ... disabled when no camera exists */
 int AllCameraControls[] = { 
-	IDC_CAMERA_LIST, IDC_CAMERA_MODES, IDB_CAMERA_DETAILS,
+	IDB_CAMERA_DISCONNECT, IDC_CAMERA_MODES, IDB_CAMERA_DETAILS,
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
 	IDB_LIVE, IDB_UNDOCK, IDB_CAPTURE, IDB_SAVE,
-	IDS_FRAME_RATE, IDV_FRAME_RATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
+	IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_FRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDR_COLOR_DISABLE, IDR_COLOR_ENABLE, IDR_COLOR_BG40, IDR_COLOR_HQ, IDR_COLOR_AUTO_IR, 
 	IDV_COLOR_CORRECT_FACTOR,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
 	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN,
+	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS,
 	ID_NULL
 };
 /* List of camera controls that get turned off when starting resolution change */
 int CameraOffControls[] = { 
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
 	IDB_LIVE, IDB_UNDOCK, IDB_CAPTURE, IDB_SAVE,
-	IDS_FRAME_RATE, IDV_FRAME_RATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
+	IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_FRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDR_COLOR_DISABLE, IDR_COLOR_ENABLE, IDR_COLOR_BG40, IDR_COLOR_HQ, IDR_COLOR_AUTO_IR, IDV_COLOR_CORRECT_FACTOR,
 	IDV_COLOR_CORRECT_FACTOR,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
 	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN,
+	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS,
 	ID_NULL
 };
 /* List of camera controls that get turned on when resolution is set */
 int CameraOnControls[] = { 
-	IDC_CAMERA_LIST, IDC_CAMERA_MODES, IDB_CAMERA_DETAILS,
+	IDC_CAMERA_LIST, IDC_CAMERA_MODES,
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
 	IDB_LIVE, IDB_UNDOCK, IDB_CAPTURE, IDB_SAVE,
-	IDS_FRAME_RATE, IDV_FRAME_RATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
+	IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_FRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDV_COLOR_CORRECT_FACTOR,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
+	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS,
 	ID_NULL
 };
-
 
 /* ===========================================================================
 -- Simple test thread to verify calls for SPEC are working properly
@@ -187,28 +210,43 @@ int CameraOnControls[] = {
 =========================================================================== */
 static void test_thread(void *arglist) {
 	DCX_STATUS status;	
+	DCX_IMAGE_INFO info;
 	int rc;
 
+	printf("test thread started\n"); fflush(stdout);
+	Sleep(5000);											/* Wait a while before starting */
+	printf("calling DCx_Status\n"); fflush(stdout);
 	rc = DCx_Status(&status);
-	printf("DCx_Status returns: %s\n", rc == 0 ? "Success" : "Fail");
+	printf("DCx_Status returns: %s\n", rc == 0 ? "Success" : "Fail"); fflush(stdout);
 	if (rc == 0) {
-		printf("Manufacturer: %s\n", status.manufacturer);
-		printf("Model: %s\n", status.model);
-		printf("Serial: %s\n", status.serial);
-		printf("Version: %s\n", status.version);
-		printf("Date: %s\n", status.date);
-		printf("CameraID: %d\n", status.CameraID);
-		printf("ColorMode: %s\n", status.color_mode);
-		printf("Pixel Pitch: %d\n", status.pixel_pitch);
-		printf("Frame rate: %.2f\n", status.fps);
-		printf("Exposure: %.2f ms\n", status.exposure);
-		printf("Gamma: %.2f\n", status.gamma);
-		printf("Gains: %d  (%d,%d,%d)\n", status.master_gain, status.red_gain, status.green_gain, status.blue_gain);
-		printf("Color correction: %d %f\n", status.color_correction, status.color_correction_factor);
+		printf("  Manufacturer: %s\n", status.manufacturer);
+		printf("  Model: %s\n", status.model);
+		printf("  Serial: %s\n", status.serial);
+		printf("  Version: %s\n", status.version);
+		printf("  Date: %s\n", status.date);
+		printf("  CameraID: %d\n", status.CameraID);
+		printf("  ColorMode: %s\n", status.color_mode);
+		printf("  Pixel Pitch: %d\n", status.pixel_pitch);
+		printf("  Frame rate: %.2f\n", status.fps);
+		printf("  Exposure: %.2f ms\n", status.exposure);
+		printf("  Gamma: %.2f\n", status.gamma);
+		printf("  Gains: Master: %d   RGB: %d,%d,%d\n", status.master_gain, status.red_gain, status.green_gain, status.blue_gain);
+		printf("  Color correction: %d %f\n", status.color_correction, status.color_correction_factor);
 	}
 
-	printf("Capture: %d\n", DCx_Capture_Image("test_img.bmp", IMAGE_BMP, 100));
-	fflush(NULL);
+	rc = DCx_Capture_Image("test_img.bmp", IMAGE_BMP, 100, &info, NULL);
+	printf("DCx_Capture_Image returns: %d\n", rc); fflush(stdout);
+	if (rc == 0) {
+		double r,g,b;
+		printf("  Image size: %d x %d\n", info.width, info.height); fflush(stdout);
+		printf("  Exposure: %.2f ms\n", info.exposure); fflush(stdout);
+		printf("  Gains: Master: %d   RGB: %d,%d,%d\n", info.master_gain, info.red_gain, info.green_gain, info.blue_gain); fflush(stdout);
+		printf("  Color correction: %d %f\n", info.color_correction, info.color_correction_factor); fflush(stdout);
+		r = 100.0 * info.red_saturate / (1.0*info.width*info.height);
+		g = 100.0 * info.green_saturate / (1.0*info.width*info.height);
+		b = 100.0 * info.blue_saturate / (1.0*info.width*info.height);
+		printf("  Saturated pixels: RGB: %d %d %d (%.2f%%, %.2f%%, %.2f%%)\n", info.red_saturate, info.green_saturate, info.blue_saturate, r,g,b); fflush(stdout);
+	}
 
 	return;
 }
@@ -244,8 +282,15 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 			EndPaint(hwnd, &paintstruct);					/* Release DC */
 			rc = TRUE; break;
 
+		case WM_RBUTTONDOWN:
+			GetCursorPos((LPPOINT) &point);
+			ScreenToClient(hwnd, &point);
+			GetClientRect(hwnd, &Client);
+			main_dcx->x_image_target = (1.0*point.x) / Client.right;
+			main_dcx->y_image_target = (1.0*point.y) / Client.bottom;
+			break;
+
 		case WM_LBUTTONDBLCLK:								/* Magnify at this location */
-		case WM_RBUTTONDBLCLK:								/* Demagnify at this location */
 		case WM_MBUTTONDOWN:
 			break;
 
@@ -309,16 +354,57 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 
 /* ===========================================================================
 =========================================================================== */
+void GenerateCrosshair(	DCX_WND_INFO *dcx, HWND hwnd) {
+	RECT rect;
+	HDC hdc;
+	int ix,iy, width, height;
+
+	/* Create brushes for the cross-hair */
+	static HBRUSH background, foreground;
+	static HPEN hpen;
+	static BOOL first = TRUE;
+
+	if (first) {
+		background = CreateSolidBrush(RGB(0,0,0));
+		foreground = CreateSolidBrush(RGB(255,255,255));
+		hpen = CreatePen(PS_SOLID, 1, RGB(255,255,255));
+		first = FALSE;
+	}
+
+	GetClientRect(hwnd, &rect);
+	width = rect.right; height = rect.bottom;
+	ix = (int) (dcx->x_image_target*width  + 0.5);
+	iy = (int) (dcx->y_image_target*height + 0.5);
+
+	hdc = GetDC(hwnd);				/* Get DC */
+	SetRect(&rect, max(ix-20,0),max(iy-1,0), min(ix+20,width),min(iy+2,height));
+	FillRect(hdc, &rect, background);
+	SetRect(&rect, max(0,ix-1),max(0,iy-20), min(ix+2,width),min(iy+20,height));
+	FillRect(hdc, &rect, background);
+
+	SelectObject(hdc, hpen);
+	MoveToEx(hdc, max(ix-20,0), iy, NULL); LineTo(hdc, min(ix+20,width), iy);
+	MoveToEx(hdc, ix, max(iy-20,0), NULL); LineTo(hdc, ix, min(iy+20,height));
+
+	ReleaseDC(hwnd, hdc);			/* Release DC */
+	return;
+}
+
+
 static void RenderImageThread(void *arglist) {
 
 	int i, col, line, height, width, pitch;
 	unsigned char *pMem, *aptr;
-	GRAPH_CURVE *red, *green, *blue, *vert, *horz;
+	GRAPH_CURVE *red, *green, *blue;
+	GRAPH_CURVE *vert, *vert_r, *vert_g, *vert_b;
+	GRAPH_CURVE *horz, *horz_r, *horz_g, *horz_b;
 	HANDLE hdlg;
 	DCX_WND_INFO *dcx;
 	GRAPH_SCALES scales;
 
 	/* Just wait for events that mean I should render the images */
+	printf("RenderImageThread started\n"); fflush(stdout);
+
 	while (main_dcx != NULL) {
 		dcx = main_dcx;
 		if (dcx->FrameEvent == NULL) { Sleep(100); continue; }
@@ -326,76 +412,111 @@ static void RenderImageThread(void *arglist) {
 		if (dcx->hCam <= 0) continue;
 
 		/* Okay, we have ability to do now */
-		if (IsWindow(float_image_hwnd)) is_RenderBitmap(dcx->hCam, dcx->Image_PID, float_image_hwnd, IS_RENDER_FIT_TO_WINDOW);
-		if (IsWindow(dcx->thumbnail))   is_RenderBitmap(dcx->hCam, dcx->Image_PID, dcx->thumbnail,   IS_RENDER_FIT_TO_WINDOW);
+		if (IsWindow(float_image_hwnd)) {
+			is_RenderBitmap(dcx->hCam, dcx->Image_PID, float_image_hwnd, IS_RENDER_FIT_TO_WINDOW);
+			GenerateCrosshair(dcx, float_image_hwnd);
+		}
+		if (IsWindow(dcx->thumbnail)) {
+			is_RenderBitmap(dcx->hCam, dcx->Image_PID, dcx->thumbnail, IS_RENDER_FIT_TO_WINDOW);
+			GenerateCrosshair(dcx, dcx->thumbnail);
+		}
 
 		/* Do the histogram calculations */
-		pMem   = dcx->Image_Mem;
-		height = dcx->height;
-		width  = dcx->width;
-		pitch  = dcx->Image_Memory_Pitch;
-		hdlg   = dcx->main_hdlg;
+		if (IsWindow(dcx->main_hdlg)) {
+			pMem   = dcx->Image_Mem;
+			height = dcx->height;
+			width  = dcx->width;
+			pitch  = dcx->Image_Memory_Pitch;
+			hdlg   = dcx->main_hdlg;
 			
-		/* For some strange reason, only works if in IS_CM_BGR8_PACKED mode */
-		red    = dcx->red_hist;
-		green  = dcx->green_hist;
-		blue   = dcx->blue_hist;
-		for (i=0; i<red->npt; i++) red->y[i] = green->y[i] = blue->y[i] = 0;
-		for (line=0; line<height; line++) {
-			aptr = pMem + line*pitch;					/* Pointer to this line */
-			for (col=0; col<width; col++) {
-				i = aptr[3*col+0]; if (i < 0) i = 0; if (i > 255) i = 255; blue->y[i]++;
-				i = aptr[3*col+1]; if (i < 0) i = 0; if (i > 255) i = 255; green->y[i]++;
-				i = aptr[3*col+2]; if (i < 0) i = 0; if (i > 255) i = 255; red->y[i]++;
+			/* For some strange reason, only works if in IS_CM_BGR8_PACKED mode */
+			red    = dcx->red_hist;
+			green  = dcx->green_hist;
+			blue   = dcx->blue_hist;
+			for (i=0; i<red->npt; i++) red->y[i] = green->y[i] = blue->y[i] = 0;
+			for (line=0; line<height; line++) {
+				aptr = pMem + line*pitch;					/* Pointer to this line */
+				for (col=0; col<width; col++) {
+					i = aptr[3*col+0]; if (i < 0) i = 0; if (i > 255) i = 255; blue->y[i]++;
+					i = aptr[3*col+1]; if (i < 0) i = 0; if (i > 255) i = 255; green->y[i]++;
+					i = aptr[3*col+2]; if (i < 0) i = 0; if (i > 255) i = 255; red->y[i]++;
+				}
 			}
-		}
-		SetDlgItemDouble(hdlg, IDT_RED_SATURATE,   "%.2f%%", (100.0*red->y[255]  )/(1.0*height*width));
-		SetDlgItemDouble(hdlg, IDT_GREEN_SATURATE, "%.2f%%", (100.0*green->y[255])/(1.0*height*width));
-		SetDlgItemDouble(hdlg, IDT_BLUE_SATURATE,  "%.2f%%", (100.0*blue->y[255] )/(1.0*height*width));
-		red->y[255] = green->y[255] = blue->y[255] = 0;
-		red->modified = green->modified = blue->modified = TRUE;
-		SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_REDRAW, 0, 0);
+			SetDlgItemDouble(hdlg, IDT_RED_SATURATE,   "%.2f%%", (100.0*red->y[255]  )/(1.0*height*width));
+			SetDlgItemDouble(hdlg, IDT_GREEN_SATURATE, "%.2f%%", (100.0*green->y[255])/(1.0*height*width));
+			SetDlgItemDouble(hdlg, IDT_BLUE_SATURATE,  "%.2f%%", (100.0*blue->y[255] )/(1.0*height*width));
+			red->y[255] = green->y[255] = blue->y[255] = 0;
+			red->modified = green->modified = blue->modified = TRUE;
+			SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_REDRAW, 0, 0);
+			
+			/* Do the horizontal profile at centerline */
+			horz = dcx->horz_w;
+			horz_r = dcx->horz_r;
+			horz_g = dcx->horz_g;
+			horz_b = dcx->horz_b;
+			if (horz->npt < width) {
+				horz->x   = realloc(horz->x, width*sizeof(*horz->x));
+				horz->y   = realloc(horz->y, width*sizeof(*horz->y));
+				horz_r->x = realloc(horz_r->x, width*sizeof(*horz_r->x));
+				horz_r->y = realloc(horz_r->y, width*sizeof(*horz_r->y));
+				horz_g->x = realloc(horz_g->x, width*sizeof(*horz_g->x));
+				horz_g->y = realloc(horz_g->y, width*sizeof(*horz_g->y));
+				horz_b->x = realloc(horz_b->x, width*sizeof(*horz_b->x));
+				horz_b->y = realloc(horz_b->y, width*sizeof(*horz_b->y));
+			}
+			horz->npt = width;
+			horz->npt = horz_r->npt = horz_g->npt = horz_b->npt = width;
+			aptr = pMem + pitch*((int) (height*dcx->y_image_target+0.5));			/* Pointer to middle line */
+			for (i=0; i<width; i++) {
+				horz->x[i] = i;
+				horz->x[i] = horz_r->x[i] = horz_g->x[i] = horz_b->x[i] = i;
+				horz->y[i] = (aptr[3*i+0] + aptr[3*i+1] + aptr[3*i+2])/3.0 ;		/* Average intensity */
+				horz_r->y[i] = aptr[3*i+2];
+				horz_g->y[i] = aptr[3*i+1];
+				horz_b->y[i] = aptr[3*i+0];
+			}
+			memset(&scales, 0, sizeof(scales));
+			scales.xmin = 0;	scales.xmax = width-1;
+			scales.ymin = 0;  scales.ymax = 256;
+			scales.autoscale_x = FALSE; scales.force_scale_x = TRUE;
+			scales.autoscale_y = FALSE; scales.force_scale_y = TRUE;
+			horz->modified = TRUE;
+			horz->modified = horz_r->modified = horz_g->modified = horz_b->modified = TRUE;
+			SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_SET_SCALES, (WPARAM) &scales, (LPARAM) 0);
+			SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_REDRAW, 0, 0);
 
-		/* Do the horizontal profile at centerline */
-		horz = dcx->horz_hist;
-		if (horz->npt < width) {
-			horz->x = realloc(horz->x, width*sizeof(*horz->x));
-			horz->y = realloc(horz->y, width*sizeof(*horz->y));
+			vert = dcx->vert_w;
+			vert_r = dcx->vert_r;
+			vert_g = dcx->vert_g;
+			vert_b = dcx->vert_b;
+			if (vert->npt < height) {
+				vert->x = realloc(vert->x, height*sizeof(*vert->x));
+				vert->y = realloc(vert->y, height*sizeof(*vert->y));
+				vert_r->x = realloc(vert_r->x, height*sizeof(*vert_r->x));
+				vert_r->y = realloc(vert_r->y, height*sizeof(*vert_r->y));
+				vert_g->x = realloc(vert_g->x, height*sizeof(*vert_g->x));
+				vert_g->y = realloc(vert_g->y, height*sizeof(*vert_g->y));
+				vert_b->x = realloc(vert_b->x, height*sizeof(*vert_b->x));
+				vert_b->y = realloc(vert_b->y, height*sizeof(*vert_b->y));
+			}
+			vert->npt = vert_r->npt = vert_g->npt = vert_b->npt = height;
+			for (i=0; i<height; i++) {
+				aptr = pMem + i*pitch + 3*((int) (width*dcx->x_image_target+0.5));	/* Access first of the column */
+				vert->y[i] = vert_r->y[i] = vert_g->y[i] = vert_b->y[i] = height-1-i;
+				vert->x[i] = (3*256 - (aptr[0] + aptr[1] + aptr[2])) / 3.0;
+				vert_r->x[i] = 256 - aptr[2];
+				vert_g->x[i] = 256 - aptr[1];
+				vert_b->x[i] = 256 - aptr[0];
+			}
+			memset(&scales, 0, sizeof(scales));
+			scales.xmin = 0; scales.xmax = 256;
+			scales.ymin = 0; scales.ymax = height-1;
+			scales.autoscale_x = FALSE;  scales.force_scale_x = TRUE;
+			scales.autoscale_y = FALSE;  scales.force_scale_y = TRUE;
+			vert->modified = vert_r->modified = vert_g->modified = vert_b->modified = TRUE;
+			SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_SCALES, (WPARAM) &scales, (LPARAM) 0);
+			SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_REDRAW, 0, 0);
 		}
-		horz->npt = width;
-		aptr = pMem + height/2*pitch;					/* Pointer to middle line */
-		for (i=0; i<width; i++) {
-			horz->x[i] = i;
-			horz->y[i] = aptr[3*i+0] + aptr[3*i+1] + aptr[3*i+2] ;
-		}
-		memset(&scales, 0, sizeof(scales));
-		scales.xmin = 0;	scales.xmax = width-1;
-		scales.ymin = 0;  scales.ymax = 3*256;
-		scales.autoscale_x = FALSE; scales.force_scale_x = TRUE;
-		scales.autoscale_y = FALSE; scales.force_scale_y = TRUE;
-		horz->modified = TRUE;
-		SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_SET_SCALES, (WPARAM) &scales, (LPARAM) 0);
-		SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_REDRAW, 0, 0);
-
-		vert = dcx->vert_hist;
-		if (vert->npt < height) {
-			vert->x = realloc(vert->x, height*sizeof(*vert->x));
-			vert->y = realloc(vert->y, height*sizeof(*vert->y));
-		}
-		vert->npt = height;
-		for (i=0; i<height; i++) {
-			aptr = pMem + i*pitch + 3*width/2;					/* Access first of the column */
-			vert->x[i] = 3*256 - (aptr[0] + aptr[1] + aptr[2]);
-			vert->y[i] = height-1-i;
-		}
-		memset(&scales, 0, sizeof(scales));
-		scales.xmin = 0; scales.xmax = 3*256;
-		scales.ymin = 0; scales.ymax = height-1;
-		scales.autoscale_x = FALSE;  scales.force_scale_x = TRUE;
-		scales.autoscale_y = FALSE;  scales.force_scale_y = TRUE;
-		vert->modified = TRUE;
-		SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_SCALES, (WPARAM) &scales, (LPARAM) 0);
-		SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_REDRAW, 0, 0);
 	}
 
 	return;									/* Only happens if main_dcx is destroyed */
@@ -450,6 +571,8 @@ int WINAPI ImageWindow(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR l
 		DispatchMessage(&msg);						 /* Send it to FloatImageWndProc */
 	}
 //	return msg.wParam;
+
+	float_image_hwnd = NULL;
 	return 0;
 }
 
@@ -470,12 +593,11 @@ static void start_image_window(void *arglist) {
 -- Return: 0 if successful (always)
 =========================================================================== */
 int DCx_Init_Driver(void) {
-	int rc;
 	static BOOL done=FALSE;
 
 /* Initialize the DCx software to pop up errors (for now so know when doing something wrong */
 	if (! done) {
-		rc = is_SetErrorReport(0, IS_ENABLE_ERR_REP); printf("is_SetErrorReport() rc: %d\n", rc); fflush(stdout);
+		is_SetErrorReport(0, IS_ENABLE_ERR_REP);
 		done = TRUE;
 	}
 
@@ -497,6 +619,7 @@ void DCx_Final_Closeout(void) {
 	DCX_WND_INFO *dcx;
 
 	if ( (dcx = main_dcx) != NULL) {
+		printf("Performing final shutdown of DCx camera\n"); fflush(stdout);
 		/* Close the camera */
 		if (dcx->hCam > 0) {
 			is_DisableEvent(dcx->hCam, IS_SET_EVENT_FRAME);
@@ -518,10 +641,61 @@ void DCx_Final_Closeout(void) {
 }
 
 /* ===========================================================================
--- Routine to create the list of cameras on the system and populate the
--- camera selection combo box
+-- Routine to generate a list of cameras on the system
 -- 
--- Usage: int DCx_Enum_Camera_List(HWND hdlg, DCX_WND_INFO *dcx);
+-- Usage: int DCx_Enum_Camera_List(int *pcount, UC480_CAMERA_INFO **plist);
+--
+-- Inputs: pcount - pointer to variable to receive count of number available
+--         plist  - pointer to variable to receive allocated description of list 
+--
+-- Output: *pcount - if != NULL, set to number of available cameras
+--         *plist  - if != NULL, set to allocated list of camera info
+--
+-- Return: >= 0 - number of cameras on the system (count) 
+--           -1 - failure getting info from the DCX interface
+--
+-- Notes: plist should be released by calling program when no longer needed
+=========================================================================== */
+int DCx_Enum_Camera_List(int *pcount, UC480_CAMERA_INFO **pinfo) {
+
+	int i, rc, count;
+	UC480_CAMERA_LIST *list = NULL;					/* Enumerated set of cameras and information */
+	UC480_CAMERA_INFO *info;
+
+	/* Initial return values */
+	if (pcount != NULL) *pcount = 0;
+	if (pinfo  != NULL) *pinfo = NULL;
+
+	/* Determine how many cameras are connected and build the combo box with the information */
+	if ( (rc = is_GetNumberOfCameras(&count)) != IS_SUCCESS) {
+		printf("is_GetNumberOfCameras() failed (rc=%d)\n", rc); fflush(stdout);
+		return -1;
+	}
+
+	if (count > 0) {
+		list = calloc(1, sizeof(UC480_CAMERA_LIST) + count*sizeof(UC480_CAMERA_INFO));
+		list->dwCount = count;
+		if ( (rc = is_GetCameraList(list)) != IS_SUCCESS) {
+			printf("Error getting camera list (rc=%d)\n", rc); fflush(stdout);
+			free(list);
+			return -2;
+		}
+		info = calloc(count, sizeof(*info));
+		for (i=0; i<count; i++) info[i] = list->uci[i];
+		free(list);
+	}
+
+	/* Return values */
+	if (pcount != NULL) *pcount = count;
+	if (pinfo  != NULL) *pinfo  = info;
+
+	return count;
+}
+
+/* ===========================================================================
+-- Routine to populate the camera selection combo box and identify best choice
+-- 
+-- Usage: int Fill_Camera_List_Control(HWND hdlg, DCX_WND_INFO *dcx, int *nAvailable, int *nFirstID);
 --
 -- Inputs: hdlg - handle to the window
 --         dcx  - handle to the main information structure
@@ -530,18 +704,13 @@ void DCx_Final_Closeout(void) {
 --
 -- Return: Number of cameras on the system (CameraCount)
 =========================================================================== */
-int DCx_Enum_Camera_List(HWND hdlg, DCX_WND_INFO *dcx, int *nAvailable, int *nFirstID) {
+int Fill_Camera_List_Control(HWND hdlg, DCX_WND_INFO *dcx, int *nAvailable, int *nFirstID) {
 
-	int i, nfree, nfirst, rc;
+	int i, nfree, nfirst;
 	UC480_CAMERA_INFO *info;
 
 	CB_INT_LIST *combolist;
 	char szBuf[60];
-
-	/* Reinitializing so delete old stuff */
-	if (CameraList != NULL) free(CameraList);
-	CameraCount = 0;
-	CameraList = NULL;
 
 	/* Prefill return values if we have points */
 	nfree = nfirst = 0;
@@ -549,17 +718,10 @@ int DCx_Enum_Camera_List(HWND hdlg, DCX_WND_INFO *dcx, int *nAvailable, int *nFi
 	/* Clear combo selection boxes and mark camera invalid now */
 	ComboBoxClearList(hdlg, IDC_CAMERA_LIST);
 
-	/* Determine how many cameras are connected and build the combo box with the information */
-	rc = is_GetNumberOfCameras(&CameraCount);
-
+	combolist = calloc(CameraCount, sizeof(*combolist));
 	if (CameraCount > 0) {
-		combolist = calloc(CameraCount, sizeof(*combolist));
-		CameraList = calloc(1, sizeof(UC480_CAMERA_LIST) + CameraCount*sizeof(UC480_CAMERA_INFO));
-		CameraList->dwCount = CameraCount;
-		rc = is_GetCameraList(CameraList);
-
 		for (i=0; i<CameraCount; i++) {
-			info = CameraList->uci+i;
+			info = CameraDetails+i;
 			combolist[i].value = info->dwCameraID;											/* Loading a camera is by CameraID */
 			sprintf_s(szBuf, sizeof(szBuf), "[%d]:%s (%s)", info->dwCameraID, info->Model, info->SerNo); fflush(stdout);
 			combolist[i].id = _strdup(szBuf);
@@ -572,7 +734,7 @@ int DCx_Enum_Camera_List(HWND hdlg, DCX_WND_INFO *dcx, int *nAvailable, int *nFi
 
 		/* Fill in the list box and enable it */
 		ComboBoxFillIntList(hdlg, IDC_CAMERA_LIST, combolist, CameraCount);
-		EnableWindow(GetDlgItem(hdlg, IDC_CAMERA_LIST), TRUE);
+		EnableDlgItem(hdlg, IDC_CAMERA_LIST, TRUE);
 
 		/* Free the memory allocated to create the combo box */
 		for (i=0; i<CameraCount; i++) if (combolist[i].id != NULL) free(combolist[i].id);
@@ -593,6 +755,7 @@ int DCx_Enum_Camera_List(HWND hdlg, DCX_WND_INFO *dcx, int *nAvailable, int *nFi
 int DCx_Select_Camera(HWND hdlg, DCX_WND_INFO *dcx, int CameraID, int *nBestFormat) {
 
 	int i, nsize, rc, n_formats;
+	BOOL bval;
 	HCAM hCam;
 
 	CAMINFO camInfo;							/* Local copies - will be copied to dcx */
@@ -611,8 +774,9 @@ int DCx_Select_Camera(HWND hdlg, DCX_WND_INFO *dcx, int CameraID, int *nBestForm
 
 	/* Disable any existing camera and free memory */
 	if (dcx->hCam > 0) {
-		is_StopLiveVideo(dcx->hCam, IS_WAIT);
-		is_ExitCamera(dcx->hCam);					/* This also frees the image mem */
+		rc = is_StopLiveVideo(dcx->hCam, IS_WAIT);
+		dcx->LiveVideo = FALSE;
+		rc = is_ExitCamera(dcx->hCam);					/* This also frees the image mem */
 	}
 	if (dcx->ImageFormatList != NULL) free(dcx->ImageFormatList);
 	dcx->CameraID = 0;
@@ -649,7 +813,7 @@ int DCx_Select_Camera(HWND hdlg, DCX_WND_INFO *dcx, int CameraID, int *nBestForm
 	dcx->CameraID = CameraID;
 	printf("  hCAM: %p  (for Camera %d)\n", hCam, CameraID); fflush(stdout);
 
-	is_ResetToDefault(hCam);
+	rc = is_ResetToDefault(hCam);
 	rc = is_SetDisplayMode(hCam, IS_SET_DM_DIB);
 	rc = is_GetCameraInfo(hCam, &camInfo);
 	if (rc == IS_SUCCESS) {
@@ -671,9 +835,9 @@ int DCx_Select_Camera(HWND hdlg, DCX_WND_INFO *dcx, int CameraID, int *nBestForm
 	}
 	dcx->SensorInfo = SensorInfo;
 
-	rc = is_EnableAutoExit(hCam, IS_DISABLE_AUTO_EXIT); 
-	rc = is_CameraStatus(hCam, IS_STANDBY_SUPPORTED, IS_GET_STATUS); 
-	if (rc == 1) rc = is_CameraStatus(hCam, IS_STANDBY, FALSE); 
+	rc = is_EnableAutoExit(hCam, IS_DISABLE_AUTO_EXIT);
+	rc = is_CameraStatus(hCam, IS_STANDBY_SUPPORTED, IS_GET_STATUS);
+	if (rc == 1) rc = is_CameraStatus(hCam, IS_STANDBY, FALSE);
 
 /* Enumerate the imaging modes */
 	rc = is_ImageFormat(hCam, IMGFRMT_CMD_GET_NUM_ENTRIES, &n_formats, sizeof(n_formats)); 
@@ -718,8 +882,16 @@ int DCx_Select_Camera(HWND hdlg, DCX_WND_INFO *dcx, int CameraID, int *nBestForm
 
 	ComboBoxFillIntList(hdlg, IDC_CAMERA_MODES, list, n_formats);
 	if (ImageFormatID >= 0) ComboBoxSetByIntValue(hdlg, IDC_CAMERA_MODES, ImageFormatID);
-	EnableWindow(GetDlgItem(hdlg, IDC_CAMERA_MODES), TRUE);
-	EnableWindow(GetDlgItem(hdlg, IDB_CAMERA_DETAILS), TRUE);
+	EnableDlgItem(hdlg, IDC_CAMERA_MODES, TRUE);
+	EnableDlgItem(hdlg, IDB_CAMERA_DETAILS, TRUE);
+	EnableDlgItem(hdlg, IDB_CAMERA_DISCONNECT, TRUE);
+
+	/* Disable the RGB profile option when monochrome */
+	bval = SensorInfo.nColorMode != IS_COLORMODE_MONOCHROME;
+	SetDlgItemCheck(hdlg, IDC_SHOW_RGB, bval);
+	EnableDlgItem(hdlg, IDC_SHOW_RGB, bval);
+	dcx->vert_r->visible = dcx->vert_g->visible = dcx->vert_b->visible = bval;
+	dcx->horz_r->visible = dcx->horz_g->visible = dcx->horz_b->visible = bval;
 
 	for (i=0; i<n_formats; i++) if (list[i].id != NULL) free(list[i].id);
 	free(list);
@@ -730,7 +902,73 @@ int DCx_Select_Camera(HWND hdlg, DCX_WND_INFO *dcx, int CameraID, int *nBestForm
 }
 
 /* ===========================================================================
+-- Reset based on existing loaded camera
+=========================================================================== */
+int Init_Connected_Camera(HWND hdlg, DCX_WND_INFO *dcx, int CameraID) {
+
+	int i, rc, n_formats;
+	HCAM hCam;
+
+	IMAGE_FORMAT_LIST *ImageFormatList;	/* Local copy - will be copied to dcx */
+	IMAGE_FORMAT_INFO *ImageFormatInfo;
+
+	CB_INT_LIST *list;
+	char szBuf[60];
+
+/* Clear combo selection boxes and mark camera invalid now */
+	if (dcx->ImageFormatList != NULL) free(dcx->ImageFormatList);
+	ComboBoxClearList(hdlg, IDC_CAMERA_MODES);
+
+	/* Verify that we have a valid camera */
+	if (dcx->CameraID <= 0) {
+		MessageBox(NULL, "Request made to re-intialize an invalid CameraID", "No cameras available", MB_ICONERROR | MB_OK);
+		printf("No cameras\n"); fflush(stdout);
+		return 3;
+	}
+	hCam = dcx->hCam;
+
+/* Enumerate the imaging modes */
+	rc = is_ImageFormat(hCam, IMGFRMT_CMD_GET_NUM_ENTRIES, &n_formats, sizeof(n_formats)); 
+	printf(" Number of image formats: %d\n", n_formats); fflush(stdout);
+	if (n_formats <= 0) {
+		MessageBox(NULL, "Camera selected appears to have no valid imaging formats.  Don't know what to do", "No image formats available", MB_ICONERROR | MB_OK);
+		printf("No image formats were reported to exist\n"); fflush(stdout);
+		return 5;
+	}
+
+	ImageFormatList = dcx->ImageFormatList;
+	n_formats = dcx->NumImageFormats;
+	list = calloc(n_formats, sizeof(*list));
+
+	for (i=0; i<n_formats; i++) {
+		ImageFormatInfo = ImageFormatList->FormatInfo+i;
+		list[i].value = ImageFormatInfo->nFormatID;
+		sprintf_s(szBuf, sizeof(szBuf), "%s", ImageFormatInfo->strFormatName);
+		list[i].id = _strdup(szBuf);
+		printf(" %2d:  ID: %2d  Width: %4d  Height: %4d  X0,Y0: %d,%d  Capture: 0x%4.4x  Binning: %d  SubSampling: %2d  Scaler: %g  Format: %s\n", i, 
+				 ImageFormatInfo->nFormatID, ImageFormatInfo->nWidth, ImageFormatInfo->nHeight, ImageFormatInfo->nX0, ImageFormatInfo->nY0,
+				 ImageFormatInfo->nSupportedCaptureModes, ImageFormatInfo->nBinningMode, ImageFormatInfo->nSubsamplingMode, ImageFormatInfo->dSensorScalerFactor,
+				 ImageFormatInfo->strFormatName);
+		fflush(stdout);
+	}
+
+	ComboBoxFillIntList(hdlg, IDC_CAMERA_MODES, list, n_formats);
+	ComboBoxSetByIntValue(hdlg, IDC_CAMERA_MODES, dcx->ImageFormatID);
+	EnableDlgItem(hdlg, IDC_CAMERA_MODES, TRUE);
+	EnableDlgItem(hdlg, IDB_CAMERA_DETAILS, TRUE);
+	EnableDlgItem(hdlg, IDB_CAMERA_DISCONNECT, TRUE);
+
+	for (i=0; i<n_formats; i++) if (list[i].id != NULL) free(list[i].id);
+	free(list);
+
+	return 0;
+}
+
+/* ===========================================================================
 -- Selects and intializes a specified resolution mode
+--
+-- Notes:
+--   (1) Calls Init_Known_Resolution after the resolution is selected
 ========================================================================== */
 int DCx_Select_Resolution(HWND hdlg, DCX_WND_INFO *dcx, HCAM hCam, int ImageFormatID) {
 
@@ -747,28 +985,16 @@ int DCx_Select_Resolution(HWND hdlg, DCX_WND_INFO *dcx, HCAM hCam, int ImageForm
 	} ExposureParms;
 
 	char *Image_Mem = NULL;
-	double min,max,interval, rval, rval1, rval2;
+	double min,max,interval, rval1, rval2;
 	int Image_PID;
 
 	unsigned char *pMem;
 	int pitch;
 
 	/* Disable controls that may no longer be valid */
-	for (i=0; CameraOffControls[i] != ID_NULL; i++) EnableWindow(GetDlgItem(hdlg, CameraOffControls[i]), FALSE);
+	for (i=0; CameraOffControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, CameraOffControls[i], FALSE);
 
-	/* If camera is currently active, need to stop it */
-	if (dcx->hCam > 0) is_StopLiveVideo(dcx->hCam, IS_WAIT);
-	dcx->ImageFormatID = 0;
-
-	/* Start the events to actually render the images */
-	is_InitEvent(dcx->hCam, dcx->FrameEvent, IS_SET_EVENT_FRAME);
-	is_EnableEvent(dcx->hCam, IS_SET_EVENT_FRAME);
-
-	/* Default aspect ratio in absence of any new information */
-	dcx->width = 1024; dcx->height = 768;
-	dcx->Image_Aspect = 1.0 * dcx->width / dcx->height;
-
-	/* Look up the requested ImageFormatID in the dcx list of know formats */
+	/* Look up the requested ImageFormatID in the dcx list of known formats */
 	for (i=0; i<dcx->NumImageFormats; i++) {
 		ImageFormatInfo = dcx->ImageFormatList->FormatInfo+i;
 		if (ImageFormatInfo->nFormatID == ImageFormatID) break;
@@ -826,8 +1052,10 @@ int DCx_Select_Resolution(HWND hdlg, DCX_WND_INFO *dcx, HCAM hCam, int ImageForm
 	rc = is_SetAutoParameter(hCam, IS_SET_ENABLE_AUTO_GAIN, &rval1, &rval2);
 	rval1 = rval2 = 0;
 	rc = is_SetAutoParameter(hCam, IS_SET_ENABLE_AUTO_SHUTTER, &rval1, &rval2);
-	rval1 = rval2 = 0;
-	rc = is_SetAutoParameter(hCam, IS_SET_ENABLE_AUTO_WHITEBALANCE, &rval1, &rval2);
+	if (dcx->SensorInfo.nColorMode != IS_COLORMODE_MONOCHROME) {
+		rval1 = rval2 = 0;
+		rc = is_SetAutoParameter(hCam, IS_SET_ENABLE_AUTO_WHITEBALANCE, &rval1, &rval2);
+	}
 	rval1 = rval2 = 0;
 	rc = is_SetAutoParameter(hCam, IS_SET_ENABLE_AUTO_FRAMERATE, &rval1, &rval2);
 
@@ -847,50 +1075,72 @@ int DCx_Select_Resolution(HWND hdlg, DCX_WND_INFO *dcx, HCAM hCam, int ImageForm
 	rc = is_Exposure(hCam, IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE,     &ExposureParms.min, 3*sizeof(ExposureParms.min));			
 	printf("  Default: %g  Current: %g   Min: %g   Max: %g   Inc: %g\n", ExposureParms.dflt, ExposureParms.current, ExposureParms.min, ExposureParms.max, ExposureParms.inc); fflush(stdout);
 
-/* Determine the available color correction modes and enable the radio buttons */
-	rval = 0.0;
-	rc = is_SetColorCorrection(hCam, IS_GET_SUPPORTED_CCOR_MODE, &rval);
-	EnableWindow(GetDlgItem(hdlg, IDR_COLOR_DISABLE), TRUE);
-	EnableWindow(GetDlgItem(hdlg, IDR_COLOR_ENABLE),  rc & IS_CCOR_ENABLE_NORMAL);
-	EnableWindow(GetDlgItem(hdlg, IDR_COLOR_BG40),    rc & IS_CCOR_ENABLE_BG40_ENHANCED);
-	EnableWindow(GetDlgItem(hdlg, IDR_COLOR_HQ),      rc & IS_CCOR_ENABLE_HQ_ENHANCED);
-	EnableWindow(GetDlgItem(hdlg, IDR_COLOR_AUTO_IR), rc & IS_CCOR_ENABLE_BG40_ENHANCED | IS_CCOR_ENABLE_HQ_ENHANCED);
-	EnableWindow(GetDlgItem(hdlg, IDV_COLOR_CORRECT_FACTOR), TRUE);
-
-/* Determine which of the gains can be used */
-	if (dcx->SensorInfo.bMasterGain) {
-		EnableWindow(GetDlgItem(hdlg, IDS_MASTER_GAIN), TRUE);
-		EnableWindow(GetDlgItem(hdlg, IDV_MASTER_GAIN), TRUE);
-	}
-	if (dcx->SensorInfo.bRGain) {
-		EnableWindow(GetDlgItem(hdlg, IDS_RED_GAIN), TRUE);
-		EnableWindow(GetDlgItem(hdlg, IDV_RED_GAIN), TRUE);
-	}
-	if (dcx->SensorInfo.bGGain) {
-		EnableWindow(GetDlgItem(hdlg, IDS_GREEN_GAIN), TRUE);
-		EnableWindow(GetDlgItem(hdlg, IDV_GREEN_GAIN), TRUE);
-	}
-	if (dcx->SensorInfo.bBGain) {
-		EnableWindow(GetDlgItem(hdlg, IDS_BLUE_GAIN), TRUE);
-		EnableWindow(GetDlgItem(hdlg, IDV_BLUE_GAIN), TRUE);
-	}
-
-	/* Enable all of the controls now */
-	for (i=0; CameraOnControls[i] != ID_NULL; i++) EnableWindow(GetDlgItem(hdlg, CameraOnControls[i]), TRUE);
-
+	/* Do much now the same as if we already had the selected resolution (avoid duplicate code) */
+	Init_Known_Resolution(hdlg, dcx, hCam);
+	
 	/* Start the events to actually render the images */
 	is_InitEvent(dcx->hCam, dcx->FrameEvent, IS_SET_EVENT_FRAME);
 	is_EnableEvent(dcx->hCam, IS_SET_EVENT_FRAME);
 
 	/* For some reason, have to stop the live video again to avoid error messages */
 	is_StopLiveVideo(dcx->hCam, IS_WAIT);
+	dcx->LiveVideo = FALSE;
 	if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
 		is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
-		EnableWindow(GetDlgItem(hdlg, IDB_CAPTURE), FALSE);
+		dcx->LiveVideo = TRUE;
+		EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
 	} else {
 		SetDlgItemCheck(hdlg, IDB_LIVE, FALSE);
-		EnableWindow(GetDlgItem(hdlg, IDB_CAPTURE), TRUE);
+		EnableDlgItem(hdlg, IDB_CAPTURE, TRUE);
 	}
+
+	return 0;
+}
+
+/* ===========================================================================
+-- Selects and intializes a specified resolution mode
+--
+-- Notes:
+--   (1) Called from DCx_Select_Resolution after a resolution is selected
+========================================================================== */
+int Init_Known_Resolution(HWND hdlg, DCX_WND_INFO *dcx, HCAM hCam) {
+
+	int i, rc;
+	double rval;
+
+	/* Disable controls that may no longer be valid (will be duplicated when called by DCx_Select_Resolution() */
+	for (i=0; CameraOffControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, CameraOffControls[i], FALSE);
+
+/* Determine the available color correction modes and enable the radio buttons */
+	rval = 0.0;
+	rc = is_SetColorCorrection(hCam, IS_GET_SUPPORTED_CCOR_MODE, &rval);
+	EnableDlgItem(hdlg, IDR_COLOR_DISABLE, TRUE);
+	EnableDlgItem(hdlg, IDR_COLOR_ENABLE,  rc & IS_CCOR_ENABLE_NORMAL);
+	EnableDlgItem(hdlg, IDR_COLOR_BG40,    rc & IS_CCOR_ENABLE_BG40_ENHANCED);
+	EnableDlgItem(hdlg, IDR_COLOR_HQ,      rc & IS_CCOR_ENABLE_HQ_ENHANCED);
+	EnableDlgItem(hdlg, IDR_COLOR_AUTO_IR, rc & IS_CCOR_ENABLE_BG40_ENHANCED | IS_CCOR_ENABLE_HQ_ENHANCED);
+	EnableDlgItem(hdlg, IDV_COLOR_CORRECT_FACTOR, TRUE);
+
+/* Determine which of the gains can be used */
+	if (dcx->SensorInfo.bMasterGain) {
+		EnableDlgItem(hdlg, IDS_MASTER_GAIN, TRUE);
+		EnableDlgItem(hdlg, IDV_MASTER_GAIN, TRUE);
+	}
+	if (dcx->SensorInfo.bRGain) {
+		EnableDlgItem(hdlg, IDS_RED_GAIN, TRUE);
+		EnableDlgItem(hdlg, IDV_RED_GAIN, TRUE);
+	}
+	if (dcx->SensorInfo.bGGain) {
+		EnableDlgItem(hdlg, IDS_GREEN_GAIN, TRUE);
+		EnableDlgItem(hdlg, IDV_GREEN_GAIN, TRUE);
+	}
+	if (dcx->SensorInfo.bBGain) {
+		EnableDlgItem(hdlg, IDS_BLUE_GAIN, TRUE);
+		EnableDlgItem(hdlg, IDV_BLUE_GAIN, TRUE);
+	}
+
+	/* Enable all of the controls now */
+	for (i=0; CameraOnControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, CameraOnControls[i], TRUE);
 
 	SendMessage(hdlg, WMP_SHOW_COLOR_CORRECT, 0, 0);
 	SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);
@@ -909,11 +1159,18 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 	static char *rname = "DCxDlgProc";
 
 	BOOL rcode;
-	int i, nfree, nfirst, nformat, rc;
+	int i, ineed, nfree, nfirst, nformat, rc;
 	int wID, wNotifyCode;
 	char szBuf[256];
 	int nGamma;
-	double fps, rval;
+
+	double fps, rval, exposure;
+	struct {
+		double rmin, rmax, rinc;
+	} exp_range;
+
+	POINT point;
+	RECT rect;
 
 	IMAGE_FILE_PARAMS ImageParams;
 
@@ -943,6 +1200,8 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 	switch (msg) {
 
 		case WM_INITDIALOG:
+			printf("Initializing DCx Camera Interface window\n"); fflush(stdout);
+
 			/* Since may not actually be the call, look up this applications instance */
 			hInstance = (HINSTANCE) GetWindowLongPtr(hdlg, GWLP_HINSTANCE);
 
@@ -953,9 +1212,8 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			atexit(DCx_Final_Closeout);
 
 			/* Disable all controls for now */
-			for (i=0; AllCameraControls[i]!=ID_NULL; i++) {
-				EnableWindow(GetDlgItem(hdlg, AllCameraControls[i]), FALSE);
-			}
+			EnableDlgItem(hdlg, IDC_CAMERA_LIST, FALSE);				/* Will be enabled when scanning cameras */
+			for (i=0; AllCameraControls[i]!=ID_NULL; i++) EnableDlgItem(hdlg, AllCameraControls[i], FALSE);
 
 			/* Create the information block and save it within this hdlg */
 			if (main_dcx == NULL) main_dcx = (DCX_WND_INFO *) calloc(1, sizeof(DCX_WND_INFO));
@@ -965,32 +1223,70 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			dcx->main_hdlg = hdlg;								/* Have this available for other use */
 			DCx_main_hdlg = hdlg;								/* Let the outside world know also */
 			dcx->thumbnail = GetDlgItem(hdlg, IDC_DISPLAY);
+			if (dcx->x_image_target == 0 && dcx->y_image_target == 0) dcx->x_image_target = dcx->y_image_target = 0.5;
 
 			/* Now, initialize the rest of the windows (will fill in parts of dcx */
 			InitializeScrollBars(hdlg, dcx);
 			InitializeHistogramCurves(hdlg, dcx);
+			SetDlgItemCheck(hdlg, IDC_SHOW_INTENSITY, TRUE);
+			SetDlgItemCheck(hdlg, IDC_SHOW_RGB, TRUE);
+			SetRadioButton(hdlg, IDR_EXPOSURE_100US, IDR_EXPOSURE_100MS, ExposureList[0].wID);
+			SetDlgItemText(hdlg, IDT_MIN_EXPOSURE, ExposureList[0].str_min);
+			SetDlgItemText(hdlg, IDT_MID_EXPOSURE, ExposureList[0].str_mid);
+			SetDlgItemText(hdlg, IDT_MAX_EXPOSURE, ExposureList[0].str_max);
 
 			/* Create the event for rendering and start the thread */
-			dcx->FrameEvent = CreateEvent(NULL, FALSE, FALSE, FALSE);
-			_beginthread(RenderImageThread, 0, NULL);
+			if (dcx->FrameEvent == NULL) dcx->FrameEvent = CreateEvent(NULL, FALSE, FALSE, FALSE);
 
 			/* Initialize the DCx driver and build list of existing cameras */
-			DCx_Init_Driver();										/* Safe to call multiple times */
-			DCx_Enum_Camera_List(hdlg, dcx, &nfree, &nfirst);
+			if (CameraDetails != NULL) { free(CameraDetails); CameraDetails = NULL; }		/* Free previously used storage */
+			DCx_Init_Driver();													/* Safe to call multiple times */
+
+			/* Set the error reporting mode for the driver */
+			is_SetErrorReport(0, dcx->EnableErrorReports ? IS_ENABLE_ERR_REP : IS_DISABLE_ERR_REP);
+			SetDlgItemCheck(hdlg, IDC_ENABLE_DCX_ERRORS, dcx->EnableErrorReports);
+
+			DCx_Enum_Camera_List(&CameraCount, &CameraDetails);
+			Fill_Camera_List_Control(hdlg, dcx, &nfree, &nfirst);
 
 			/* Either select the one we are coming back to, or maybe choose one (if only one available) */
-			if (dcx->CameraID != 0) {
-				ComboBoxSetByIntValue(hdlg, IDC_CAMERA_LIST, dcx->CameraID);
-			} else if (nfree == 1) {										/* If only one free, then open it */
+			if (dcx->hCam != 0) {
+				printf("Re-initializing to camera ID: %d / hCam: %d\n", dcx->CameraID, dcx->hCam); fflush(stdout);
+				rc = 0;
+				if ( (rc = ComboBoxSetByIntValue(hdlg, IDC_CAMERA_LIST, dcx->CameraID)) == 0) {		/* Make sure camera is still there */
+					if ( (rc = Init_Connected_Camera(hdlg, dcx, dcx->CameraID)) == 0) {
+						if ( (rc = ComboBoxSetByIntValue(hdlg, IDC_CAMERA_MODES, dcx->ImageFormatID)) == 0) {
+							if ( (rc = Init_Known_Resolution(hdlg, dcx, dcx->hCam)) != 0) {
+								printf("failed to re-initialize the resolution (rc=%d)\n", rc); fflush(stdout);
+							}
+						}
+					}
+				}
+				if (rc != 0) {
+					printf("ERROR: Something went wrong in trying to reconnect to camera (rc=%d)\n", rc); fflush(stdout);
+					SendMessage(hdlg, IDB_CAMERA_DISCONNECT, 0, 0);
+				}
+			}
+
+			/* If there is no camera active, and only one possible, go ahead and initialize it */
+			if (dcx->hCam == 0 && nfree == 1) {													/* If only one free, then open it */
 				if ( DCx_Select_Camera(hdlg, dcx, nfirst, &nformat) == 0) {
 					ComboBoxSetByIntValue(hdlg, IDC_CAMERA_LIST, nfirst);					/* We have it selected now */
 					if ( DCx_Select_Resolution(hdlg, dcx, dcx->hCam, nformat) == 0) {
 						ComboBoxSetByIntValue(hdlg, IDC_CAMERA_MODES, nformat);
 						is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+						dcx->LiveVideo = TRUE;
 						SetDlgItemCheck(hdlg, IDB_LIVE, TRUE);
-						EnableWindow(GetDlgItem(hdlg, IDB_CAPTURE), FALSE);
+						EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
 					}
 				}
+			}
+
+			/* Finally, start a thread to monitor events and render the image */
+			if (! dcx->RenderImageThreadActive) {
+				printf("Starting Image Rendering Thread\n"); fflush(stdout);
+				_beginthread(RenderImageThread, 0, NULL);
+				dcx->RenderImageThreadActive = TRUE;
 			}
 
 			SetTimer(hdlg, TIMER_FRAME_RATE_UPDATE, 1000, NULL);									/* Redraw at roughtly 1 Hz rate */
@@ -999,6 +1295,15 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 		case WM_CLOSE:
 			dcx->main_hdlg = NULL;						/* Mark this window as invalid so can restart */
+			dcx->thumbnail = NULL;
+
+			FreeCurve(dcx->red_hist);   dcx->red_hist = NULL;
+			FreeCurve(dcx->green_hist); dcx->green_hist = NULL;
+			FreeCurve(dcx->blue_hist);  dcx->blue_hist = NULL;
+			FreeCurve(dcx->vert_w);	 dcx->vert_w = NULL;
+			FreeCurve(dcx->horz_w);	 dcx->horz_w = NULL;
+
+			/* Need to release memory associated with the curves */
 			EndDialog(hdlg,0);
 			rcode = TRUE; break;
 
@@ -1009,6 +1314,20 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				SetDlgItemDouble(hdlg, IDT_FRAMERATE, "%.2f", fps);
 			}
 			rcode = TRUE; break;
+
+		case WM_RBUTTONDOWN:
+			GetCursorPos((LPPOINT) &point);
+			GetWindowRect(GetDlgItem(hdlg, IDC_DISPLAY), &rect);
+			if (point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom) {
+				dcx->x_image_target = (1.0*point.x-rect.left) / (rect.right-rect.left);
+				dcx->y_image_target = (1.0*point.y-rect.top)  / (rect.bottom-rect.top);
+			}
+			fflush(stdout);
+			break;
+
+		case WM_LBUTTONDBLCLK:								/* Magnify at this location */
+		case WM_MBUTTONDOWN:
+			break;
 
 /* See dirsync.c for way to change the text color instead of just the background color */
 /* See lasgo queue.c for way to change background */
@@ -1084,7 +1403,9 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 							SendMessage(hdlg, WMP_SET_FRAMERATE, (int) (100*fps+0.5), 0);
 							break;
 						case IDS_EXPOSURE_TIME:										/* Just send the value of the scroll bar */
-							SendMessage(hdlg, WMP_SET_EXPOSURE, ipos, 0);
+							i = GetRadioButtonIndex(hdlg, IDR_EXPOSURE_100US, IDR_EXPOSURE_100MS);
+							rval = ExposureList[i].exp_min * pow(10.0,ipos/100.0);			/* Scale */
+							SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (100*rval+0.5), 0);
 							break;
 						case IDS_GAMMA:
 							SendMessage(hdlg, WMP_SET_GAMMA, ipos, 0);
@@ -1147,20 +1468,24 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			rcode = TRUE; break;
 
 		case WMP_SET_EXPOSURE:										/* From IDV_EXPOSURE_TIME and on ENTER of the same */
-			rval = (double) wParam;
-			if (rval < MIN_EXPOSURE) rval = MIN_EXPOSURE;
-			if (rval > MAX_EXPOSURE) rval = MAX_EXPOSURE;
+			exposure = (double) wParam / 100.0;					/* Passed is time in 10 uS increments */
+			is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE, &exp_range, sizeof(exp_range));
+			is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &rval, sizeof(rval));
+			if (exposure < exp_range.rmin) exposure = exp_range.rmin;
+			if (exposure > MAX_EXPOSURE)   exposure = MAX_EXPOSURE;
+			if (exposure > rval && exposure-rval < exp_range.rinc) exposure = rval+1.01*exp_range.rinc;
+			if (exposure < rval && rval-exposure < exp_range.rinc) exposure = rval-1.01*exp_range.rinc;
+			
 			/* Unfortunately, while framerate will decrease the exposure, exposure will not similarly change frame rate */
 			is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &fps);
-			if (1000.0/fps < rval || fps < MAX_FPS-0.1) {	/* Change framerate to best value for this  */
-				fps = (int) (10*1000.0/rval) / 10.0;			/* Closest 0.1 value */
+			if (1000.0/fps < exposure+0.1 || fps < MAX_FPS-0.1) {	/* Change framerate to best value for this  */
+				fps = (int) (10*1000.0/exposure) / 10.0;			/* Closest 0.1 value */
 				if (fps > MAX_FPS) fps = MAX_FPS;
 				is_SetFrameRate(dcx->hCam, fps, &fps);			/* Set and query simultaneously */
+				SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);	/* Make sure this is up to date */
 			}
-			is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_SET_EXPOSURE, &rval, sizeof(rval));
-			SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETPOS, TRUE, (int) (rval+0.5));
-			SetDlgItemDouble(hdlg, IDV_EXPOSURE_TIME, "%.2f", rval);
-			SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);		/* Make sure this is up to date */
+			is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_SET_EXPOSURE, &exposure, sizeof(exposure));
+			SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
 			rcode = TRUE; break;
 
 		case WMP_SHOW_FRAMERATE:
@@ -1170,9 +1495,22 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			rcode = TRUE; break;
 
 		case WMP_SHOW_EXPOSURE:
-			rc = is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &rval, sizeof(rval));
-			SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETPOS, TRUE, (int) (rval+0.5));
+			is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &rval, sizeof(rval));
+			if (rval < 0.010) rval = 0.010;										/* Assume 10 us minimum exposure */
 			SetDlgItemDouble(hdlg, IDV_EXPOSURE_TIME, "%.2f", rval);
+			i = GetRadioButtonIndex(hdlg, IDR_EXPOSURE_100US, IDR_EXPOSURE_100MS);
+			ineed = (i >= 0 && i < N_EXPOSURE_LIST) ? i : 0;
+			while (ineed > 0                 && rval < ExposureList[ineed].exp_min) ineed--;
+			while (ineed < N_EXPOSURE_LIST-1 && rval > ExposureList[ineed].exp_max) ineed++;
+			if (i != ineed) {
+				SetRadioButtonIndex(hdlg, IDR_EXPOSURE_100US, IDR_EXPOSURE_100MS, ineed);
+				SetDlgItemText(hdlg, IDT_MIN_EXPOSURE, ExposureList[ineed].str_min);
+				SetDlgItemText(hdlg, IDT_MID_EXPOSURE, ExposureList[ineed].str_mid);
+				SetDlgItemText(hdlg, IDT_MAX_EXPOSURE, ExposureList[ineed].str_max);
+			}
+			rval = rval/ExposureList[ineed].exp_min;
+			i = (int) (100.0*log(rval)/log(10.0)+0.5);		/* 2 decades range in general */
+			SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETPOS, TRUE, i);
 			rcode = TRUE; break;
 
 		case WM_COMMAND:
@@ -1188,7 +1526,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 							if (*hptr == IDV_FRAME_RATE) {
 								SendMessage(hdlg, WMP_SET_FRAMERATE, (int) (100*GetDlgItemDouble(hdlg, IDV_FRAME_RATE)+0.5), 0);
 							} else if (*hptr == IDV_EXPOSURE_TIME) {
-								SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (GetDlgItemDouble(hdlg, IDV_EXPOSURE_TIME)+0.5), 0);
+								SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (100*GetDlgItemDouble(hdlg, IDV_EXPOSURE_TIME)+0.5), 0);
 							} else if (*hptr == IDV_GAMMA) {
 								SendMessage(hdlg, WMP_SET_GAMMA, (int) (100*GetDlgItemDouble(hdlg, IDV_GAMMA)+0.5), 0);
 							} else {
@@ -1203,6 +1541,38 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					SendMessage(hdlg, WM_CLOSE, 0, 0);
 					rcode = TRUE; break;
 
+				case IDC_ENABLE_DCX_ERRORS:
+					dcx->EnableErrorReports = GetDlgItemCheck(hdlg, wID);
+					is_SetErrorReport(0, dcx->EnableErrorReports ? IS_ENABLE_ERR_REP : IS_DISABLE_ERR_REP);
+					rcode = TRUE; break;
+					
+				case IDB_RESET_CURSOR:
+					dcx->x_image_target = dcx->y_image_target = 0.5;
+					rcode = TRUE; break;
+					
+				case IDC_SHOW_INTENSITY:
+					dcx->vert_w->visible = dcx->horz_w->visible = GetDlgItemCheck(hdlg, wID);
+					rcode = TRUE; break;
+
+				case IDC_SHOW_RGB:
+					dcx->vert_r->visible = dcx->vert_g->visible = dcx->vert_b->visible = GetDlgItemCheck(hdlg, wID);
+					dcx->horz_r->visible = dcx->horz_g->visible = dcx->horz_b->visible = GetDlgItemCheck(hdlg, wID);
+					rcode = TRUE; break;
+					
+				case IDB_CAMERA_DISCONNECT:
+					if (dcx->hCam > 0) {
+						is_DisableEvent(dcx->hCam, IS_SET_EVENT_FRAME);
+						is_ExitEvent(dcx->hCam, IS_SET_EVENT_FRAME);
+						is_ExitCamera(dcx->hCam);
+						dcx->hCam = 0;
+					}
+					for (i=0; CameraOffControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, CameraOffControls[i], FALSE);
+					ComboBoxClearSelection(hdlg, IDC_CAMERA_LIST);		/* Should be "unselect" */
+					ComboBoxClearSelection(hdlg, IDC_CAMERA_MODES);		/* Should be "unselect" */
+					EnableDlgItem(hdlg, IDB_CAMERA_DETAILS, FALSE);
+					EnableDlgItem(hdlg, IDB_CAMERA_DISCONNECT, FALSE);
+					rcode = TRUE; break;
+					
 				case IDB_CAMERA_DETAILS:
 					_beginthread(show_camera_info_thread, 0, NULL);
 					rcode = TRUE; break;
@@ -1210,10 +1580,12 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case IDB_LIVE:
 					if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
 						is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
-						EnableWindow(GetDlgItem(hdlg, IDB_CAPTURE), FALSE);
+						dcx->LiveVideo = TRUE;
+						EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
 					} else {
 						is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
-						EnableWindow(GetDlgItem(hdlg, IDB_CAPTURE), TRUE);
+						dcx->LiveVideo = FALSE;
+						EnableDlgItem(hdlg, IDB_CAPTURE, TRUE);
 					}
 					rcode = TRUE; break;
 
@@ -1223,8 +1595,9 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 							if (DCx_Select_Resolution(hdlg, dcx, dcx->hCam, nformat) == 0) {
 								is_StopLiveVideo(dcx->hCam, IS_WAIT);
 								is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+								dcx->LiveVideo = TRUE;
 								SetDlgItemCheck(hdlg, IDB_LIVE, TRUE);
-								EnableWindow(GetDlgItem(hdlg, IDB_CAPTURE), FALSE);
+								EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
 							}
 						}
 					}
@@ -1235,14 +1608,16 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 						if (DCx_Select_Resolution(hdlg, dcx, dcx->hCam, ComboBoxGetIntValue(hdlg, wID)) == 0) {
 							is_StopLiveVideo(dcx->hCam, IS_WAIT);
 							is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+							dcx->LiveVideo = TRUE;
 							SetDlgItemCheck(hdlg, IDB_LIVE, TRUE);
-							EnableWindow(GetDlgItem(hdlg, IDB_CAPTURE), FALSE);
+							EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
 						}
 					}
 					rcode = TRUE; break;
 					
 				case IDB_CAPTURE:
 					is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
+					dcx->LiveVideo = FALSE;
 					rcode = TRUE; break;
 					
 				case IDB_UNDOCK:
@@ -1250,14 +1625,20 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 
 				case IDB_SAVE:
-					if (GetDlgItemCheck(hdlg, IDB_LIVE)) rc = is_FreezeVideo(dcx->hCam, IS_WAIT); 
+					if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
+						rc = is_FreezeVideo(dcx->hCam, IS_WAIT); 
+						dcx->LiveVideo = FALSE;
+					}
 					ImageParams.pwchFileName = NULL;		/* fname; */
 					ImageParams.pnImageID    = NULL;	
 					ImageParams.ppcImageMem  = NULL;
 					ImageParams.nQuality     = 0;
 					ImageParams.nFileType = IS_IMG_BMP;
 					rc = is_ImageFile(dcx->hCam, IS_IMAGE_FILE_CMD_SAVE, &ImageParams, sizeof(ImageParams));
-					if (GetDlgItemCheck(hdlg, IDB_LIVE)) is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+					if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
+						is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+						dcx->LiveVideo = TRUE;
+					}
 					rcode = TRUE; break;
 
 				case IDB_LOAD_PARAMETERS:
@@ -1281,7 +1662,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					
 				case IDV_EXPOSURE_TIME:
 					if (wNotifyCode == EN_KILLFOCUS) {
-						SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (GetDlgItemDouble(hdlg, wID)+0.5), 0);
+						SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (100*GetDlgItemDouble(hdlg, wID)+0.5), 0);
 					}
 					rcode = TRUE; break;
 
@@ -1293,6 +1674,24 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 				case IDB_GAMMA_NEUTRAL:
 					SendMessage(hdlg, WMP_SET_GAMMA, 100, 0);
+					rcode = TRUE; break;
+
+				case IDR_EXPOSURE_100US:
+				case IDR_EXPOSURE_1MS:
+				case IDR_EXPOSURE_10MS:
+				case IDR_EXPOSURE_100MS:
+					i = wID-IDR_EXPOSURE_100US;
+					SetDlgItemText(hdlg, IDT_MIN_EXPOSURE, ExposureList[i].str_min);
+					SetDlgItemText(hdlg, IDT_MID_EXPOSURE, ExposureList[i].str_mid);
+					SetDlgItemText(hdlg, IDT_MAX_EXPOSURE, ExposureList[i].str_max);
+					is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &rval, sizeof(rval));					
+					if (rval < ExposureList[i].exp_min) {
+						SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (100*ExposureList[i].exp_min+0.5), 0);
+					} else if (rval > ExposureList[i].exp_max) {
+						SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (100*ExposureList[i].exp_max+0.5), 0);
+					} else {
+						SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
+					}
 					rcode = TRUE; break;
 
 					/* Only time I get a message is when it is clicked, so just take for granted */
@@ -1326,7 +1725,6 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 						SetDlgItemDouble(hdlg, wID, "%.2f", rval);
 						rval = 0;
 						rc = is_SetColorCorrection(dcx->hCam, IS_GET_CCOR_MODE, &rval);
-						printf("CCOR_MODE: %d %f\n", rc, rval); fflush(stdout);
 					}
 					rcode = TRUE; break;
 					
@@ -1347,22 +1745,12 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 
 				/* Intentionally unused IDs */
-				case IDT_CAMERA_MANUFACTURER:
-				case IDT_CAMERA_MODEL:
-				case IDT_CAMERA_SERIAL_NO:
-				case IDT_CAMERA_ID:
-				case IDT_CAMERA_IMAGE_SIZE:
-				case IDT_CAMERA_PIXEL_PITCH:
-				case IDT_CAMERA_VERSION:
-				case IDT_CAMERA_DATE:
-				case IDT_CAMERA_COLOR_MODE:
-				case IDT_COMPILE_VERSION:
 				case IDT_RED_SATURATE:
 				case IDT_GREEN_SATURATE:
 				case IDT_BLUE_SATURATE:
 				case IDT_FRAMERATE:
 					break;
-					
+
 				default:
 					printf("Unused wID in %s: %d\n", rname, wID); fflush(stdout);
 					break;
@@ -1465,6 +1853,8 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 	/* Load the class for the graph window */
 	Graph_StartUp(hThisInstance);					/* Initialize the graphics control */
 
+	_beginthread(test_thread, 0, NULL);
+
 	/* And show the dialog box */
 	hInstance = hThisInstance;
 	DialogBox(hInstance, "DCX_DIALOG", HWND_DESKTOP, (DLGPROC) DCxDlgProc);
@@ -1476,6 +1866,15 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 /* ===========================================================================
 -- Called from INITDIALOG to start up the graph window
 =========================================================================== */
+void FreeCurve(GRAPH_CURVE *cv) {
+	if (cv != NULL) {
+		if (cv->x != NULL) free(cv->x);
+		if (cv->y != NULL) free(cv->y);
+		free(cv);
+	}
+	return;
+}
+
 int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 
 	int i, npt;
@@ -1554,7 +1953,6 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 	SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_SET_X_TITLE, (WPARAM) "counts in pixel", (LPARAM) 0);
 	SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_SET_Y_TITLE, (WPARAM) "number", (LPARAM) 0);
 	SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_SET_LABEL_VISIBILITY, 0, 0);
-//	SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_SET_TITLE_VISIBILITY, 0, 0);
 
 	/* Set up the horizontal profile */
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
@@ -1570,17 +1968,67 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->x[i] = i; cv->y[i] = 0; }
-	cv->rgb = RGB(192,192,192);
-	dcx->horz_hist = cv;
+	cv->rgb = RGB(255,255,255);
+	dcx->horz_w = cv;
+
+	cv = calloc(sizeof(GRAPH_CURVE), 1);
+	cv->ID = 2;											/* reference curve */
+	strcpy_s(cv->legend, sizeof(cv->legend), "row red scan");
+	cv->master        = FALSE;
+	cv->visible       = TRUE;
+	cv->free_on_clear = TRUE;
+	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
+	cv->force_scale_x = cv->force_scale_y = FALSE;
+	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
+	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->x = calloc(sizeof(*cv->x), cv->npt);
+	cv->y = calloc(sizeof(*cv->y), cv->npt);
+	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
+	cv->rgb = RGB(255,0,0);
+	dcx->horz_r = cv;
+
+	cv = calloc(sizeof(GRAPH_CURVE), 1);
+	cv->ID = 3;											/* reference curve */
+	strcpy_s(cv->legend, sizeof(cv->legend), "row green scan");
+	cv->master        = FALSE;
+	cv->visible       = TRUE;
+	cv->free_on_clear = TRUE;
+	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
+	cv->force_scale_x = cv->force_scale_y = FALSE;
+	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
+	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->x = calloc(sizeof(*cv->x), cv->npt);
+	cv->y = calloc(sizeof(*cv->y), cv->npt);
+	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
+	cv->rgb = RGB(0,255,0);
+	dcx->horz_g = cv;
+
+	cv = calloc(sizeof(GRAPH_CURVE), 1);
+	cv->ID = 4;											/* reference curve */
+	strcpy_s(cv->legend, sizeof(cv->legend), "row blue scan");
+	cv->master        = FALSE;
+	cv->visible       = TRUE;
+	cv->free_on_clear = TRUE;
+	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
+	cv->force_scale_x = cv->force_scale_y = FALSE;
+	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
+	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->x = calloc(sizeof(*cv->x), cv->npt);
+	cv->y = calloc(sizeof(*cv->y), cv->npt);
+	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
+	cv->rgb = RGB(128,128,255);
+	dcx->horz_b = cv;
 
 	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_CLEAR, (WPARAM) 0, (LPARAM) 0);
 	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_SET_LABEL_VISIBILITY, 0, 0);
 	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_SET_TITLE_VISIBILITY, 0, 0);
+	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_SET_NO_MARGINS, 1, 0);
+	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_SET_BACKGROUND_COLOR, RGB(0,0,64), 0);
 	memset(&parms, 0, sizeof(parms));
 	parms.suppress_grid = parms.suppress_ticks = TRUE;
 	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_SET_AXIS_PARMS, (WPARAM) &parms, (LPARAM) 0);
 
-	/* Set up the vertical profile */
+	/* Set up the vertical profiles */
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 1;											/* reference curve */
 	strcpy_s(cv->legend, sizeof(cv->legend), "col scan");
@@ -1590,26 +2038,83 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1024;									/* Normally large enough, but will expand when set */
+	cv->npt = 1280;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
-	cv->rgb = RGB(192,192,192);
-	dcx->vert_hist = cv;
+	cv->rgb = RGB(255,255,255);
+	dcx->vert_w = cv;
+
+	cv = calloc(sizeof(GRAPH_CURVE), 1);
+	cv->ID = 2;											/* reference curve */
+	strcpy_s(cv->legend, sizeof(cv->legend), "col red scan");
+	cv->master        = FALSE;
+	cv->visible       = TRUE;
+	cv->free_on_clear = TRUE;
+	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
+	cv->force_scale_x = cv->force_scale_y = FALSE;
+	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
+	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->x = calloc(sizeof(*cv->x), cv->npt);
+	cv->y = calloc(sizeof(*cv->y), cv->npt);
+	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
+	cv->rgb = RGB(255,0,0);
+	dcx->vert_r = cv;
+
+	cv = calloc(sizeof(GRAPH_CURVE), 1);
+	cv->ID = 3;											/* reference curve */
+	strcpy_s(cv->legend, sizeof(cv->legend), "col green scan");
+	cv->master        = FALSE;
+	cv->visible       = TRUE;
+	cv->free_on_clear = TRUE;
+	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
+	cv->force_scale_x = cv->force_scale_y = FALSE;
+	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
+	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->x = calloc(sizeof(*cv->x), cv->npt);
+	cv->y = calloc(sizeof(*cv->y), cv->npt);
+	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
+	cv->rgb = RGB(0,255,0);
+	dcx->vert_g = cv;
+
+	cv = calloc(sizeof(GRAPH_CURVE), 1);
+	cv->ID = 4;											/* reference curve */
+	strcpy_s(cv->legend, sizeof(cv->legend), "col blue scan");
+	cv->master        = FALSE;
+	cv->visible       = TRUE;
+	cv->free_on_clear = TRUE;
+	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
+	cv->force_scale_x = cv->force_scale_y = FALSE;
+	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
+	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->x = calloc(sizeof(*cv->x), cv->npt);
+	cv->y = calloc(sizeof(*cv->y), cv->npt);
+	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
+	cv->rgb = RGB(128,128,255);
+	dcx->vert_b = cv;
 
 	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_CLEAR, (WPARAM) 0, (LPARAM) 0);
 	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_LABEL_VISIBILITY, 0, 0);
 	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_TITLE_VISIBILITY, 0, 0);
+	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_NO_MARGINS, 1, 0);
+	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_BACKGROUND_COLOR, RGB(0,0,64), 0);
 	memset(&parms, 0, sizeof(parms));
 	parms.suppress_grid = parms.suppress_ticks = TRUE;
 	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_AXIS_PARMS, (WPARAM) &parms, (LPARAM) 0);
 
 	/* Add all the curves now; only cv_raw should show initially */
-	SendDlgItemMessage(hdlg, IDG_HISTOGRAMS,   WMP_ADD_CURVE, (WPARAM) dcx->red_hist,   (LPARAM) 0);
-	SendDlgItemMessage(hdlg, IDG_HISTOGRAMS,   WMP_ADD_CURVE, (WPARAM) dcx->green_hist, (LPARAM) 0);
-	SendDlgItemMessage(hdlg, IDG_HISTOGRAMS,   WMP_ADD_CURVE, (WPARAM) dcx->blue_hist,  (LPARAM) 0);
-	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_ADD_CURVE, (WPARAM) dcx->horz_hist,  (LPARAM) 0);
-	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_ADD_CURVE, (WPARAM) dcx->vert_hist,  (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_HISTOGRAMS,   WMP_ADD_CURVE, (WPARAM) dcx->red_hist,    (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_HISTOGRAMS,   WMP_ADD_CURVE, (WPARAM) dcx->green_hist,  (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_HISTOGRAMS,   WMP_ADD_CURVE, (WPARAM) dcx->blue_hist,   (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_ADD_CURVE, (WPARAM) dcx->horz_w,   (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_ADD_CURVE, (WPARAM) dcx->horz_r, (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_ADD_CURVE, (WPARAM) dcx->horz_g, (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_ADD_CURVE, (WPARAM) dcx->horz_b, (LPARAM) 0);
+
+	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_ADD_CURVE, (WPARAM) dcx->vert_w,   (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_ADD_CURVE, (WPARAM) dcx->vert_r, (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_ADD_CURVE, (WPARAM) dcx->vert_g, (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_ADD_CURVE, (WPARAM) dcx->vert_b, (LPARAM) 0);
 
 	return 0;
 }
@@ -1627,11 +2132,11 @@ int InitializeScrollBars(HWND hdlg, DCX_WND_INFO *dcx) {
 	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPAGESIZE, 0, 20);
 
 	/* Set up the scroll bar for the exposure time */
-	SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETRANGE, FALSE, MAKELPARAM(1,1000));		/* In 1 ms increments */
+	SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETRANGE, FALSE, MAKELPARAM(1,200));		/* 2 decades, 100 per decade */
 	SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_CLEARTICS, FALSE, 0);
-	SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETTICFREQ, 100, 0);
-	SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETLINESIZE, 0, 10);
-	SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETPAGESIZE, 0, 50);
+	SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETTICFREQ, 20, 0);
+	SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETLINESIZE, 0, 1);
+	SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETPAGESIZE, 0, 5);
 
 	/* Set up the scroll bar for gamma */
 	SendDlgItemMessage(hdlg, IDS_GAMMA, TBM_SETRANGE, FALSE, MAKELPARAM(1,1000));		/* In 1 ms increments */
@@ -1676,32 +2181,50 @@ void DCx_Start_Dialog(void *arglist) {
 /* ===========================================================================
 -- Interface routine to accept a request to save an image as a file
 --
--- Usage: int DCX_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality);
+-- Usage: int DCX_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
 --
 -- Inputs: fname   - if not NULL, pointer to name of file to be saved
 --                   if NULL, brings up a Save As ... dialog box
 --         format  - one of IMAGE_BMP, IMAGE_JPG, IMAGE_PNG
 --         quality - quality of image (primary JPEG)
+--         info    - pointer (if not NULL) to structure to be filled with image info
+--			  HwndRenderBitmap - if not NULL, handle were we should try to render the bitmap
 --
 -- Output: Saves the file as specified.
+--         if info != NULL, *info filled with details of capture and basic image stats
 --
 -- Return: 0 - all okay
 --         1 - camera is not initialized and active
 --         2 - file save failed for some other reason
 =========================================================================== */
-int DCx_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality) {
-
+int DCx_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap) {
+	static char *rname = "DCx_Capture_Image";
+	
 	wchar_t fname_w[MAX_PATH];
 	IMAGE_FILE_PARAMS ImageParams;
-	HWND hdlg;
 	HCAM hCam;
-	int rc;
+	DCX_WND_INFO *dcx;
+
+	int rc, col, line, height, width, pitch, nGamma;
+	unsigned char *pMem, *aptr;
 	size_t ncount;
 
-	/* Get the key variables from the control structure */
-	hdlg = main_dcx->main_hdlg;
-	hCam = main_dcx->hCam;
-	
+	/* If info provided, clear it in case we have a failure */
+	if (info != NULL) memset(info, 0, sizeof(DCX_IMAGE_INFO));
+
+	/* Must have been started at some point to be able to return images */
+	if (main_dcx == NULL || main_dcx->hCam <= 0) return 1;
+	dcx  = main_dcx;
+	hCam = dcx->hCam;
+
+	/* Capture and hold an image */
+	if ( (rc = is_FreezeVideo(hCam, IS_WAIT)) != 0) {
+		printf("%s: is_FreezeVideo returned failure (rc=%d)", rname, rc);
+		rc = is_FreezeVideo(hCam, IS_WAIT);
+		printf("  Retry gives: %d\n", rc);
+		fflush(stdout);
+	}
+
 	/* Convert the filename */
 	if (fname != NULL) {
 		mbstowcs_s(&ncount, fname_w, MAX_PATH, fname, strlen(fname));
@@ -1729,6 +2252,46 @@ int DCx_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality) {
 	}
 	rc = is_ImageFile(hCam, IS_IMAGE_FILE_CMD_SAVE, &ImageParams, sizeof(ImageParams));
 
+	if (info != NULL) {
+		pMem   = dcx->Image_Mem;
+		height = dcx->height;
+		width  = dcx->width;
+		pitch  = dcx->Image_Memory_Pitch;
+		
+/* Calculate the number of saturated pixels on each color plane */
+		info->red_saturate = info->green_saturate = info->blue_saturate = 0;
+		for (line=0; line<height; line++) {
+			aptr = pMem + line*pitch;					/* Pointer to this line */
+			for (col=0; col<width; col++) {
+				if (aptr[3*col+0] >= 255) info->blue_saturate++;
+				if (aptr[3*col+1] >= 255) info->green_saturate++;
+				if (aptr[3*col+2] >= 255) info->red_saturate++;
+			}
+		}
+
+		info->width = width;
+		info->height = height;
+
+		is_Exposure(hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &info->exposure, sizeof(info->exposure));
+
+		is_Gamma(hCam, IS_GAMMA_CMD_GET, &nGamma, sizeof(nGamma));
+		info->gamma = nGamma / 100.0;
+		info->color_correction = is_SetColorCorrection(hCam, IS_GET_CCOR_MODE, &info->color_correction_factor);
+
+		info->master_gain = (dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(hCam, IS_GET_MASTER_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+		info->red_gain    = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(hCam, IS_GET_RED_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+		info->green_gain  = (dcx->SensorInfo.bGGain)      ? is_SetHardwareGain(hCam, IS_GET_GREEN_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+		info->blue_gain   = (dcx->SensorInfo.bBGain)      ? is_SetHardwareGain(hCam, IS_GET_BLUE_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	}
+
+	if (IsWindow(hwndRenderBitmap)) {
+		is_RenderBitmap(dcx->hCam, dcx->Image_PID, hwndRenderBitmap, IS_RENDER_FIT_TO_WINDOW);
+		GenerateCrosshair(dcx, hwndRenderBitmap);
+	}
+
+
+	if (dcx->LiveVideo) is_CaptureVideo(hCam, IS_DONT_WAIT);
+	
 	return rc;
 }
 
@@ -1743,9 +2306,9 @@ int DCx_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality) {
 -- Output: Fills in *conditions if requested
 --
 -- Return: 0 - camera is ready for imaging
---         1 - camera is not initialized and active
+--         1 - camera is not initialized and/or not active
 =========================================================================== */
-BOOL DCx_Status(DCX_STATUS *status) {
+int DCx_Status(DCX_STATUS *status) {
 
 	DCX_WND_INFO *dcx;
 	HCAM hCam;
@@ -1753,13 +2316,15 @@ BOOL DCx_Status(DCX_STATUS *status) {
 	SENSORINFO SensorInfo;
 	int nGamma;
 	
-	if (status != NULL) memset(status, 0, sizeof(*status));
+	/* Must have been started at some point to be able to return images */
 	if (main_dcx == NULL || main_dcx->hCam <= 0) return 1;
-	
-	dcx = main_dcx;
-	
+	dcx  = main_dcx;
 	hCam = dcx->hCam;
 
+	/* If status is NULL, only interested in if the camera is alive and configured */
+	if (status == NULL) return 0;
+
+	/* Now maybe give information */
 	is_SetFrameRate(hCam, IS_GET_FRAMERATE, &status->fps);
 	is_Exposure(hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &status->exposure, sizeof(status->exposure));
 
@@ -1789,4 +2354,48 @@ BOOL DCx_Status(DCX_STATUS *status) {
 	status->color_correction = is_SetColorCorrection(dcx->hCam, IS_GET_CCOR_MODE, &status->color_correction_factor);
 
 	return 0;
+}
+
+
+/* ===========================================================================
+-- Write DCx camera properties to a logfile
+--
+-- Usage: int DCx_WriteParmaeters(char *pre_text, FILE *funit);
+--
+-- Inputs: pre_text - if not NULL, text written each line before the information (possibly "/* ")
+--         funit    - open file handle
+--
+-- Output: Outputs text based information on the camera to the log file
+--
+-- Return: 0 - successful (camera valid and funit valid)
+--         1 - camera not initialized or funit invalid
+=========================================================================== */
+int DCx_WriteParameters(char *pre_text, FILE *funit) {
+
+	DCX_STATUS status;
+	int rc;
+
+	if (pre_text == NULL) pre_text = "";
+	
+	if (DCx_Status(&status) == 0 && funit != NULL) {
+		fprintf(funit, "%sThorLabs DCx Camera\n", pre_text);
+		fprintf(funit, "%s  Manufacturer: %s\n", pre_text, status.manufacturer);
+		fprintf(funit, "%s  Model:        %s\n", pre_text, status.model);
+		fprintf(funit, "%s  Serial:       %s\n", pre_text, status.serial);
+		fprintf(funit, "%s  Version:      %s\n", pre_text, status.version);
+		fprintf(funit, "%s  Date:         %s\n", pre_text, status.date);
+		fprintf(funit, "%s  CameraID:     %d\n", pre_text, status.CameraID);
+		fprintf(funit, "%s  ColorMode:    %s\n", pre_text, status.color_mode);
+		fprintf(funit, "%s  Pixel Pitch:  %d\n", pre_text, status.pixel_pitch);
+		fprintf(funit, "%s  Frame rate:   %.2f\n", pre_text, status.fps);
+		fprintf(funit, "%s  Exposure:     %.2f ms\n", pre_text, status.exposure);
+		fprintf(funit, "%s  Gamma:        %.2f\n", pre_text, status.gamma);
+		fprintf(funit, "%s  Gains: Master: %d   RGB: %d,%d,%d\n", pre_text, status.master_gain, status.red_gain, status.green_gain, status.blue_gain);
+		fprintf(funit, "%s  Color correction: %d %f\n", pre_text, status.color_correction, status.color_correction_factor);
+		rc = 0;
+	} else {
+		rc = 1;
+	}
+
+	return rc;
 }

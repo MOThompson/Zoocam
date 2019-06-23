@@ -5,20 +5,21 @@
 #define IDS_ABOUTBOX                    101
 #define IDB_LOGO                        135
 #define IDR_MAINFRAME                   136
+#define IDB_SAVE                        1998
+#define IDT_COMPILE_VERSION             1999
 #define IDC_STATIC_ABOUT_COMPANY        2000
 #define IDC_STATIC_ABOUT_APPNAME        2001
-#define IDT_COMPILE_VERSION             2002
 #define IDC_DISPLAY                     2003
 #define IDB_LIVE                        2004
 #define IDB_UNDOCK                      2005
 #define IDB_CAPTURE                     2006
-#define IDB_SAVE                        2007
 #define IDB_SAVE_PARAMETERS             2008
 #define IDB_LOAD_PARAMETERS             2009
 #define IDC_CAMERA_LIST                 2010
 #define IDC_CAMERA_MODES                2011
 #define IDB_CAMERA_DETAILS              2012
 #define IDT_CAMERA_MANUFACTURER         2013
+#define IDB_CAMERA_DISCONNECT           2013
 #define IDT_CAMERA_MODEL                2014
 #define IDT_CAMERA_SERIAL_NO            2015
 #define IDT_CAMERA_ID                   2016
@@ -56,6 +57,17 @@
 #define IDG_HORZ_PROFILE                2048
 #define IDG_HISTOGRAMS3                 2049
 #define IDG_HISTOGRAMS                  2049
+#define IDR_EXPOSURE_100US              2050
+#define IDR_EXPOSURE_1MS                2051
+#define IDR_EXPOSURE_10MS               2052
+#define IDR_EXPOSURE_100MS              2053
+#define IDT_MIN_EXPOSURE                2054
+#define IDT_MID_EXPOSURE                2055
+#define IDT_MAX_EXPOSURE                2056
+#define IDB_RESET_CURSOR                2057
+#define IDC_SHOW_INTENSITY              2058
+#define IDC_SHOW_RGB                    2059
+#define IDC_ENABLE_DCX_ERRORS           2060
 
 // Next default values for new objects
 // 
@@ -63,7 +75,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        137
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2048
+#define _APS_NEXT_CONTROL_VALUE         2061
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

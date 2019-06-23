@@ -47,6 +47,103 @@
 
 
 
+/* ===========================================================================
+-- Potentially useful messages from very early code
+=========================================================================== */
+#if 0
+/**************************************************************************
+ *
+ *  Name       : DlgCenterWindow(hDlg)
+ *
+ *  Description: Centers the dialog on the screen
+ *
+ *  Concepts:  Any dialog box is free to call this routine.  Should be done
+ *             during WM_INITDLG message processing.
+ *
+ *  Parameters :  hDlg     = window handle of the dialog
+ *
+ *  Return     :  [none]
+ *
+ *************************************************************************/
+VOID DlgCenterWindow(HWND hdlg) {
+
+	HWND hwndOwner; 
+	RECT rc, rcDlg, rcOwner; 
+
+	if ((hwndOwner = GetParent(hdlg)) == NULL) hwndOwner = GetDesktopWindow();
+	GetWindowRect(hwndOwner, &rcOwner); 
+	GetWindowRect(hdlg, &rcDlg); 
+	CopyRect(&rc, &rcOwner); 
+
+/* Offset owner and dialog box rectangles so that right/bottom represent the
+ * width and height, and then offset the owner again to discard space taken
+ * up by the dialog box.
+ */
+	OffsetRect(&rcDlg, -rcDlg.left, -rcDlg.top); 
+	OffsetRect(&rc, -rc.left, -rc.top); 
+	OffsetRect(&rc, -rcDlg.right, -rcDlg.bottom); 
+
+/* The new position is the sum of half the remaining space and the owner's
+ * original position.
+ */
+	SetWindowPos(hdlg, HWND_TOP, rcOwner.left+rc.right/2, rcOwner.top+rc.bottom/2, 0, 0, SWP_NOSIZE); 
+	return;
+}
+
+
+/**************************************************************************
+ *
+ *  Name       : DlgSetSysMenu(hDlg)
+ *
+ *  Description: Sets only the Move and Close items of the system menu
+ *
+ *  Concepts:  Any dialog box is free to call this routine, to edit
+ *             which menu items will appear on its System Menu pulldown.
+ *
+ *  API's      :  WinWindowFromID
+ *                SendMessage
+ *
+ *  Parameters :  hDlg     = window handle of the dialog
+ *
+ *  Return     :  [none]
+ *
+ *************************************************************************/
+VOID DlgSetSysMenu(HWND hDlg) {
+
+#if 0
+	HWND     hSysMenu;
+	MENUITEM Mi;
+	UINT     Pos;
+	MRESULT  Id;
+	SHORT    cItems;
+
+	/******************************************************************/
+	/*  We only want Move and Close in the system menu.               */
+	/******************************************************************/
+
+	hSysMenu = WinWindowFromID(hDlg, FID_SYSMENU);
+	SendMessage( hSysMenu, MM_QUERYITEM, MPFROM2SHORT(SC_SYSMENU, FALSE), MPFROMP((PCH) & Mi));
+	Pos = 0L;
+	cItems = (SHORT)SendMessage( Mi.hwndSubMenu, MM_QUERYITEMCOUNT, 0, 0);
+	while (cItems--) {
+		Id = SendMessage( Mi.hwndSubMenu, MM_ITEMIDFROMPOSITION, MPFROMLONG(Pos), 0);
+		switch (SHORT1FROMMR(Id)) {
+			case SC_MOVE:
+			case SC_CLOSE:
+				Pos++;  /* Don't delete that one. */
+				break;
+			default:
+				SendMessage( Mi.hwndSubMenu, MM_DELETEITEM, MPFROM2SHORT((USHORT)Id, TRUE), 0);
+		}
+	}
+#endif
+
+	return;
+}
+
+#endif
+
+
 /* ============================================================================
 	Routine to complement WritePrivateProfileString - really stupid its not there
 ============================================================================ */
@@ -75,10 +172,10 @@ BOOL WritePrivateProfileDouble(LPCTSTR lpAppName, LPCTSTR lpKeyName, double rval
 // Win API function (could rewrite for myself if ever needed)
 // DWORD WINAPI GetPrivateProfileString(LPCTSTR lpAppName, LPCTSTR lpKeyName, LPCTSTR lpDefault, LPTSTR lpReturnedString, DWORD nSize, LPCTSTR lpFileName);
 
-BOOL ReadPrivateProfileStr(LPCTSTR lpAppName, LPCTSTR lpKeyName, char *str, LPCTSTR lpFileName) {
+BOOL ReadPrivateProfileStr(LPCTSTR lpAppName, LPCTSTR lpKeyName, char *str, size_t len, LPCTSTR lpFileName) {
 	char szBuf[256];
 	if (GetPrivateProfileString(lpAppName, lpKeyName, NULL, szBuf, sizeof(szBuf), lpFileName) <= 0) return FALSE;
-	strcpy(str, szBuf);
+	strcpy_s(str, len, szBuf);
 	return TRUE;
 }
 
@@ -157,9 +254,10 @@ int GetRadioButtonIndex(HWND hdlg, int nID_first, int nID_last) {
 -- on the value rather than index in the list.
 --
 -- Usage: int ComboBoxFillIntList(HWND hdlg, int wID, CB_INT_LIST *list, int n);
+--        int ComboBoxClearSelection(HWND hdlg, int wID);
 --        int ComboBoxGetIntValue(HWND hdlg, int wID);
 --        int ComboBoxSetByIntValue(HWND hdlg, int wID, int ival);
---			 int ComboBoxClearList(HWND hdlg, inw wID);
+--			 int ComboBoxClearList(HWND hdlg, int wID);
 --
 --        int ComboBoxFillPtrList(HWND hdlg, int wID, CB_PTR_LIST *list, int n);
 --        void *ComboBoxGetPtrValue(HWND hdlg, int wID);
@@ -175,9 +273,20 @@ int GetRadioButtonIndex(HWND hdlg, int nID_first, int nID_last) {
 --    
 -- Return: 0 if successful, 1 if any sort of error.  Normally this is that the 
 --         value requested in a SetByValue does not exist.
+--
+-- Notes:
+--   (1) The SetByIntValue or SetByPtrValue functions will choose the first
+--       element if the specified int or string does not exist.  In this
+--       case, the function returns 1; if item exists, it returns 0;
+--   (2) Use ComboBoxClearSelection() to clear all selections
 =========================================================================== */
 int ComboBoxClearList(HWND hdlg, int wID) {
 	SendDlgItemMessage(hdlg, wID, CB_RESETCONTENT, (WPARAM) 0, (LPARAM) 0);
+	return 0;
+}
+
+int ComboBoxClearSelection(HWND hdlg, int wID) {
+	SendDlgItemMessage(hdlg, wID, CB_SETCURSEL, (WPARAM) -1, (LPARAM) 0);
 	return 0;
 }
 

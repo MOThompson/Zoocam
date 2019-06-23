@@ -14,7 +14,7 @@ void DisableCloseButton(HWND hwnd);
 #define GetDlgItemCheck( hwnd, ID )	( SendDlgItemMessage( hwnd, ID, BM_GETCHECK, 0, 0 ) == BST_CHECKED )
 #define SetDlgItemCheck( hwnd, ID, mark )	SendDlgItemMessage( hwnd, ID, BM_SETCHECK, ( mark ? BST_CHECKED : BST_UNCHECKED ), 0 )
 #define ClickDlgItem( hwnd, ID ) SendMessage( hdlg, WM_COMMAND, MAKEWPARAM( ID, BN_CLICKED ), 0 )
-#define EnableDlgWindow(hdlg, wID, flag) EnableWindow(GetDlgItem(hdlg, wID), flag)
+#define EnableDlgItem(hdlg, wID, flag) EnableWindow(GetDlgItem(hdlg, wID), flag)
 
 /* **************************************************************************
    Routines to determine which radio button is checked
@@ -36,7 +36,7 @@ BOOL WritePrivateProfileStr(LPCTSTR lpAppName, LPCTSTR lpKeyName, LPCTSTR lpStri
 BOOL WritePrivateProfileInt(LPCTSTR lpAppName, LPCTSTR lpKeyName, int ival, LPCTSTR lpFileName);
 BOOL WritePrivateProfileDouble(LPCTSTR lpAppName, LPCTSTR lpKeyName, double rval, LPCTSTR lpFileName);
 
-BOOL ReadPrivateProfileStr(LPCTSTR lpAppName, LPCTSTR lpKeyName, char *str, LPCTSTR lpFileName);
+BOOL ReadPrivateProfileStr(LPCTSTR lpAppName, LPCTSTR lpKeyName, char *str, size_t len, LPCTSTR lpFileName);
 BOOL ReadPrivateProfileInt(LPCTSTR lpAppName, LPCTSTR lpKeyName, int *ival, LPCTSTR lpFileName);
 BOOL ReadPrivateProfileDouble(LPCTSTR lpAppName, LPCTSTR lpKeyName, double *rval, LPCTSTR lpFileName);
 
@@ -59,6 +59,7 @@ typedef struct _CB_PTR_LIST {
 #define	CB_COUNT(list)		(sizeof(list)/sizeof(list[0]))
 
 int ComboBoxClearList(HWND hdlg, int wID);
+int ComboBoxClearSelection(HWND hdlg, int wID);
 int ComboBoxFillIntList(HWND hdlg, int wID, CB_INT_LIST *list, int n);
 int ComboBoxGetIntValue(HWND hdlg, int wID);
 int ComboBoxSetByIntValue(HWND hdlg, int wID, int ival);

@@ -282,6 +282,8 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			graph->show_Y_labels = TRUE;
 			graph->show_X_title = TRUE;
 			graph->show_Y_title = TRUE;
+			graph->no_margins = FALSE;
+			graph->background_color = -1;							/* Mark as no color */
 			*graph->x_title = '\0';
 			*graph->y_title = '\0';
 			SetWindowLong(hwnd, 0, (LONG) graph);
@@ -324,6 +326,13 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			hdc       = BeginPaint(hwnd, &paintstruct);		/* Get DC */
 #endif
 			ixmax = cxClient; iymax = cyClient;
+
+			/* If a background color is specified, fill it now */
+			if (graph->background_color != -1) {
+				hbrush = CreateSolidBrush(graph->background_color);
+				FillRect(hdc, &rect, hbrush);
+				DeleteObject(hbrush);
+			}
 
 			/* Go through all curves, update the min/max range if modified flag set */
 			for (i=0; i<graph->ncurves; i++) {
@@ -441,6 +450,10 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			/* Adjust the margins for titles if required */
 			if ((x_labels.sci && graph->show_X_labels) || (graph->show_X_title && (strlen(graph->x_title) != 0))) y_left_margin += TITLE_MARGIN;
 			if ((y_labels.sci && graph->show_Y_labels) || (graph->show_Y_title && (strlen(graph->y_title) != 0))) x_left_margin += TITLE_MARGIN;
+
+			if (graph->no_margins) {
+				x_left_margin = x_right_margin = y_left_margin = y_right_margin = 1;
+			}
 
 			/* Draw the constant X lines */
 			hpen = CreatePen(PS_SOLID, 1, RGB(128,128,128));
@@ -1004,6 +1017,14 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				if (graph->nfncs < GRAPH_MAX_FNCS) graph->nfncs++;
 			}
 			InvalidateRect(hwnd, NULL, ERASE_BACKGROUND_ON_INVALIDATE);
+			rc = 0; break;
+
+		case WMP_SET_NO_MARGINS:
+			graph->no_margins = (wParam != 0);
+			rc = 0; break;
+
+		case WMP_SET_BACKGROUND_COLOR:
+			graph->background_color = (int) wParam;
 			rc = 0; break;
 
 		case WMP_SET_X_TITLE:

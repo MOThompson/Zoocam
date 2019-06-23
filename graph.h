@@ -23,17 +23,19 @@ void ArrayMinMax(double *x, int npt, double *xmin, double *xmax);
 #define	WMP_CLEAR_CURVES_KEEP_LAST	(WM_APP+18)			/* Delete all but last curve */
 #define	WMP_SET_CURVE_VISIBILITY	(WM_APP+19)
 #define	WMP_SET_FNC_VISIBILITY		(WM_APP+20)
-#define	WMP_SET_MESH_VISIBILITY		(WM_APP+21)
-#define	WMP_SET_SCALES					(WM_APP+22)
-#define	WMP_SET_ZFORCE					(WM_APP+23)
-#define	WMP_SET_AXIS_PARMS			(WM_APP+24)
-#define	WMP_LOGMODE						(WM_APP+25)
-#define	WMP_SET_X_TITLE				(WM_APP+26)
-#define	WMP_SET_Y_TITLE				(WM_APP+27)
-#define	WMP_SET_LABEL_VISIBILITY	(WM_APP+28)
+#define	WMP_SET_NO_MARGINS			(WM_APP+21)			/* If wParam != 0, sets minimal (1 pixel) margins around graph area */
+#define	WMP_SET_BACKGROUND_COLOR	(WM_APP+22)			/* wParam has the RGB value of the desired background */
+#define	WMP_SET_SCALES					(WM_APP+23)
+#define	WMP_SET_ZFORCE					(WM_APP+24)
+#define	WMP_SET_AXIS_PARMS			(WM_APP+25)
+#define	WMP_SET_MESH_VISIBILITY		(WM_APP+26)
+#define	WMP_LOGMODE						(WM_APP+27)
+#define	WMP_SET_X_TITLE				(WM_APP+28)
+#define	WMP_SET_Y_TITLE				(WM_APP+29)
+#define	WMP_SET_LABEL_VISIBILITY	(WM_APP+30)
 #define	  GRAPH_X_LABELS				(0x01)
 #define	  GRAPH_Y_LABELS				(0x02)
-#define	WMP_SET_TITLE_VISIBILITY	(WM_APP+29)
+#define	WMP_SET_TITLE_VISIBILITY	(WM_APP+31)
 #define	  GRAPH_X_TITLE				(0x01)
 #define	  GRAPH_Y_TITLE				(0x02)
 
@@ -139,6 +141,8 @@ typedef struct _GRAPH_DATA {
 	BOOL suppress_y_minor, suppress_y_major;			/* Suppress x axis tick marks */
 	BOOL show_X_labels, show_Y_labels;					/* Should we draw the labels on X and Y axes */
 	BOOL show_X_title, show_Y_title;						/* Should we draw the title on X and Y axes */
+	BOOL no_margins;											/* Show only minimal margins */
+	int  background_color;									/* Background color */
 	char x_title[64], y_title[64];						/* Are there titles on the X and Y axes */
 
 	GRAPH_FNC *function[GRAPH_MAX_FNCS];
