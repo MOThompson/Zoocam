@@ -2,6 +2,9 @@
 	win32ex.h - API for add-ons to standard win32 API
 ******************************************************************************/
 
+/* Center a dialog window within its parent */
+void DlgCenterWindow(HWND hdlg);
+
 /* Show msgs from a dialog box call */
 char *GetMsgInfo(char *routine, UINT msg, WPARAM wparam, LPARAM lparam);
 void ShowMsgInfo(char *routine, UINT msg, WPARAM wparam, LPARAM lparam);

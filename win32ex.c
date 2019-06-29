@@ -51,45 +51,6 @@
 -- Potentially useful messages from very early code
 =========================================================================== */
 #if 0
-/**************************************************************************
- *
- *  Name       : DlgCenterWindow(hDlg)
- *
- *  Description: Centers the dialog on the screen
- *
- *  Concepts:  Any dialog box is free to call this routine.  Should be done
- *             during WM_INITDLG message processing.
- *
- *  Parameters :  hDlg     = window handle of the dialog
- *
- *  Return     :  [none]
- *
- *************************************************************************/
-VOID DlgCenterWindow(HWND hdlg) {
-
-	HWND hwndOwner; 
-	RECT rc, rcDlg, rcOwner; 
-
-	if ((hwndOwner = GetParent(hdlg)) == NULL) hwndOwner = GetDesktopWindow();
-	GetWindowRect(hwndOwner, &rcOwner); 
-	GetWindowRect(hdlg, &rcDlg); 
-	CopyRect(&rc, &rcOwner); 
-
-/* Offset owner and dialog box rectangles so that right/bottom represent the
- * width and height, and then offset the owner again to discard space taken
- * up by the dialog box.
- */
-	OffsetRect(&rcDlg, -rcDlg.left, -rcDlg.top); 
-	OffsetRect(&rc, -rc.left, -rc.top); 
-	OffsetRect(&rc, -rcDlg.right, -rcDlg.bottom); 
-
-/* The new position is the sum of half the remaining space and the owner's
- * original position.
- */
-	SetWindowPos(hdlg, HWND_TOP, rcOwner.left+rc.right/2, rcOwner.top+rc.bottom/2, 0, 0, SWP_NOSIZE); 
-	return;
-}
-
 
 /**************************************************************************
  *
@@ -142,6 +103,46 @@ VOID DlgSetSysMenu(HWND hDlg) {
 }
 
 #endif
+
+
+/* ===========================================================================
+ *
+ *  Name       : DlgCenterWindow(hDlg)
+ *
+ *  Description: Centers a dialog window within its parent (or desktop)
+ *
+ *  Concepts:  Any dialog box is free to call this routine.  Should be done
+ *             during WM_INITDLG message processing.
+ *
+ *  Parameters :  hDlg     = window handle of the dialog
+ *
+ *  Return     :  [none]
+ *
+=========================================================================== */
+void DlgCenterWindow(HWND hdlg) {
+
+	HWND hwndOwner; 
+	RECT rc, rcDlg, rcOwner; 
+
+	if ((hwndOwner = GetParent(hdlg)) == NULL) hwndOwner = GetDesktopWindow();
+	GetWindowRect(hwndOwner, &rcOwner); 
+	GetWindowRect(hdlg, &rcDlg); 
+	CopyRect(&rc, &rcOwner); 
+
+/* Offset owner and dialog box rectangles so that right/bottom represent the
+ * width and height, and then offset the owner again to discard space taken
+ * up by the dialog box.
+ */
+	OffsetRect(&rcDlg, -rcDlg.left, -rcDlg.top); 
+	OffsetRect(&rc, -rc.left, -rc.top); 
+	OffsetRect(&rc, -rcDlg.right, -rcDlg.bottom); 
+
+/* The new position is the sum of half the remaining space and the owner's
+ * original position.
+ */
+	SetWindowPos(hdlg, HWND_TOP, rcOwner.left+rc.right/2, rcOwner.top+rc.bottom/2, 0, 0, SWP_NOSIZE); 
+	return;
+}
 
 
 /* ============================================================================
@@ -360,7 +361,7 @@ char *GetMsgInfo(char *routine, UINT msg, WPARAM wparam, LPARAM lparam) {
 	int i;
 	static char szBuf[256];
 	static struct {
-		int msg;
+		UINT msg;
 		char *text;
 	} msg_list[] = {
 		{0x0000,	"WM_NULL"},

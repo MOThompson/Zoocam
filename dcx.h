@@ -1,9 +1,8 @@
 /* Global identifier of my window handle */
 HWND DCx_main_hdlg;
 
-typedef struct _DCX_INFO DCX_INFO;
-
 typedef enum _DCX_IMAGE_FORMAT { IMAGE_BMP, IMAGE_JPG, IMAGE_PNG } DCX_IMAGE_FORMAT;
+typedef enum _DCX_IMAGE_TYPE   { IMAGE_COLOR, IMAGE_MONOCHROME } DCX_IMAGE_TYPE;
 
 typedef struct _DCX_IMAGE_INFO {
 	int width, height;
@@ -17,20 +16,20 @@ typedef struct _DCX_IMAGE_INFO {
 } DCX_IMAGE_INFO;
 
 typedef struct _DCX_STATUS {
-	char manufacturer[32];	/* Camera manufacturer */
-	char model[32];			/* Camera model */
-	char serial[32];			/* Camera serial number */
-	char version[32];			/* Camera version */
-	char date[32];				/* Firmware date */
-	int CameraID;				/* Camera ID (as set in EEPROM */
-	char color_mode[16];		/* Bayer, Monochrome or unknown */
-	int pixel_pitch;			/* Pixel pitch in um */
-	double fps;					/* Frame rate (frames per second) */
-	double exposure;			/* Current exposure (ms) */
-	double gamma;				/* Gamma value */
-	int master_gain;			/* Gains in non-linear range [0,100] */
+	char manufacturer[32];		/* Camera manufacturer */
+	char model[32];				/* Camera model */
+	char serial[32];				/* Camera serial number */
+	char version[32];				/* Camera version */
+	char date[32];					/* Firmware date */
+	int CameraID;					/* Camera ID (as set in EEPROM */
+	DCX_IMAGE_TYPE color_mode;	/* Monochrome or color mode */
+	int pixel_pitch;				/* Pixel pitch in um */
+	double fps;						/* Frame rate (frames per second) */
+	double exposure;				/* Current exposure (ms) */
+	double gamma;					/* Gamma value */
+	int master_gain;				/* Gains in non-linear range [0,100] */
 	int red_gain, green_gain, blue_gain;
-	int color_correction;	/* 0,1,2,4,8 corresponding to disable, enable, BG40, HQ, IR Auto */
+	int color_correction;		/* 0,1,2,4,8 corresponding to disable, enable, BG40, HQ, IR Auto */
 	double color_correction_factor;
 } DCX_STATUS;
 
