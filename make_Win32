@@ -4,7 +4,7 @@ RFLAGS = /nologo
 DCx_LIB = \code\lab\DCx\Lib\uc480.lib 
 SYSLIBS = wsock32.lib user32.lib gdi32.lib comdlg32.lib comctl32.lib advapi32.lib vfw32.lib shell32.lib
 
-ALL: DCx.exe dcx.c.1
+ALL: DCxLive.exe dcx.c.1
 
 # Cheap revisioning work
 dcx.c.1 : dcx.c
@@ -25,8 +25,8 @@ win32ex.obj : win32ex.c win32ex.h
 graph.obj : graph.c graph.h
 	cl -c $(CFLAGS) graph.c
 
-DCx.exe : DCx.obj DCx.res win32ex.obj graph.obj
-	cl $(CFLAGS) -FeDCx.exe DCx.obj win32ex.obj graph.obj DCx.res $(DCx_LIB) $(SYSLIBS)
+DCxLive.exe : DCx.obj DCx.res win32ex.obj graph.obj
+	cl $(CFLAGS) -FeDCxLive.exe DCx.obj win32ex.obj graph.obj DCx.res $(DCx_LIB) $(SYSLIBS)
 
 DCx.res : DCx.rc resource.h
 	rc $(RFLAGS) DCx.rc

@@ -2322,9 +2322,13 @@ int DCx_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMA
 		for (line=0; line<height; line++) {
 			aptr = pMem + line*pitch;					/* Pointer to this line */
 			for (col=0; col<width; col++) {
-				if (aptr[3*col+0] >= 255) info->blue_saturate++;
-				if (aptr[3*col+1] >= 255) info->green_saturate++;
-				if (aptr[3*col+2] >= 255) info->red_saturate++;
+				if (dcx->SensorIsColor) {
+					if (aptr[3*col+0] >= 255) info->blue_saturate++;
+					if (aptr[3*col+1] >= 255) info->green_saturate++;
+					if (aptr[3*col+2] >= 255) info->red_saturate++;
+				} else {
+					if (aptr[col] >= 255) info->blue_saturate = info->green_saturate = ++info->red_saturate;
+				}
 			}
 		}
 
