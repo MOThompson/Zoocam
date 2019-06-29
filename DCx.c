@@ -1909,7 +1909,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 	/* Load the class for the graph window */
 	Graph_StartUp(hThisInstance);					/* Initialize the graphics control */
 
-	_beginthread(test_thread, 0, NULL);
+//	_beginthread(test_thread, 0, NULL);
 
 	/* And show the dialog box */
 	hInstance = hThisInstance;
