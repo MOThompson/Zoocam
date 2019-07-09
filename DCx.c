@@ -174,7 +174,8 @@ int AllCameraControls[] = {
 	IDV_COLOR_CORRECT_FACTOR,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
 	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN,
-	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS,
+	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
+	IDC_SHOW_INTENSITY, IDC_SHOW_RGB,
 	ID_NULL
 };
 /* List of camera controls that get turned off when starting resolution change */
@@ -187,7 +188,8 @@ int CameraOffControls[] = {
 	IDV_COLOR_CORRECT_FACTOR,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
 	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN,
-	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS,
+	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
+	IDC_SHOW_INTENSITY, IDC_SHOW_RGB,
 	ID_NULL
 };
 /* List of camera controls that get turned on when resolution is set */
@@ -199,7 +201,8 @@ int CameraOnControls[] = {
 	IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDV_COLOR_CORRECT_FACTOR,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
-	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS,
+	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
+	IDC_SHOW_INTENSITY, IDC_SHOW_RGB,
 	ID_NULL
 };
 
@@ -529,15 +532,16 @@ static void RenderImageThread(void *arglist) {
 			}
 			vert->npt = vert_r->npt = vert_g->npt = vert_b->npt = height;
 			for (i=0; i<height; i++) {
-				aptr = pMem + i*pitch + 3*((int) (width*dcx->x_image_target+0.5));	/* Access first of the column */
 				vert->y[i] = vert_r->y[i] = vert_g->y[i] = vert_b->y[i] = height-1-i;
 				if (dcx->SensorIsColor) {
+					aptr = pMem + i*pitch + 3*((int) (width*dcx->x_image_target+0.5));	/* Access first of the column */
 					vert->x[i] = (3*256 - (aptr[0] + aptr[1] + aptr[2])) / 3.0;
 					vert_r->x[i] = 256 - aptr[2];
 					vert_g->x[i] = 256 - aptr[1];
 					vert_b->x[i] = 256 - aptr[0];
 				} else {
-					vert->x[i] = vert_r->x[i] = vert_g->x[i] = vert_b->x[i] = 256 - aptr[i];
+					aptr = pMem + i*pitch + ((int) (width*dcx->x_image_target+0.5));		/* Access first of the column */
+					vert->x[i] = vert_r->x[i] = vert_g->x[i] = vert_b->x[i] = 256 - aptr[0];
 				}
 			}
 			memset(&scales, 0, sizeof(scales));
@@ -1736,7 +1740,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case IDR_EXPOSURE_1MS:
 				case IDR_EXPOSURE_10MS:
 				case IDR_EXPOSURE_100MS:
-					i = wID-IDR_EXPOSURE_100US;
+					i = GetRadioButtonIndex(hdlg, IDR_EXPOSURE_100US, IDR_EXPOSURE_100MS);
 					SetDlgItemText(hdlg, IDT_MIN_EXPOSURE, ExposureList[i].str_min);
 					SetDlgItemText(hdlg, IDT_MID_EXPOSURE, ExposureList[i].str_mid);
 					SetDlgItemText(hdlg, IDT_MAX_EXPOSURE, ExposureList[i].str_max);
@@ -2224,7 +2228,7 @@ int InitializeScrollBars(HWND hdlg, DCX_WND_INFO *dcx) {
 --
 -- Usage: void DCx_Start_Dialog(void *arglist);
 --
--- Inputs: arglist - unused
+-- Inputs: arglist - passed to WM_INITDIALOG as lParam (currently unused)
 --
 -- Output: simply launches the dialog box
 --
@@ -2232,7 +2236,7 @@ int InitializeScrollBars(HWND hdlg, DCX_WND_INFO *dcx) {
 =========================================================================== */
 void DCx_Start_Dialog(void *arglist) {
 
-	DialogBox(NULL, "DCX_DIALOG", HWND_DESKTOP, (DLGPROC) DCxDlgProc);
+	DialogBoxParam(NULL, "DCX_DIALOG", HWND_DESKTOP, (DLGPROC) DCxDlgProc, (LPARAM) arglist);
 
 	return;
 }
@@ -2379,6 +2383,9 @@ int DCx_Status(DCX_STATUS *status) {
 	SENSORINFO SensorInfo;
 	int nGamma;
 	
+	/* In case of errors, return all zeros in the structure if it exists */
+	if (status != NULL) memset(status, 0, sizeof(*status));
+
 	/* Must have been started at some point to be able to return images */
 	if (main_dcx == NULL || main_dcx->hCam <= 0) return 1;
 	dcx  = main_dcx;
