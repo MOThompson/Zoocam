@@ -4,6 +4,7 @@
 /* Feature test macros            */
 /* ------------------------------ */
 #define _POSIX_SOURCE						/* Always require POSIX standard */
+#define _CRT_SECURE_NO_WARNINGS	/* Turn off for this routine (intentional use of strncpy) */
 
 /* To use the double buffering with a memory device context, define USE_MEMORY_DC and set ERASE... to FALSE */
 #define	USE_MEMORY_DC
@@ -1029,7 +1030,8 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 		case WMP_SET_X_TITLE:
 			if ( ((char *) wParam) != NULL) {
-				strncpy_s(graph->x_title, sizeof(graph->x_title), (char *) wParam, sizeof(graph->x_title));
+				strncpy(graph->x_title, (char *) wParam, sizeof(graph->x_title));
+				graph->x_title[sizeof(graph->x_title)-1] = '\0';
 			} else {
 				*graph->x_title = '\0';
 			}
@@ -1038,7 +1040,8 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 		case WMP_SET_Y_TITLE:
 			if ( ((char *) wParam) != NULL) {
-				strncpy_s(graph->y_title, sizeof(graph->y_title), (char *) wParam, sizeof(graph->y_title));
+				strncpy(graph->y_title, (char *) wParam, sizeof(graph->y_title));
+				graph->y_title[sizeof(graph->y_title)-1] = '\0';
 			} else {
 				*graph->y_title = '\0';
 			}
@@ -1810,7 +1813,7 @@ static int FormatLabels(LABEL_FORMAT *lab, double rmin, double rmax, double dx) 
 	/* And determine number of decimals required / creating format statement */
 	if (dx/lab->scale > 1.0) {										/* Does each interval correspond to integer changes? */
 		lab->mx = -1;
-		strcpy_s(lab->format, sizeof(lab->format), "%i");
+		strcpy(lab->format, "%i");
 	} else {
 		lab->mx = (int) (-log10(dx/lab->scale)+0.999);		/* Number of digits required to see dx */
 		sprintf_s(lab->format, sizeof(lab->format), "%%.%if", lab->mx);

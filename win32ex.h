@@ -2,6 +2,9 @@
 	win32ex.h - API for add-ons to standard win32 API
 ******************************************************************************/
 
+/* Extensions to standard libraries */
+errno_t strcpy_m(char *dest, size_t dest_size, const char *src);
+
 /* Center a dialog window within its parent */
 void DlgCenterWindow(HWND hdlg);
 

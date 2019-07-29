@@ -5,7 +5,10 @@
 /* ------------------------------ */
 /* Feature test macros            */
 /* ------------------------------ */
-#define _POSIX_SOURCE_			  /* Always require POSIX standard */
+#define _POSIX_SOURCE_					/* Always require POSIX standard */
+#ifndef	_CRT_SECURE_NO_WARNINGS
+	#define _CRT_SECURE_NO_WARNINGS	/* Turn off for this routine (intentional use of strncpy) */
+#endif
 
 /***** Standard Include Files *****/
 /* from standard C library */
@@ -14,6 +17,7 @@
 #include <stdlib.h>				  /* for performing a variety of operations */
 #include <string.h>				  /* for manipulating several kinds of strings */
 #include <float.h>
+#include <errno.h>
 #include <math.h>
 
 /* from standard Windows library */
@@ -45,6 +49,34 @@
 /***** Private Variables *****/
 
 
+
+
+/* ===========================================================================
+-- Secure version of string copy that will not overflow the buffer.
+-- Unlike strcpy_s, this version simply truncates src if necessary to fit.
+--
+-- Usage: errno_t strcpy_m(char *dest, size_t dest_size, const char *src);
+--
+-- Inputs: dest - buffer for string copy
+--         dest_size - defined length of dest
+--         src  - source string
+--
+-- Output: Copies up to dest_size-1 characters from src to dest and terminates
+--         dest with a null character (guarenteed)
+--
+-- Return: 0 if successful
+--         EINVAL if dest or src are NULL
+--         ERANGE if dest_size is <= 0
+=========================================================================== */
+errno_t strcpy_m(char *dest, size_t dest_size, const char *src) {
+
+	if (dest == NULL || src == NULL) return EINVAL;
+	if (dest_size <= 0) return ERANGE;
+
+	strncpy(dest, src, dest_size);
+	dest[dest_size-1] = '\0';
+	return 0;
+}
 
 
 /* ===========================================================================
@@ -176,7 +208,7 @@ BOOL WritePrivateProfileDouble(LPCTSTR lpAppName, LPCTSTR lpKeyName, double rval
 BOOL ReadPrivateProfileStr(LPCTSTR lpAppName, LPCTSTR lpKeyName, char *str, size_t len, LPCTSTR lpFileName) {
 	char szBuf[256];
 	if (GetPrivateProfileString(lpAppName, lpKeyName, NULL, szBuf, sizeof(szBuf), lpFileName) <= 0) return FALSE;
-	strcpy_s(str, len, szBuf);
+	strcpy_m(str, len, szBuf);
 	return TRUE;
 }
 

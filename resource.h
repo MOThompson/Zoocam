@@ -68,6 +68,7 @@
 #define IDC_SHOW_INTENSITY              2058
 #define IDC_SHOW_RGB                    2059
 #define IDC_ENABLE_DCX_ERRORS           2060
+#define IDC_FULL_WIDTH_CURSOR           2061
 
 // Next default values for new objects
 // 

@@ -48,3 +48,5 @@ win32ex.h : \code\Window_Classes\win32ex\win32ex.h
 
 win32ex.c : \code\Window_Classes\win32ex\win32ex.c
 	copy $** $@
+
+win32ex.obj : win32ex.h

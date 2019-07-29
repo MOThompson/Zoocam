@@ -98,6 +98,7 @@ typedef struct _DCX_WND_INFO {
 
 	HWND thumbnail;
 	double x_image_target, y_image_target;
+	BOOL full_width_cursor;
 
 	GRAPH_CURVE *red_hist, *green_hist, *blue_hist;
 	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b;
@@ -381,14 +382,25 @@ void GenerateCrosshair(	DCX_WND_INFO *dcx, HWND hwnd) {
 	iy = (int) (dcx->y_image_target*height + 0.5);
 
 	hdc = GetDC(hwnd);				/* Get DC */
-	SetRect(&rect, max(ix-20,0),max(iy-1,0), min(ix+20,width),min(iy+2,height));
-	FillRect(hdc, &rect, background);
-	SetRect(&rect, max(0,ix-1),max(0,iy-20), min(ix+2,width),min(iy+20,height));
-	FillRect(hdc, &rect, background);
+	if (! dcx->full_width_cursor) {
+		SetRect(&rect, max(ix-20,0),max(iy-1,0), min(ix+20,width),min(iy+2,height));
+		FillRect(hdc, &rect, background);
+		SetRect(&rect, max(0,ix-1),max(0,iy-20), min(ix+2,width),min(iy+20,height));
+		FillRect(hdc, &rect, background);
 
-	SelectObject(hdc, hpen);
-	MoveToEx(hdc, max(ix-20,0), iy, NULL); LineTo(hdc, min(ix+20,width), iy);
-	MoveToEx(hdc, ix, max(iy-20,0), NULL); LineTo(hdc, ix, min(iy+20,height));
+		SelectObject(hdc, hpen);
+		MoveToEx(hdc, max(ix-20,0), iy, NULL); LineTo(hdc, min(ix+20,width), iy);
+		MoveToEx(hdc, ix, max(iy-20,0), NULL); LineTo(hdc, ix, min(iy+20,height));
+	} else {
+		SetRect(&rect, 0,max(iy-1,0), width,min(iy+2,height));
+		FillRect(hdc, &rect, background);
+		SetRect(&rect, max(0,ix-1),0, min(ix+2,width),height);
+		FillRect(hdc, &rect, background);
+
+		SelectObject(hdc, hpen);
+		MoveToEx(hdc, 0, iy, NULL); LineTo(hdc, width, iy);
+		MoveToEx(hdc, ix, 0, NULL); LineTo(hdc, ix, height);
+	}		
 
 	ReleaseDC(hwnd, hdc);			/* Release DC */
 	return;
@@ -1272,6 +1284,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			InitializeHistogramCurves(hdlg, dcx);
 			SetDlgItemCheck(hdlg, IDC_SHOW_INTENSITY, TRUE);
 			SetDlgItemCheck(hdlg, IDC_SHOW_RGB, TRUE);
+			SetDlgItemCheck(hdlg, IDC_FULL_WIDTH_CURSOR, dcx->full_width_cursor);
 			SetRadioButton(hdlg, IDR_EXPOSURE_100US, IDR_EXPOSURE_100MS, ExposureList[0].wID);
 			SetDlgItemText(hdlg, IDT_MIN_EXPOSURE, ExposureList[0].str_min);
 			SetDlgItemText(hdlg, IDT_MID_EXPOSURE, ExposureList[0].str_mid);
@@ -1619,6 +1632,10 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					dcx->horz_r->visible = dcx->horz_g->visible = dcx->horz_b->visible = GetDlgItemCheck(hdlg, wID);
 					rcode = TRUE; break;
 					
+				case IDC_FULL_WIDTH_CURSOR:
+					dcx->full_width_cursor = GetDlgItemCheck(hdlg, wID);
+					rcode = TRUE; break;
+							
 				case IDB_CAMERA_DISCONNECT:
 					if (dcx->hCam > 0) {
 						is_DisableEvent(dcx->hCam, IS_SET_EVENT_FRAME);
@@ -1950,7 +1967,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 	/* Initialize the curves for histograms */
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 0;											/* Main curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "red");
+	strcpy_m(cv->legend, sizeof(cv->legend), "red");
 	cv->master        = TRUE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -1967,7 +1984,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 	/* Initialize the green histogram */
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 1;											/* dark curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "green");
+	strcpy_m(cv->legend, sizeof(cv->legend), "green");
 	cv->master        = FALSE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -1984,7 +2001,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 	/* Initialize the blue histogram */
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 2;											/* reference curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "reference");
+	strcpy_m(cv->legend, sizeof(cv->legend), "reference");
 	cv->master        = FALSE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -2020,7 +2037,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 	/* Set up the horizontal profile */
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 1;											/* reference curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "row scan");
+	strcpy_m(cv->legend, sizeof(cv->legend), "row scan");
 	cv->master        = TRUE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -2036,7 +2053,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 2;											/* reference curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "row red scan");
+	strcpy_m(cv->legend, sizeof(cv->legend), "row red scan");
 	cv->master        = FALSE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -2052,7 +2069,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 3;											/* reference curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "row green scan");
+	strcpy_m(cv->legend, sizeof(cv->legend), "row green scan");
 	cv->master        = FALSE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -2068,7 +2085,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 4;											/* reference curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "row blue scan");
+	strcpy_m(cv->legend, sizeof(cv->legend), "row blue scan");
 	cv->master        = FALSE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -2094,7 +2111,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 	/* Set up the vertical profiles */
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 1;											/* reference curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "col scan");
+	strcpy_m(cv->legend, sizeof(cv->legend), "col scan");
 	cv->master        = TRUE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -2110,7 +2127,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 2;											/* reference curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "col red scan");
+	strcpy_m(cv->legend, sizeof(cv->legend), "col red scan");
 	cv->master        = FALSE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -2126,7 +2143,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 3;											/* reference curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "col green scan");
+	strcpy_m(cv->legend, sizeof(cv->legend), "col green scan");
 	cv->master        = FALSE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -2142,7 +2159,7 @@ int InitializeHistogramCurves(HWND hdlg, DCX_WND_INFO *dcx) {
 
 	cv = calloc(sizeof(GRAPH_CURVE), 1);
 	cv->ID = 4;											/* reference curve */
-	strcpy_s(cv->legend, sizeof(cv->legend), "col blue scan");
+	strcpy_m(cv->legend, sizeof(cv->legend), "col blue scan");
 	cv->master        = FALSE;
 	cv->visible       = TRUE;
 	cv->free_on_clear = FALSE;
@@ -2408,14 +2425,14 @@ int DCx_Status(DCX_STATUS *status) {
 
 	if (is_GetSensorInfo(hCam, &SensorInfo) == IS_SUCCESS) {
 		status->pixel_pitch = SensorInfo.wPixelSize;
-		strcpy_s(status->model, sizeof(status->model), SensorInfo.strSensorName);
+		strcpy_m(status->model, sizeof(status->model), SensorInfo.strSensorName);
 		status->color_mode = SensorInfo.nColorMode == IS_COLORMODE_MONOCHROME ? IMAGE_MONOCHROME : IMAGE_COLOR ;
 	}
 	if (is_GetCameraInfo(hCam, &camInfo) == IS_SUCCESS) {
-		strcpy_s(status->serial, sizeof(status->serial), camInfo.SerNo); 
-		strcpy_s(status->manufacturer, sizeof(status->manufacturer), camInfo.ID); 
-		strcpy_s(status->version, sizeof(status->version), camInfo.Version); 
-		strcpy_s(status->date, sizeof(status->date), camInfo.Date); 
+		strcpy_m(status->serial, sizeof(status->serial), camInfo.SerNo); 
+		strcpy_m(status->manufacturer, sizeof(status->manufacturer), camInfo.ID); 
+		strcpy_m(status->version, sizeof(status->version), camInfo.Version); 
+		strcpy_m(status->date, sizeof(status->date), camInfo.Date); 
 		status->CameraID = camInfo.Select;
 	}
 
