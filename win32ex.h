@@ -6,7 +6,8 @@
 errno_t strcpy_m(char *dest, size_t dest_size, const char *src);
 
 /* Center a dialog window within its parent */
-void DlgCenterWindow(HWND hdlg);
+#define	DlgCenterWindow(hdlg)	(DlgCenterWindowEx((hdlg), NULL))
+void DlgCenterWindowEx(HWND hdlg, HWND parent);
 
 /* Show msgs from a dialog box call */
 char *GetMsgInfo(char *routine, UINT msg, WPARAM wparam, LPARAM lparam);

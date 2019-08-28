@@ -20,6 +20,7 @@
 #include <time.h>
 #include <direct.h>
 #include <math.h>
+#include <stdint.h>             /* C99 extension to get known width integers */
 
 /* Extend from POSIX to get I/O and thread functions */
 #undef _POSIX_
@@ -1921,6 +1922,9 @@ BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPara
 /* ===========================================================================
 =========================================================================== */
 #ifdef	STANDALONE
+
+#include "DCx_Server.h"
+
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
 
 	/* If not done, make sure we are loaded.  Assume safe to call multiply */
@@ -1932,6 +1936,9 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 
 //	_beginthread(test_thread, 0, NULL);
 
+/* Initialize the DCx TCP server for remote image requests */
+	Init_DCx_Server();
+
 	/* And show the dialog box */
 	hInstance = hThisInstance;
 	printf("Calling dialog box procedure\n"); fflush(stdout);
@@ -1939,6 +1946,9 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 
 	printf("WinMain: returned from dialog box procedure\n"); fflush(stdout);
 
+	/* And shut down the DCX server */
+	Shutdown_DCx_Server();
+	
 	return 0;
 }
 #endif
@@ -2355,6 +2365,7 @@ int DCx_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMA
 
 		info->width = width;
 		info->height = height;
+		info->memory_pitch = pitch;
 
 		is_Exposure(hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &info->exposure, sizeof(info->exposure));
 
@@ -2378,6 +2389,96 @@ int DCx_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMA
 	
 	return rc;
 }
+
+/* ===========================================================================
+-- Interface routine to accept a request to grab and store an image in memory 
+--
+-- Usage: int DCX_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer);
+--
+-- Inputs: info    - pointer (if not NULL) to structure to be filled with image info
+--         buffer  - pointer set to location of image in memory;
+--                   calling routine responsible for freeing this memory after use
+--
+-- Output: Captures an image and copies the buffer to memory location
+--         if info != NULL, *info filled with details of capture and basic image stats
+--
+-- Return: 0 - all okay
+--         1 - camera is not initialized and active
+--         2 - file save failed for some other reason
+=========================================================================== */
+int DCx_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer) {
+	static char *rname = "DCx_Acquire_Image";
+
+	HCAM hCam;
+	DCX_WND_INFO *dcx;
+
+	int rc, col, line, height, width, pitch, nGamma;
+	unsigned char *pMem, *aptr;
+
+	/* If info provided, clear it in case we have a failure */
+	if (info != NULL) memset(info, 0, sizeof(DCX_IMAGE_INFO));
+	if (buffer == NULL) return -1;
+
+	/* Must have been started at some point to be able to return images */
+	if (main_dcx == NULL || main_dcx->hCam <= 0) return 1;
+	dcx  = main_dcx;
+	hCam = dcx->hCam;
+
+	/* Capture and hold an image */
+	if ( (rc = is_FreezeVideo(hCam, IS_WAIT)) != 0) {
+		printf("%s: is_FreezeVideo returned failure (rc=%d)", rname, rc);
+		rc = is_FreezeVideo(hCam, IS_WAIT);
+		printf("  Retry gives: %d\n", rc);
+		fflush(stdout);
+	}
+
+	pMem   = dcx->Image_Mem;
+	height = dcx->height;
+	width  = dcx->width;
+	pitch  = dcx->Image_Memory_Pitch;
+
+	/* Copy the image to an allocated buffer */
+	*buffer = malloc(pitch*height);			/* Allocate space for new memory */
+	memcpy(*buffer, pMem, pitch*height);
+
+	if (info != NULL) {
+
+		/* Copy over information */
+		info->width = width;
+		info->height = height;
+		info->memory_pitch = pitch;
+
+		is_Exposure(hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &info->exposure, sizeof(info->exposure));
+
+		is_Gamma(hCam, IS_GAMMA_CMD_GET, &nGamma, sizeof(nGamma));
+		info->gamma = nGamma / 100.0;
+		info->color_correction = is_SetColorCorrection(hCam, IS_GET_CCOR_MODE, &info->color_correction_factor);
+
+		info->master_gain = (dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(hCam, IS_GET_MASTER_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+		info->red_gain    = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(hCam, IS_GET_RED_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+		info->green_gain  = (dcx->SensorInfo.bGGain)      ? is_SetHardwareGain(hCam, IS_GET_GREEN_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+		info->blue_gain   = (dcx->SensorInfo.bBGain)      ? is_SetHardwareGain(hCam, IS_GET_BLUE_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+
+		/* Calculate the number of saturated pixels on each color plane */
+		info->red_saturate = info->green_saturate = info->blue_saturate = 0;
+		for (line=0; line<height; line++) {
+			aptr = pMem + line*pitch;					/* Pointer to this line */
+			for (col=0; col<width; col++) {
+				if (dcx->SensorIsColor) {
+					if (aptr[3*col+0] >= 255) info->blue_saturate++;
+					if (aptr[3*col+1] >= 255) info->green_saturate++;
+					if (aptr[3*col+2] >= 255) info->red_saturate++;
+				} else {
+					if (aptr[col] >= 255) info->blue_saturate = info->green_saturate = ++info->red_saturate;
+				}
+			}
+		}
+	}
+
+	if (dcx->LiveVideo) is_CaptureVideo(hCam, IS_DONT_WAIT);
+	return 0;
+}
+
 
 /* ===========================================================================
 -- Query of DCX camera status

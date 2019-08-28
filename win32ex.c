@@ -138,25 +138,32 @@ VOID DlgSetSysMenu(HWND hDlg) {
 
 
 /* ===========================================================================
- *
- *  Name       : DlgCenterWindow(hDlg)
- *
- *  Description: Centers a dialog window within its parent (or desktop)
- *
- *  Concepts:  Any dialog box is free to call this routine.  Should be done
- *             during WM_INITDLG message processing.
- *
- *  Parameters :  hDlg     = window handle of the dialog
- *
- *  Return     :  [none]
- *
+-- Routine to center a dialog window in either its parent or to a specified window 
+--
+-- Usage: void DlgCenterWindow(HWND hdlg);
+--        void DlgCenterWindowEx(HWND hdlg, HWND parent);
+--
+-- Inputs: hdlg - window to center
+--         parent - if !NULL, window to center hdlg within
+--                  if NULL or ! IsWindow(hdlg), tries to use GetParent(hdlg), otherwise
+--                  GetDesktopWindow()
+--
+-- Output: Centers the specified window within the specified parent window
+--
+-- Return: none
+--
+-- Notes: While called "parent", can be any window that can be enumerated
 =========================================================================== */
-void DlgCenterWindow(HWND hdlg) {
+void DlgCenterWindowEx(HWND hdlg, HWND parent) {
 
 	HWND hwndOwner; 
 	RECT rc, rcDlg, rcOwner; 
 
-	if ((hwndOwner = GetParent(hdlg)) == NULL) hwndOwner = GetDesktopWindow();
+	if (parent != NULL && IsWindow(parent)) {
+		hwndOwner = parent;
+	} else if ((hwndOwner = GetParent(hdlg)) == NULL) {
+		hwndOwner = GetDesktopWindow();
+	}
 	GetWindowRect(hwndOwner, &rcOwner); 
 	GetWindowRect(hdlg, &rcDlg); 
 	CopyRect(&rc, &rcOwner); 
