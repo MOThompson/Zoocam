@@ -573,7 +573,7 @@ int DCx_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer) {
 
 	uint32_t i,j,pitch;
 	char *image;
-	
+
 	/* Fake an RGB image */
 	info->height = 1024;
 	info->width  = 1280;

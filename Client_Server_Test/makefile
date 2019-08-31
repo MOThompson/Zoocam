@@ -1,10 +1,5 @@
-#################################################################
-# REMEMBER ... HAVE TO GO TO x64 using "cl64.bat" TO COMPILE 
-#################################################################
-CFLAGS = /nologo /W3 /WX- /O2 /Ob1 /GF /MT /GS /Gy /fp:precise /Zc:forScope /Gd
-LFLAGS = /nologo /subsystem:windows
-RFLAGS = /nologo
-SYSLIBS = wsock32.lib user32.lib 
+CFLAGS = /nologo /W3
+SYSLIBS = wsock32.lib
 
 ALL: client.exe server.exe
 

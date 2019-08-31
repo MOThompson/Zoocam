@@ -169,9 +169,16 @@ int main(int argc, char *argv[]) {
 	unsigned char *data = NULL;
 	int rc, client_version, server_version;
 	uint32_t i,j;
+	char *server_IP;
 
-	if ( (rc = Init_DCx_Client(LOOPBACK_SERVER_IP_ADDRESS)) != 0) {
-		fprintf(stderr, "ERROR: Unable to connect to the server at the specified IP address\n");
+	server_IP = LOOPBACK_SERVER_IP_ADDRESS;	/* Local test (server on same machine) */
+//	server_IP = "128.253.129.74";					/* Machine in laser room */
+//	server_IP = "128.253.129.71";					/* Machine in open lab room */
+
+	if (argc > 1) server_IP = argv[1];			/* Use the first argument on command line if given */
+
+	if ( (rc = Init_DCx_Client(server_IP)) != 0) {
+		fprintf(stderr, "ERROR: Unable to connect to the server at the specified IP address (%s)\n", server_IP);
 		return 0;
 	}
 

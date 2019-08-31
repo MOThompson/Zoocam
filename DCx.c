@@ -90,6 +90,7 @@ typedef struct _DCX_WND_INFO {
 	BOOL EnableErrorReports;				/* Do we want error reports as message boxes? */
 
 	/* Associated with the selected resolution */
+	int Image_Count;							/* Number of images processed - use to identify new data */
 	IMAGE_FORMAT_INFO *ImageFormatInfo;
 	int height, width;
 	int Image_PID;
@@ -101,6 +102,7 @@ typedef struct _DCX_WND_INFO {
 	double x_image_target, y_image_target;
 	BOOL full_width_cursor;
 
+	int red_saturate, green_saturate, blue_saturate;
 	GRAPH_CURVE *red_hist, *green_hist, *blue_hist;
 	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b;
 	GRAPH_CURVE *horz_w, *horz_r, *horz_g, *horz_b;
@@ -473,7 +475,9 @@ static void RenderImageThread(void *arglist) {
 				SetDlgItemDouble(hdlg, IDT_RED_SATURATE,   "%.2f%%", (100.0*red->y[255]  )/(1.0*height*width));
 				SetDlgItemDouble(hdlg, IDT_GREEN_SATURATE, "%.2f%%", (100.0*green->y[255])/(1.0*height*width));
 				SetDlgItemDouble(hdlg, IDT_BLUE_SATURATE,  "%.2f%%", (100.0*blue->y[255] )/(1.0*height*width));
-				red->y[255] = green->y[255] = blue->y[255] = 0;
+				dcx->red_saturate   = (int) red->y[255];		red->y[255]   = 0;
+				dcx->green_saturate = (int) green->y[255];	green->y[255] = 0;
+				dcx->blue_saturate  = (int) blue->y[255];		blue->y[255]  = 0;
 				red->modified = green->modified = blue->modified = TRUE;
 				red->visible  = green->visible  = blue->visible  = TRUE;
 				red->rgb = RGB(255,0,0);
@@ -484,7 +488,7 @@ static void RenderImageThread(void *arglist) {
 				SetDlgItemDouble(hdlg, IDT_RED_SATURATE,   "%.2f%%", rval);
 				SetDlgItemDouble(hdlg, IDT_GREEN_SATURATE, "%.2f%%", rval);
 				SetDlgItemDouble(hdlg, IDT_BLUE_SATURATE,  "%.2f%%", rval);
-				red->y[255] = 0;
+				dcx->red_saturate = dcx->green_saturate = dcx->blue_saturate = (int) red->y[255];
 				red->modified = TRUE;
 				red->visible = TRUE; green->visible = FALSE; blue->visible = FALSE;
 				red->rgb = RGB(225,225,255);
@@ -566,10 +570,92 @@ static void RenderImageThread(void *arglist) {
 			SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_SCALES, (WPARAM) &scales, (LPARAM) 0);
 			SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_REDRAW, 0, 0);
 		}										/* if (IsWindow(dcx->main_hdlg)) */
+
+		dcx->Image_Count++;				/* So threads can tell when there is new image data */
 	}											/* while (main_dcx != NULL) */
 
 	printf("RenderImageThread exiting\n"); fflush(stdout);
 	return;									/* Only happens when main_dcx is destroyed */
+}
+
+/* ===========================================================================
+-- Thread to autoset the intentity so max is between 95 and 100% with
+-- not saturation
+--
+-- Usage: _beginthread(
+=========================================================================== */
+static void AutoExposureThread(void *arglist) {
+
+	static BOOL active=FALSE;
+
+	int i, try;
+	DCX_WND_INFO *dcx;
+	double exposure, gain, last_gain;					/* Exposure time in ms */
+	int LastImage, max_saturate, red_peak, green_peak, blue_peak, peak, oscillate;
+
+	/* Get a pointer to the data structure */
+	dcx = (DCX_WND_INFO*) arglist;
+
+	/* Avoid multiple by just monitoring myself */
+	if (active || ! dcx->LiveVideo || dcx->Image_Mem == NULL) {
+		Beep(300,200);
+		return;
+	}
+	active = TRUE;
+	
+	LastImage = -1;
+	last_gain = 1.0;												/* Starting condition ... can go either way now */
+	oscillate = 0;
+	for (try=0; try<20; try++) {								/* No more than 10 attempts in case of oscillation */
+		for (i=0; i<4; i++) {
+			if (dcx->Image_Count > LastImage+1) break;
+			Sleep(50);
+		}
+		if (dcx->Image_Count <= LastImage+1) continue;		/* If no new image, just skip attempt */
+		
+		/* Get the current exposure time */
+		is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &exposure, sizeof(exposure));		/* Exposure in ms */
+		LastImage = dcx->Image_Count;
+		
+		/* If saturated, drop intensity and try again */
+		max_saturate = dcx->width*dcx->height/1000;															/* Max tolerated as saturated */
+		if (dcx->red_saturate > max_saturate || dcx->green_saturate > max_saturate || dcx->blue_saturate > max_saturate) {
+			gain = 0.8;
+
+		/* Okay, intensity is low, not high ... ignore top max_saturate pixels to get highest intensity */
+		} else {
+			peak = max_saturate - dcx->red_saturate;
+			for (i=255; i>=0,peak>0; i--) peak -= (int) dcx->red_hist->y[i];
+			red_peak = i+1;
+
+			peak = max_saturate - dcx->green_saturate;
+			for (i=255; i>=0,peak>0; i--) peak -= (int) dcx->green_hist->y[i];
+			green_peak = i+1;
+
+			peak = max_saturate - dcx->blue_saturate;
+			for (i=255; i>=0,peak>0; i--) peak -= (int) dcx->blue_hist->y[i];
+			blue_peak = i+1;
+
+			peak = max(red_peak, green_peak); peak = max(peak, blue_peak);
+			if (peak >= 240) break;															/* We are done */
+
+			gain = min(1.25, 250.0/peak);													/* No more than 25% increase each time */
+		}
+
+		/* Watch for oscillations - if multiple reverses, go for average and quit */
+		if ( (gain-1.0)*(last_gain-1.0) < 0) oscillate++;
+		if (oscillate >= 2) gain = (1.0+gain)/2.0;
+
+		/* Reset the gain and maybe break */
+		SendMessage(dcx->main_hdlg, WMP_SET_EXPOSURE, (int) (100*exposure*gain+0.5), 0);
+		if (oscillate >= 2) break;
+
+		Sleep((int) max(30.0, 3*exposure));												/* Give time to be executed */
+		last_gain = gain;
+	}
+
+	active = FALSE;						/* We are done with what we will try */
+	return;
 }
 
 /* ===========================================================================
@@ -1618,6 +1704,10 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case IDC_ENABLE_DCX_ERRORS:
 					dcx->EnableErrorReports = GetDlgItemCheck(hdlg, wID);
 					is_SetErrorReport(0, dcx->EnableErrorReports ? IS_ENABLE_ERR_REP : IS_DISABLE_ERR_REP);
+					rcode = TRUE; break;
+					
+				case IDB_AUTO_EXPOSURE:
+					_beginthread(AutoExposureThread, 0, dcx);
 					rcode = TRUE; break;
 					
 				case IDB_RESET_CURSOR:

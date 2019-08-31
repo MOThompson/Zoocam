@@ -69,6 +69,8 @@
 #define IDC_SHOW_RGB                    2059
 #define IDC_ENABLE_DCX_ERRORS           2060
 #define IDC_FULL_WIDTH_CURSOR           2061
+#define IDC_BUTTON1                     2062
+#define IDB_AUTO_EXPOSURE               2062
 
 // Next default values for new objects
 // 
@@ -76,7 +78,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        137
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2061
+#define _APS_NEXT_CONTROL_VALUE         2063
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif
