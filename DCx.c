@@ -49,6 +49,7 @@
 	#include "uc480.h"
 #undef	_PURE_C
 
+#define	INCLUDE_DCX_DETAIL_INFO							/* Get all of the typedefs and internal details */
 #include "dcx.h"
 
 /* ------------------------------- */
@@ -59,54 +60,17 @@
 #define	nint(x)	(((x)>0) ? ( (int) (x+0.5)) : ( (int) (x-0.5)) )
 
 #define	WMP_SET_FRAMERATE			(WM_APP+2)
-#define	WMP_SET_EXPOSURE			(WM_APP+3)
-#define	WMP_SHOW_FRAMERATE		(WM_APP+4)
-#define	WMP_SHOW_EXPOSURE			(WM_APP+5)
-#define	WMP_SET_GAMMA				(WM_APP+6)
-#define	WMP_SHOW_GAMMA				(WM_APP+7)
-#define	WMP_SHOW_COLOR_CORRECT	(WM_APP+8)
-#define	WMP_SHOW_GAINS				(WM_APP+9)
+#define	WMP_SHOW_FRAMERATE		(WM_APP+3)
+#define	WMP_SHOW_EXPOSURE			(WM_APP+4)
+#define	WMP_SET_GAMMA				(WM_APP+5)
+#define	WMP_SHOW_GAMMA				(WM_APP+6)
+#define	WMP_SHOW_COLOR_CORRECT	(WM_APP+7)
+#define	WMP_SHOW_GAINS				(WM_APP+8)
 
 #define	MIN_FPS		(0.5)
 #define	MAX_FPS		(15)
 
 #define	MAX_EXPOSURE	(2000.0)
-
-typedef struct _DCX_WND_INFO {
-	HWND main_hdlg;							/* Handle to primary dialog box */
-	HANDLE FrameEvent;
-	BOOL RenderImageThreadActive;
-	BOOL LiveVideo;							/* Are we in free-run mode? */
-
-	/* Associated with opening a camera */
-	HCAM hCam;
-	int CameraID;
-	CAMINFO CameraInfo;						/* Details on the camera */
-	SENSORINFO SensorInfo;					/* Details on the sensor */
-	BOOL SensorIsColor;						/* Is the camera a color camera */
-	int NumImageFormats;						/* Number of image formats available */
-	IMAGE_FORMAT_LIST *ImageFormatList;	/* List of formats for the active camera */
-	int ImageFormatID;						/* Currently selected Image Format */
-	BOOL EnableErrorReports;				/* Do we want error reports as message boxes? */
-
-	/* Associated with the selected resolution */
-	int Image_Count;							/* Number of images processed - use to identify new data */
-	IMAGE_FORMAT_INFO *ImageFormatInfo;
-	int height, width;
-	int Image_PID;
-	char *Image_Mem;
-	int Image_Memory_Pitch;
-	double Image_Aspect;
-
-	HWND thumbnail;
-	double x_image_target, y_image_target;
-	BOOL full_width_cursor;
-
-	int red_saturate, green_saturate, blue_saturate;
-	GRAPH_CURVE *red_hist, *green_hist, *blue_hist;
-	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b;
-	GRAPH_CURVE *horz_w, *horz_r, *horz_g, *horz_b;
-} DCX_WND_INFO;
 
 /* ------------------------------- */
 /* My external function prototypes */
@@ -163,7 +127,7 @@ struct {
 	{IDR_EXPOSURE_100US,   0.1,    10.0, "100 us", "1 ms",   "10 ms"},
 	{IDR_EXPOSURE_1MS,     1.0,   100.0, "1 ms",   "10 ms",  "100 ms"},
 	{IDR_EXPOSURE_10MS,   10.0,  1000.0, "10 ms",  "100 ms", "1000 ms"},
-	{IDR_EXPOSURE_100MS, 100.0, 10000.0, "100 ms",  "1 s",   "10 ms"}
+	{IDR_EXPOSURE_100MS, 100.0, 10000.0, "100 ms",  "1 s",   "10 s"}
 };
 #define N_EXPOSURE_LIST	(sizeof(ExposureList)/sizeof(ExposureList[0]))
 
@@ -647,7 +611,7 @@ static void AutoExposureThread(void *arglist) {
 		if (oscillate >= 2) gain = (1.0+gain)/2.0;
 
 		/* Reset the gain and maybe break */
-		SendMessage(dcx->main_hdlg, WMP_SET_EXPOSURE, (int) (100*exposure*gain+0.5), 0);
+		DCx_Set_Exposure(dcx, exposure*gain, TRUE, dcx->main_hdlg);
 		if (oscillate >= 2) break;
 
 		Sleep((int) max(30.0, 3*exposure));												/* Give time to be executed */
@@ -1303,11 +1267,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 	char szBuf[256];
 	int nGamma;
 
-	double fps, rval, exposure;
-	struct {
-		double rmin, rmax, rinc;
-	} exp_range;
-
+	double fps, rval;
 	POINT point;
 	RECT rect;
 
@@ -1565,7 +1525,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 						case IDS_EXPOSURE_TIME:										/* Just send the value of the scroll bar */
 							i = GetRadioButtonIndex(hdlg, IDR_EXPOSURE_100US, IDR_EXPOSURE_100MS);
 							rval = ExposureList[i].exp_min * pow(10.0,ipos/100.0);			/* Scale */
-							SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (100*rval+0.5), 0);
+							DCx_Set_Exposure(dcx, rval, TRUE, hdlg);
 							break;
 						case IDS_GAMMA:
 							SendMessage(hdlg, WMP_SET_GAMMA, ipos, 0);
@@ -1627,27 +1587,6 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
 			rcode = TRUE; break;
 
-		case WMP_SET_EXPOSURE:										/* From IDV_EXPOSURE_TIME and on ENTER of the same */
-			exposure = (double) wParam / 100.0;					/* Passed is time in 10 uS increments */
-			is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE, &exp_range, sizeof(exp_range));
-			is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &rval, sizeof(rval));
-			if (exposure < exp_range.rmin) exposure = exp_range.rmin;
-			if (exposure > MAX_EXPOSURE)   exposure = MAX_EXPOSURE;
-			if (exposure > rval && exposure-rval < exp_range.rinc) exposure = rval+1.01*exp_range.rinc;
-			if (exposure < rval && rval-exposure < exp_range.rinc) exposure = rval-1.01*exp_range.rinc;
-			
-			/* Unfortunately, while framerate will decrease the exposure, exposure will not similarly change frame rate */
-			is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &fps);
-			if (1000.0/fps < exposure+0.1 || fps < MAX_FPS-0.1) {	/* Change framerate to best value for this  */
-				fps = (int) (10*1000.0/exposure) / 10.0;			/* Closest 0.1 value */
-				if (fps > MAX_FPS) fps = MAX_FPS;
-				is_SetFrameRate(dcx->hCam, fps, &fps);			/* Set and query simultaneously */
-				SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);	/* Make sure this is up to date */
-			}
-			is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_SET_EXPOSURE, &exposure, sizeof(exposure));
-			SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
-			rcode = TRUE; break;
-
 		case WMP_SHOW_FRAMERATE:
 			is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &fps);
 			SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPOS, TRUE, (int) (10.0*fps));
@@ -1686,7 +1625,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 							if (*hptr == IDV_FRAME_RATE) {
 								SendMessage(hdlg, WMP_SET_FRAMERATE, (int) (100*GetDlgItemDouble(hdlg, IDV_FRAME_RATE)+0.5), 0);
 							} else if (*hptr == IDV_EXPOSURE_TIME) {
-								SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (100*GetDlgItemDouble(hdlg, IDV_EXPOSURE_TIME)+0.5), 0);
+								DCx_Set_Exposure(dcx, GetDlgItemDouble(hdlg, IDV_EXPOSURE_TIME), TRUE, hdlg);
 							} else if (*hptr == IDV_GAMMA) {
 								SendMessage(hdlg, WMP_SET_GAMMA, (int) (100*GetDlgItemDouble(hdlg, IDV_GAMMA)+0.5), 0);
 							} else {
@@ -1829,9 +1768,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 					
 				case IDV_EXPOSURE_TIME:
-					if (wNotifyCode == EN_KILLFOCUS) {
-						SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (100*GetDlgItemDouble(hdlg, wID)+0.5), 0);
-					}
+					if (wNotifyCode == EN_KILLFOCUS) DCx_Set_Exposure(dcx, GetDlgItemDouble(hdlg, wID), TRUE, hdlg);
 					rcode = TRUE; break;
 
 				case IDV_GAMMA:
@@ -1854,9 +1791,9 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					SetDlgItemText(hdlg, IDT_MAX_EXPOSURE, ExposureList[i].str_max);
 					is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &rval, sizeof(rval));					
 					if (rval < ExposureList[i].exp_min) {
-						SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (100*ExposureList[i].exp_min+0.5), 0);
+						DCx_Set_Exposure(dcx, ExposureList[i].exp_min, TRUE, hdlg);
 					} else if (rval > ExposureList[i].exp_max) {
-						SendMessage(hdlg, WMP_SET_EXPOSURE, (int) (100*ExposureList[i].exp_max+0.5), 0);
+						DCx_Set_Exposure(dcx, ExposureList[i].exp_max, TRUE, hdlg);
 					} else {
 						SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
 					}
@@ -2675,3 +2612,48 @@ int DCx_WriteParameters(char *pre_text, FILE *funit) {
 
 	return rc;
 }
+
+/* ===========================================================================
+-- Routine to set the exposure on the camera (if enabled)
+--
+-- Usage: int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate, HWND hdlg);
+--
+-- Inputs: dcx - pointer to info about the camera
+--         exposure - desired exposure in ms
+--         maximize_framerate - if TRUE, maximize framerate for given exposure
+--         hdlg - if a window, will receive WMP_SHOW_FRAMERATE and WMP_SHOW_EXPOSURE messages
+--
+-- Output: Sets the camera exposure to desired value, and optionally maximizes 
+--         the framerate
+--
+-- Return: 0 if successful
+=========================================================================== */
+int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate, HWND hdlg) {
+
+	struct {
+		double rmin, rmax, rinc;
+	} exp_range;
+	double current, fps;
+
+	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE, &exp_range, sizeof(exp_range));
+	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &current, sizeof(current));
+	if (exposure < exp_range.rmin) exposure = exp_range.rmin;
+	if (exposure > MAX_EXPOSURE)   exposure = MAX_EXPOSURE;
+	if (exposure > current && exposure-current < exp_range.rinc) exposure = current+1.01*exp_range.rinc;
+	if (exposure < current && current-exposure < exp_range.rinc) exposure = current-1.01*exp_range.rinc;
+
+	/* Unfortunately, while framerate will auto decrease exposure, exposure will not auto increase frame rate */
+	if (maximize_framerate) {
+		is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &fps);
+		if (1000.0/fps < exposure+0.1 || fps < MAX_FPS-0.1) {	/* Change framerate to best value for this  */
+			fps = (int) (10*1000.0/exposure) / 10.0;			/* Closest 0.1 value */
+			if (fps > MAX_FPS) fps = MAX_FPS;
+			is_SetFrameRate(dcx->hCam, fps, &fps);			/* Set and query simultaneously */
+			if (hdlg != NULL && IsWindow(hdlg)) SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);	/* Make sure this is up to date */
+		}
+	}
+	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_SET_EXPOSURE, &exposure, sizeof(exposure));
+	if (hdlg != NULL && IsWindow(hdlg)) SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
+
+	return 0;
+}				

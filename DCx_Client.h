@@ -7,7 +7,7 @@
 -- would BREAK EXISTING COMPILATIONS.  Version is checked by the client
 -- open routine, so as long as this changes, don't expect problems.
 =========================================================================== */
-#define	DCX_CLIENT_SERVER_VERSION	(1001)			/* Version of this code */
+#define	DCX_CLIENT_SERVER_VERSION	(1002)			/* Version of this code */
 
 #ifndef	IS_DCX_SERVER
 
@@ -88,6 +88,27 @@ int DCx_Remote_Get_Camera_Info(DCX_STATUS *status);
 --	Routine to acquire an image (local save)
 --
 --	Usage:  int DCx_Remote_Acquire_Image(DCX_IMAGE_INFO *info, char **image);
+--
+--	Inputs: info - pointer to buffer to receive information about image
+--         image - pointer to get malloc'd memory with the image itself
+--                 caller responsible for releasing this memory
+-- 
+--	Output: info and image defined if new image obtained
+--
+-- Return: 0 if successful, other error indication
+--         On error *image will be NULL and *info will be zero
+--
+-- Note: This is really 3 transactions with the server
+--         (1) DCX_ACQUIRE_IMAGE   [captures the image]
+--         (2) DCX_GET_IMAGE_INFO  [transmits information about image]
+--         (3) DCX_GET_IMAGE_DATA  [transmits actual image bytes]
+=========================================================================== */
+int DCx_Remote_Acquire_Image(DCX_IMAGE_INFO *info, char **image);
+
+/* ===========================================================================
+--	Routine to set the camera acquisition time
+--
+--	Usage:  int DCx_Remote_Set_Exposure(double exposure, BOOL maximize_framerate);
 --
 --	Inputs: info - pointer to buffer to receive information about image
 --         image - pointer to get malloc'd memory with the image itself

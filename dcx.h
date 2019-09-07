@@ -119,3 +119,61 @@ int DCx_Status(DCX_STATUS *status);
 --         1 - camera not initialized or funit invalid
 =========================================================================== */
 int DCx_WriteParameters(char *pre_text, FILE *funit);
+
+
+#ifdef INCLUDE_DCX_DETAIL_INFO
+
+typedef struct _DCX_WND_INFO {
+	HWND main_hdlg;							/* Handle to primary dialog box */
+	HANDLE FrameEvent;
+	BOOL RenderImageThreadActive;
+	BOOL LiveVideo;							/* Are we in free-run mode? */
+
+	/* Associated with opening a camera */
+	HCAM hCam;
+	int CameraID;
+	CAMINFO CameraInfo;						/* Details on the camera */
+	SENSORINFO SensorInfo;					/* Details on the sensor */
+	BOOL SensorIsColor;						/* Is the camera a color camera */
+	int NumImageFormats;						/* Number of image formats available */
+	IMAGE_FORMAT_LIST *ImageFormatList;	/* List of formats for the active camera */
+	int ImageFormatID;						/* Currently selected Image Format */
+	BOOL EnableErrorReports;				/* Do we want error reports as message boxes? */
+
+	/* Associated with the selected resolution */
+	int Image_Count;							/* Number of images processed - use to identify new data */
+	IMAGE_FORMAT_INFO *ImageFormatInfo;
+	int height, width;
+	int Image_PID;
+	char *Image_Mem;
+	int Image_Memory_Pitch;
+	double Image_Aspect;
+
+	HWND thumbnail;
+	double x_image_target, y_image_target;
+	BOOL full_width_cursor;
+
+	int red_saturate, green_saturate, blue_saturate;
+	GRAPH_CURVE *red_hist, *green_hist, *blue_hist;
+	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b;
+	GRAPH_CURVE *horz_w, *horz_r, *horz_g, *horz_b;
+} DCX_WND_INFO;
+
+/* ===========================================================================
+-- Routine to set the exposure on the camera (if enabled)
+--
+-- Usage: int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate, HWND hdlg);
+--
+-- Inputs: dcx - pointer to info about the camera
+--         exposure - desired exposure in ms
+--         maximize_framerate - if TRUE, maximize framerate for given exposure
+--         hdlg - if a window, will receive WMP_SHOW_FRAMERATE and WMP_SHOW_EXPOSURE messages
+--
+-- Output: Sets the camera exposure to desired value, and optionally maximizes 
+--         the framerate
+--
+-- Return: 0 if successful
+=========================================================================== */
+int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate, HWND hdlg);
+
+#endif			/* INCLUDE_DCX_DETAIL_INFO */
