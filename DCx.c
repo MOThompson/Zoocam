@@ -66,11 +66,10 @@
 #define	WMP_SHOW_GAMMA				(WM_APP+6)
 #define	WMP_SHOW_COLOR_CORRECT	(WM_APP+7)
 #define	WMP_SHOW_GAINS				(WM_APP+8)
+#define	WMP_SHOW_CURSOR_POSN		(WM_APP+9)
 
 #define	MIN_FPS		(0.5)
 #define	MAX_FPS		(15)
-
-#define	MAX_EXPOSURE	(2000.0)
 
 /* ------------------------------- */
 /* My external function prototypes */
@@ -260,7 +259,8 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 			GetClientRect(hwnd, &Client);
 			main_dcx->x_image_target = (1.0*point.x) / Client.right;
 			main_dcx->y_image_target = (1.0*point.y) / Client.bottom;
-			break;
+			SendMessage(main_dcx->main_hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
+			rc = TRUE; break;
 
 		case WM_LBUTTONDBLCLK:								/* Magnify at this location */
 		case WM_MBUTTONDOWN:
@@ -553,12 +553,17 @@ static void AutoExposureThread(void *arglist) {
 	static BOOL active=FALSE;
 
 	int i, try;
+	char msg[20];
 	DCX_WND_INFO *dcx;
-	double exposure, gain, last_gain;					/* Exposure time in ms */
-	int LastImage, max_saturate, red_peak, green_peak, blue_peak, peak, oscillate;
+	HWND hdlg;
+	double exposure, last_exposure;					/* Exposure time in ms */
+	double upper_bound, lower_bound, min_increment;
+	int LastImage, max_saturate, red_peak, green_peak, blue_peak, peak;
 
 	/* Get a pointer to the data structure */
 	dcx = (DCX_WND_INFO*) arglist;
+	hdlg = dcx->main_hdlg;
+	if (hdlg != NULL && ! IsWindow(hdlg)) hdlg = NULL;		/* Mark hdlg if not window */
 
 	/* Avoid multiple by just monitoring myself */
 	if (active || ! dcx->LiveVideo || dcx->Image_Mem == NULL) {
@@ -566,28 +571,42 @@ static void AutoExposureThread(void *arglist) {
 		return;
 	}
 	active = TRUE;
-	
-	LastImage = -1;
-	last_gain = 1.0;												/* Starting condition ... can go either way now */
-	oscillate = 0;
-	for (try=0; try<20; try++) {								/* No more than 10 attempts in case of oscillation */
-		for (i=0; i<4; i++) {
-			if (dcx->Image_Count > LastImage+1) break;
-			Sleep(50);
-		}
-		if (dcx->Image_Count <= LastImage+1) continue;		/* If no new image, just skip attempt */
-		
-		/* Get the current exposure time */
-		is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &exposure, sizeof(exposure));		/* Exposure in ms */
+	if (hdlg != NULL) {
+		EnableDlgItem(hdlg, IDB_AUTO_EXPOSURE, FALSE);
+		SetDlgItemText(hdlg, IDB_AUTO_EXPOSURE, "iter 0");
+	}
+
+/* -------------------------------------------------------------------------------
+-- Get camera information on range of exposure allowed
+-- Note that is_Exposure(IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE) is limited by current
+-- framerate while is_GetFrameTimeRange() is not.  But deal with bug in the return 
+-- values from is_GetFrameTimeRange()
+--------------------------------------------------------------------------- */
+	is_GetFrameTimeRange(dcx->hCam, &lower_bound, &upper_bound, &min_increment);
+//	lower_bound   *= 1000;											/* Go from seconds to ms (but looks to already in ms so ignore) */
+	upper_bound   *= 1000;											/* Go from seconds to ms */
+	min_increment *= 1000;											/* Go from seconds to ms */
+
+	/* Set maximum number of saturated pixels to tolerate */
+	max_saturate = dcx->width*dcx->height/1000;															/* Max tolerated as saturated */
+
+	/* Do binary search ... 1024 => 0.1% which is close enough */
+	for (try=0; try<10; try++) {
+
+		/* Get current exposure time (ms) and image info */
+		is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &exposure, sizeof(exposure));
+		last_exposure = exposure;									/* Hold so know change at end */
 		LastImage = dcx->Image_Count;
-		
-		/* If saturated, drop intensity and try again */
-		max_saturate = dcx->width*dcx->height/1000;															/* Max tolerated as saturated */
+
+		/* If saturated, new upper_bound and use mid-point of lower/upper next time */
 		if (dcx->red_saturate > max_saturate || dcx->green_saturate > max_saturate || dcx->blue_saturate > max_saturate) {
-			gain = 0.8;
+			upper_bound = exposure;
+			exposure = (upper_bound + lower_bound) / 2.0;
 
 		/* Okay, intensity is low, not high ... ignore top max_saturate pixels to get highest intensity */
 		} else {
+			lower_bound = exposure;
+
 			peak = max_saturate - dcx->red_saturate;
 			for (i=255; i>=0,peak>0; i--) peak -= (int) dcx->red_hist->y[i];
 			red_peak = i+1;
@@ -601,24 +620,35 @@ static void AutoExposureThread(void *arglist) {
 			blue_peak = i+1;
 
 			peak = max(red_peak, green_peak); peak = max(peak, blue_peak);
-			if (peak >= 240) break;															/* We are done */
+			if (peak >= 245) break;															/* We are done */
 
-			gain = min(1.25, 250.0/peak);													/* No more than 25% increase each time */
+			exposure *= 250.0/peak;															/* New estimated exposure */
+			if (exposure > upper_bound) exposure = (upper_bound + lower_bound) / 2.0;
+
 		}
+		if (fabs(exposure - last_exposure) < min_increment) break;				/* Not enough change to be done */
 
-		/* Watch for oscillations - if multiple reverses, go for average and quit */
-		if ( (gain-1.0)*(last_gain-1.0) < 0) oscillate++;
-		if (oscillate >= 2) gain = (1.0+gain)/2.0;
+		/* Reset the gain now and collect a few images to stabilize */
+		DCx_Set_Exposure(dcx, exposure, TRUE, dcx->main_hdlg);
 
-		/* Reset the gain and maybe break */
-		DCx_Set_Exposure(dcx, exposure*gain, TRUE, dcx->main_hdlg);
-		if (oscillate >= 2) break;
-
-		Sleep((int) max(30.0, 3*exposure));												/* Give time to be executed */
-		last_gain = gain;
+		/* Wait for at least the 3th new exposure to stabilize image */
+		if (hdlg != NULL) {
+			sprintf_s(msg, sizeof(msg), "iter %d", try+1);
+			SetDlgItemText(hdlg, IDB_AUTO_EXPOSURE, msg);
+		}
+		for (i=0; i<10; i++) {
+			if (dcx->Image_Count > LastImage+2) break;
+			Sleep(max(nint(exposure/2), 30));
+		}
+		if (dcx->Image_Count <= LastImage+2) break;									/* No new image - abort */
 	}
 
 	active = FALSE;						/* We are done with what we will try */
+	if (hdlg != NULL) {
+		SetDlgItemText(hdlg, IDB_AUTO_EXPOSURE, "Auto");
+		EnableDlgItem(hdlg, IDB_AUTO_EXPOSURE, TRUE);
+	}
+
 	return;
 }
 
@@ -1391,6 +1421,9 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				dcx->RenderImageThreadActive = TRUE;
 			}
 
+			/* Update the cursor position to initial value (probably 0) */
+			SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
+
 			SetTimer(hdlg, TIMER_FRAME_RATE_UPDATE, 1000, NULL);									/* Redraw at roughtly 1 Hz rate */
 
 			rcode = TRUE; break;
@@ -1442,7 +1475,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				dcx->x_image_target = (1.0*point.x-rect.left) / (rect.right-rect.left);
 				dcx->y_image_target = (1.0*point.y-rect.top)  / (rect.bottom-rect.top);
 			}
-			fflush(stdout);
+			SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
 			break;
 
 		case WM_LBUTTONDBLCLK:								/* Magnify at this location */
@@ -1534,6 +1567,11 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				}
 			}
 			rcode = TRUE; break;
+
+		case WMP_SHOW_CURSOR_POSN:
+			SetDlgItemInt(hdlg, IDT_CURSOR_X_PIXEL, nint((dcx->x_image_target-0.5)*dcx->width),  TRUE);
+			SetDlgItemInt(hdlg, IDT_CURSOR_Y_PIXEL, nint((0.5-dcx->y_image_target)*dcx->height), TRUE);	/* Remember Y is top down */
+			rc = TRUE; break;
 
 		case WMP_SET_GAMMA:
 			nGamma = (int) wParam;
@@ -1651,6 +1689,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					
 				case IDB_RESET_CURSOR:
 					dcx->x_image_target = dcx->y_image_target = 0.5;
+					SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
 					rcode = TRUE; break;
 					
 				case IDC_SHOW_INTENSITY:
@@ -1705,6 +1744,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 								dcx->LiveVideo = TRUE;
 								SetDlgItemCheck(hdlg, IDB_LIVE, TRUE);
 								EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
+								SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
 							}
 						}
 					}
@@ -1718,6 +1758,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 							dcx->LiveVideo = TRUE;
 							SetDlgItemCheck(hdlg, IDB_LIVE, TRUE);
 							EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
+							SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
 						}
 					}
 					rcode = TRUE; break;
@@ -1854,6 +1895,8 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case IDT_GREEN_SATURATE:
 				case IDT_BLUE_SATURATE:
 				case IDT_FRAMERATE:
+				case IDT_CURSOR_X_PIXEL:
+				case IDT_CURSOR_Y_PIXEL:
 					break;
 
 				default:
@@ -2618,7 +2661,7 @@ int DCx_WriteParameters(char *pre_text, FILE *funit) {
 --
 -- Usage: int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate, HWND hdlg);
 --
--- Inputs: dcx - pointer to info about the camera
+-- Inputs: dcx - pointer to info about the camera or NULL to use default
 --         exposure - desired exposure in ms
 --         maximize_framerate - if TRUE, maximize framerate for given exposure
 --         hdlg - if a window, will receive WMP_SHOW_FRAMERATE and WMP_SHOW_EXPOSURE messages
@@ -2627,6 +2670,9 @@ int DCx_WriteParameters(char *pre_text, FILE *funit) {
 --         the framerate
 --
 -- Return: 0 if successful
+--
+-- Notes: If dcx is unknown (and hdlg), can set dcx to NULL to use static
+--        value.  This is used by the client/server code to simplify life.
 =========================================================================== */
 int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate, HWND hdlg) {
 
@@ -2635,10 +2681,26 @@ int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate
 	} exp_range;
 	double current, fps;
 
-	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE, &exp_range, sizeof(exp_range));
+	/* If dcx is NULL, then use defaults for dcx and main dialog as hdlg (unless !NULL) */
+	if (dcx == NULL) {
+		dcx = main_dcx;
+		if (hdlg == NULL) hdlg = dcx->main_hdlg;
+	}
+
+/* -------------------------------------------------------------------------------
+-- Get the exposure allowed range and the current exposure value
+-- Note that is_Exposure(IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE) is limited by current
+-- framerate while is_GetFrameTimeRange() is not.  But deal with bug in the return 
+-- values from is_GetFrameTimeRange()
+--------------------------------------------------------------------------- */
+//	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE, &exp_range, sizeof(exp_range));
+	is_GetFrameTimeRange(dcx->hCam, &exp_range.rmin, &exp_range.rmax, &exp_range.rinc);
+//	exp_range.rmin *= 1000;											/* Go from seconds to ms (but looks to already in ms so ignore) */
+	exp_range.rmax *= 1000;											/* Go from seconds to ms */
+	exp_range.rinc *= 1000;											/* Go from seconds to ms */
 	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &current, sizeof(current));
 	if (exposure < exp_range.rmin) exposure = exp_range.rmin;
-	if (exposure > MAX_EXPOSURE)   exposure = MAX_EXPOSURE;
+	if (exposure > exp_range.rmax) exposure = exp_range.rmax;
 	if (exposure > current && exposure-current < exp_range.rinc) exposure = current+1.01*exp_range.rinc;
 	if (exposure < current && current-exposure < exp_range.rinc) exposure = current-1.01*exp_range.rinc;
 
@@ -2654,6 +2716,40 @@ int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate
 	}
 	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_SET_EXPOSURE, &exposure, sizeof(exposure));
 	if (hdlg != NULL && IsWindow(hdlg)) SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
+
+	return 0;
+}				
+
+/* ===========================================================================
+-- Routine to set the gains on the camera (if enabled)
+--
+-- Usage: int DCx_Set_Gains(DCX_WND_INFO *dcx, int master, int red, int green, int blue, HWND hdlg);
+--
+-- Inputs: dcx - pointer to info about the camera or NULL to use default
+--         master - value in range [0,100] for hardware gain of the channel
+--         red   - value in range [0,100] for hardware gain of the red channel
+--         green - value in range [0,100] for hardware gain of the green channel
+--         blue  - value in range [0,100] for hardware gain of the blue channel
+--         hdlg - if a window, will receive WMP_SHOW_GAINS message
+--
+-- Output: Sets the hardware gain values to desired value
+--
+-- Return: 0 if successful
+--
+-- Notes: If dcx is unknown (and hdlg), can set dcx to NULL to use static
+--        value.  This is used by the client/server code to simplify life.
+=========================================================================== */
+int DCx_Set_Gains(DCX_WND_INFO *dcx, int master, int red, int green, int blue, HWND hdlg) {
+
+	/* If dcx is NULL, then use defaults for dcx and main dialog as hdlg (unless !NULL) */
+	if (dcx == NULL) {
+		dcx = main_dcx;
+		if (hdlg == NULL) hdlg = dcx->main_hdlg;
+	}
+
+	/* Set the gains immediately */
+	is_SetHardwareGain(dcx->hCam, master, red, green, blue);
+	if (hdlg != NULL && IsWindow(hdlg)) SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
 
 	return 0;
 }				
