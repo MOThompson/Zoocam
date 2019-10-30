@@ -51,6 +51,7 @@
 
 #define	INCLUDE_DCX_DETAIL_INFO							/* Get all of the typedefs and internal details */
 #include "dcx.h"
+#include "dcx_server.h"
 
 /* ------------------------------- */
 /* My local typedef's and defines  */
@@ -1426,6 +1427,9 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 			SetTimer(hdlg, TIMER_FRAME_RATE_UPDATE, 1000, NULL);									/* Redraw at roughtly 1 Hz rate */
 
+			/* Initialize the DCx TCP server for remote image requests */
+			Init_DCx_Server();
+
 			rcode = TRUE; break;
 
 		case WM_CLOSE:
@@ -1951,6 +1955,7 @@ BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPara
 				SetDlgItemText(hdlg, IDT_CAMERA_IMAGE_SIZE, szTmp);
 				SetDlgItemInt(hdlg, IDT_CAMERA_PIXEL_PITCH, SensorInfo.wPixelSize, FALSE);
 			}
+
 			rcode = TRUE; break;
 
 		case WM_CLOSE:
@@ -1993,8 +1998,6 @@ BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPara
 =========================================================================== */
 #ifdef	STANDALONE
 
-#include "DCx_Server.h"
-
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
 
 	/* If not done, make sure we are loaded.  Assume safe to call multiply */
@@ -2005,9 +2008,6 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 	Graph_StartUp(hThisInstance);					/* Initialize the graphics control */
 
 //	_beginthread(test_thread, 0, NULL);
-
-/* Initialize the DCx TCP server for remote image requests */
-	Init_DCx_Server();
 
 	/* And show the dialog box */
 	hInstance = hThisInstance;

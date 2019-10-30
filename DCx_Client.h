@@ -9,13 +9,21 @@
 =========================================================================== */
 #define	DCX_CLIENT_SERVER_VERSION	(1002)			/* Version of this code */
 
-#ifndef	IS_DCX_SERVER
-
-typedef int BOOL;
+/* =============================
+-- Port that the server runs
+============================= */
+#define	DCX_ACCESS_PORT		(985)					/* Port for client/server connections */
 
 #define	DFLT_SERVER_IP_ADDRESS	"128.253.129.93"		/* "127.0.0.1" for loop-back */
 #define	LOOPBACK_SERVER_IP_ADDRESS	"127.0.0.1"			/* Server on this computer */
 
+/* List of the allowed requests */
+#define SERVER_END				(0)		/* Shut down server (please don't use) */
+#define DCX_QUERY_VERSION		(1)		/* Return version of the server code */
+#define DCX_GET_CAMERA_INFO	(2)		/* Return structure with camera data */
+#define DCX_ACQUIRE_IMAGE		(3)		/* Acquire image only (local storage) */
+#define DCX_GET_IMAGE_INFO		(4)		/* Return info on the image */
+#define DCX_GET_IMAGE_DATA		(5)		/* Transfer the actual image data */
 
 /* ===========================================================================
 -- Routine to open and initialize the socket to the DCx server
@@ -125,7 +133,5 @@ int DCx_Remote_Acquire_Image(DCX_IMAGE_INFO *info, char **image);
 --         (3) DCX_GET_IMAGE_DATA  [transmits actual image bytes]
 =========================================================================== */
 int DCx_Remote_Acquire_Image(DCX_IMAGE_INFO *info, char **image);
-
-#endif		/*	IS_DCx_SERVER */
 
 #endif		/* _DCx_CLIENT_INCLUDED */

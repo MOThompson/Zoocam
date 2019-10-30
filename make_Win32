@@ -7,7 +7,7 @@ RFLAGS = /nologo
 DCx_LIB = \code\lab\DCx\Lib\uc480.lib 
 SYSLIBS = wsock32.lib user32.lib gdi32.lib comdlg32.lib comctl32.lib advapi32.lib vfw32.lib shell32.lib
 
-ALL: client.exe DCxLive.exe dcx.c.1
+ALL: client.exe server.exe DCxLive.exe dcx.c.1
 
 INSTALL: z:\lab\exes\DCxLive.exe
 
@@ -21,8 +21,11 @@ dcx.c.1 : dcx.c
 CLEAN: 
 	rm *.exe *.obj *.res
 
-client.exe : DCx_client_server.c DCx_client.h 
-	cl -Feclient.exe -DLOCAL_CLIENT_TEST $(CFLAGS) DCx_client_server.c $(SYSLIBS)
+client.exe : DCx_client.c DCx_client.h server_support.obj server_support.h
+	cl -Feclient.exe -DLOCAL_CLIENT_TEST $(CFLAGS) DCx_client.c server_support.obj $(SYSLIBS)
+
+server.exe : server_test.c DCx_server.obj server_support.obj server_support.h DCx_server.h DCx_client.h 
+	cl -Feserver.exe $(CFLAGS) server_test.c DCx_server.obj server_support.obj $(SYSLIBS)
 
 DCx.obj : DCx.c uc480.h resource.h win32ex.h graph.h
 	cl -c -DSTANDALONE $(CFLAGS) DCx.c
@@ -33,11 +36,8 @@ win32ex.obj : win32ex.c win32ex.h
 graph.obj : graph.c graph.h
 	cl -c $(CFLAGS) graph.c
 
-server.obj : DCx_client_server.c DCx_client.h DCx.h
-	cl -c -Foserver.obj -DIS_DCX_SERVER $(CFLAGS) DCx_client_server.c
-
-DCxLive.exe : DCx.obj server.obj DCx.res win32ex.obj graph.obj
-	cl $(CFLAGS) -FeDCxLive.exe DCx.obj server.obj win32ex.obj graph.obj DCx.res $(DCx_LIB) $(SYSLIBS)
+DCxLive.exe : DCx.obj DCx_server.obj DCx.res win32ex.obj graph.obj server_support.obj
+	cl $(CFLAGS) -FeDCxLive.exe DCx.obj DCx_server.obj win32ex.obj graph.obj server_support.obj DCx.res $(DCx_LIB) $(SYSLIBS)
 
 DCx.res : DCx.rc resource.h
 	rc $(RFLAGS) DCx.rc
@@ -59,6 +59,12 @@ win32ex.h : \code\Window_Classes\win32ex\win32ex.h
 	copy $** $@
 
 win32ex.c : \code\Window_Classes\win32ex\win32ex.c
+	copy $** $@
+
+server_support.c : \code\lab\Server_Support\server_support.c
+	copy $** $@
+
+server_support.h : \code\lab\Server_Support\server_support.h
 	copy $** $@
 
 win32ex.obj : win32ex.h
