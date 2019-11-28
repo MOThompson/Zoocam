@@ -97,7 +97,11 @@
 		int rgb;
 		int isize;												/* If 0, use default.  If !0, draws square +-n pixels */
 		BOOL master;											/* If TRUE, will be used to define graph xmin/xmax and axes */
+		int flags;												/* Set various flags (see below) */
 	} GRAPH_CURVE;
+#define	CURVE_FLAG_POINTS					(0x01)		/* Do only points (also default if flags == 0) */
+#define	CURVE_FLAG_LINES					(0x02)		/* Do solid connected lines rather than points */
+#define	CURVE_FLAG_LINES_AND_POINTS	(0x03)		/* Do solid connected lines and points */
 	
 	typedef struct _GRAPH_MESH {
 		int ID;													/* ID (can be used to selectively delete	*/

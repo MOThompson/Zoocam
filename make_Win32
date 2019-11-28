@@ -36,6 +36,9 @@ win32ex.obj : win32ex.c win32ex.h
 graph.obj : graph.c graph.h
 	cl -c $(CFLAGS) graph.c
 
+server_support.obj : server_support.c server_support.h
+	cl -c $(CFLAGS) server_support.c
+
 DCxLive.exe : DCx.obj DCx_server.obj DCx.res win32ex.obj graph.obj server_support.obj
 	cl $(CFLAGS) -FeDCxLive.exe DCx.obj DCx_server.obj win32ex.obj graph.obj server_support.obj DCx.res $(DCx_LIB) $(SYSLIBS)
 

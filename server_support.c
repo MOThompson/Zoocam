@@ -41,6 +41,7 @@
 /* ------------------------------- */
 /* My internal function prototypes */
 /* ------------------------------- */
+static uint32_t CRC32(void *buffer, int count);
 
 /* ------------------------------- */
 /* My usage of other external fncs */
@@ -126,7 +127,7 @@ int RunServer(char *pname, unsigned short port, void (*ClientHandler)(void *), v
 
 /* Copy over the name since we will be here a while and don't want it changed out from under us */
 	strcpy_s(name, sizeof(name), pname);
-	
+
 /* Make sure we can inititiate and have sockets available */
 	if (InitSockets() != 0) return 3;
 
@@ -386,8 +387,10 @@ int GetSocketMsg(SOCKET socket, CS_MSG *request, void **pdata) {
 	}
 	request->msg      = ntohl(request->msg);
 	request->msgid    = ntohl(request->msgid);
+	request->option   = ntohl(request->option);
 	request->rc       = ntohl(request->rc);
 	request->data_len = ntohl(request->data_len);
+	request->crc32    = ntohl(request->crc32);
 
 	/* If we are to get additional data, grab it now */
 	if (request->data_len > 0) {
@@ -404,6 +407,15 @@ int GetSocketMsg(SOCKET socket, CS_MSG *request, void **pdata) {
 			fprintf(stderr, "ERROR[%s]: Expected %d bytes but only got %d\n", request->data_len, icnt); fflush(stderr);
 		}
 
+		/* If crc32 is set, verify or output an error */
+		if (request->crc32 != 0) {
+			uint32_t crc;
+			crc = CRC32(data, request->data_len);
+			if (crc != request->crc32) {
+				fprintf(stderr, "ERROR[%s]: CRC32 mistmatch (0x%8.8x versus 0x%8.8x)\n", crc, request->crc32); fflush(stderr);
+			}
+		}
+		
 		/* Either return or dump the data */
 		if (pdata != NULL) {
 			*pdata = data;
@@ -444,12 +456,15 @@ int SendSocketMsg(SOCKET socket, CS_MSG reply, void *data) {
 	/* Validate request and save length of data to send */
 	if (data == NULL) reply.data_len = 0;			/* Can't send data if no pointer provided */
 	isend = reply.data_len;								/* Amount of data to send */
+	if (isend > 0) reply.crc32 = CRC32(data, isend);
 
 	/* Network encode the return values and send the message back */
-	reply.msg      = ntohl(reply.msg);
-	reply.msgid    = ntohl(reply.msgid);
+	reply.msg      = htonl(reply.msg);
+	reply.msgid    = htonl(reply.msgid);
+	reply.option   = htonl(reply.option);
 	reply.rc       = htonl(reply.rc);
 	reply.data_len = htonl(reply.data_len);
+	reply.crc32    = htonl(reply.crc32);
 	icnt = send(socket, (char *) &reply, sizeof(reply), 0);
 
 	/* If there is any additional data to send, do so now */
@@ -636,4 +651,83 @@ void htond_me(double *val) {
 	}
 
 	return;
+}
+
+
+/* ===========================================================================
+-- Routine to reflect a bit pattern (0->7, 1->6, etc.)
+--
+-- Usage: int32_t reflect(uint32_t crc, int isize);
+--
+-- Inputs: crc   - value to be reflected
+--         isize - number of bits for the reflection (8 or 32 usually)
+--
+-- Output: none
+--
+-- Return: reflected bit pattern
+--
+-- Note: Required by the CRC32 standard
+=========================================================================== */
+static uint32_t reflect(uint32_t crc, int isize) {
+	int i;
+	uint32_t new;
+
+	new = 0;									/* Empty return value */
+	for (i=0; i<isize; i++) if (crc & (0x01<<i)) new |= ( 0x01 << (isize-i-1) );
+	return new;
+}
+
+/* ===========================================================================
+-- Routine to calculate the CRC32 checksum of a buffer
+--
+-- Usage: uint32_t CRC32(void *buffer, int count);
+--
+-- Inputs: buffer - pointer to a buffer to be read
+--         count  - number of bytes in the bufer
+--
+-- Output: none
+--
+-- Return: CRC32 checksum of the buffer
+--
+-- Note: This returns the "CRC-32" standard checksum
+--         (1) polynomial    0x04C11DB7
+--         (2) initial value 0xFFFFFFFF
+--         (3) reflection of input value
+--         (4) reflection of output value
+--
+-- Values can be verified with string based buffers at crccalc.com
+--
+-- CRC32 generator ... based partly on algorithm published on-line by NetworkDLS 2010
+--   https://github.com/NTDLS/NSWFL/blob/master/NSWFL_CRC32.Cpp
+--   https://github.com/NTDLS/NSWFL/blob/master/NSWFL_CRC32.H
+=========================================================================== */
+#define POLYNOMIAL (0x04C11DB7)
+
+static uint32_t CRC32(void *buffer, int count) {
+
+	static uint32_t *table = NULL;
+	int i,j;
+	uint32_t crc;
+	unsigned char *data;
+
+	/* On first call, initialize the lookup table with reflection (per standard) */
+	if (table == NULL) {
+		table = calloc(256, sizeof(*table));
+		for (i=0; i<256; i++) {
+			crc = reflect(i,8) << 24;
+			for (j=0; j<8; j++) {
+				crc = (crc << 1) ^ ((crc & 0x80000000) ? POLYNOMIAL : 0);
+			}
+			table[i] = reflect(crc, 32);
+		}
+	}
+
+	/* Just go through the data */
+	crc = 0xffffffff;								/* Initial value */
+	data = (unsigned char *) buffer;
+	for (i=0; i<count; i++) {
+		crc = (crc >> 8) ^ table[(crc & 0xff) ^ data[i]];
+	}
+	crc ^= 0xffffffff;							/* Finalize */
+	return crc;
 }

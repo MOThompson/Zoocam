@@ -1,3 +1,6 @@
+#ifndef _SERVER_SUPPORT_H_LOADED
+#define _SERVER_SUPPORT_H_LOADED
+
 /* Make sure we have enough #includes to run */
 #include <stdint.h>             /* C99 extension to get known width integers */
 #include <signal.h>
@@ -47,10 +50,12 @@
 /* Standardized message to the server/client, expecting standardized response */
 #pragma pack(4)
 typedef struct _CS_MSG {
-	uint32_t msg;
-	uint32_t msgid;
-	uint32_t rc;
-	uint32_t data_len;
+	uint32_t msg;							/* Command message (see message #defines) */
+	int32_t msgid;							/* user ID for potential queued operations */ 
+	int32_t option;						/* single parameter for enhancing some msgs */ 
+	int32_t rc;								/* return code from message (0 generally ok) */
+	uint32_t data_len;					/* length (bytes) of extra data transmitted with message */
+	uint32_t crc32;						/* CRC32 checksum of transmitted data (if any) */
 } CS_MSG;
 #pragma pack()
 
@@ -98,3 +103,5 @@ int CloseServerConnection(CLIENT_DATA_BLOCK *block);
 
 void htond_me(double *val);							/* Handle doubles across network (my code) */
 void ntohd_me(double *val);							/* network to host for double */
+
+#endif			/* #ifndef _SERVER_SUPPORT_H_LOADED */

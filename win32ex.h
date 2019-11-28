@@ -1,3 +1,6 @@
+#ifndef _WIN32EX_H_LOADED
+#define _WIN32EX_H_LOADED
+
 /******************************************************************************
 	win32ex.h - API for add-ons to standard win32 API
 ******************************************************************************/
@@ -224,3 +227,5 @@ void AbortOnFatalError( char *rname, char *msg );
 
 double UpNice(double dx);
 double DownNice(double dx);
+
+#endif		/* #ifndef _WIN32EX_H_LOADED */

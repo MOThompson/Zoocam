@@ -1,4 +1,4 @@
-/* -- DCx_server.c */
+/* DCx_server.c */
 
 /* ------------------------------ */
 /* Feature test macros            */
@@ -68,7 +68,6 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block);
 --            1 ==> Unable to create mutex
 --            2 ==> Unable to spawn the server thread
 =========================================================================== */
-static uintptr_t DCx_Msg_Server_Thread = -1;		/* -1 means not actually running */
 static BOOL DCx_Msg_Server_Up = FALSE;				/* Server has been started */
 static HANDLE DCx_Server_Mutex = NULL;				/* access to the client/server communication */
 

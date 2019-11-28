@@ -693,59 +693,84 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				open = SelectObject(hdc, hpen);
 				hbrush = CreateSolidBrush(ipen);
 
-				/* if < 200 points, make each a 3x3 square, otherwise small */
-				for (i=0; i<cv->npt; i++) {
-					xtmp = cv->x[i];	ytmp = cv->y[i];
-					if (xtmp == 0 && graph->mode == GR_LOGLOG) xtmp = 1E-12;
-					if (ytmp == 0 && graph->mode != GR_LINEAR) ytmp = 1E-12;
-					xtmp = (graph->mode != GR_LOGLOG) ? xtmp : log(fabs(xtmp));
-					ytmp = (graph->mode == GR_LINEAR) ? ytmp : log(fabs(ytmp));
-					if (OutOfRange(xtmp, ytmp, xmin, xmax, ymin, ymax)) continue;
-					ix = get_ix(xtmp, xmin,xmax, ixmax);
-					iy = get_iy(ytmp, ymin,ymax, iymax);
-					if (cv->isize > 0) {							/* Specified size */
-						myrect.left = ix-cv->isize+1; myrect.right  = ix+cv->isize;
-						myrect.top  = iy-cv->isize+1; myrect.bottom = iy+cv->isize;
-					} else if (cv->npt < 200) {
-						myrect.left = ix-1; myrect.right  = ix+2;
-						myrect.top  = iy-1; myrect.bottom = iy+2;
-					} else {
-						myrect.left = ix; myrect.right  = ix+1;
-						myrect.top  = iy; myrect.bottom = iy+1;
+				/* Need the connecting lines? */
+				if (cv->flags & CURVE_FLAG_LINES) {
+					BOOL penup = TRUE;
+					for (i=0; i<cv->npt; i++) {
+						xtmp = cv->x[i];	ytmp = cv->y[i];
+						if (xtmp == 0 && graph->mode == GR_LOGLOG) xtmp = 1E-12;
+						if (ytmp == 0 && graph->mode != GR_LINEAR) ytmp = 1E-12;
+						xtmp = (graph->mode != GR_LOGLOG) ? xtmp : log(fabs(xtmp));
+						ytmp = (graph->mode == GR_LINEAR) ? ytmp : log(fabs(ytmp));
+						if (OutOfRange(xtmp, ytmp, xmin, xmax, ymin, ymax)) {
+							penup = TRUE;
+							continue;
+						}
+						ix = get_ix(xtmp, xmin,xmax, ixmax);
+						iy = get_iy(ytmp, ymin,ymax, iymax);
+						if (penup) {
+							MoveToEx(hdc, ix, iy, (LPPOINT) NULL);
+							penup = FALSE;
+						} else {
+							LineTo(hdc, ix, iy);
+						}
 					}
-					if (cv->pt_rgb != NULL) {
-						if (cv->pt_rgb[i] != 0) {
-							HPEN open;
-							HBRUSH hbrush;
-
-							ipen = cv->pt_rgb[i];
-							hpen = CreatePen(PS_SOLID, 1, ipen);
-							open = SelectObject(hdc, hpen);
-							hbrush = CreateSolidBrush(ipen);
-							FillRect(hdc, &myrect, hbrush);
-							SelectObject(hdc,open);
-							DeleteObject(hpen);
-							DeleteObject(hbrush);
+				} 
+				if (cv->flags == 0 || cv->flags & CURVE_FLAG_POINTS) {
+					/* if < 200 points, make each a 3x3 square, otherwise small */
+					for (i=0; i<cv->npt; i++) {
+						xtmp = cv->x[i];	ytmp = cv->y[i];
+						if (xtmp == 0 && graph->mode == GR_LOGLOG) xtmp = 1E-12;
+						if (ytmp == 0 && graph->mode != GR_LINEAR) ytmp = 1E-12;
+						xtmp = (graph->mode != GR_LOGLOG) ? xtmp : log(fabs(xtmp));
+						ytmp = (graph->mode == GR_LINEAR) ? ytmp : log(fabs(ytmp));
+						if (OutOfRange(xtmp, ytmp, xmin, xmax, ymin, ymax)) continue;
+						ix = get_ix(xtmp, xmin,xmax, ixmax);
+						iy = get_iy(ytmp, ymin,ymax, iymax);
+						if (cv->isize > 0) {							/* Specified size */
+							myrect.left = ix-cv->isize+1; myrect.right  = ix+cv->isize;
+							myrect.top  = iy-cv->isize+1; myrect.bottom = iy+cv->isize;
+						} else if (cv->npt < 200) {
+							myrect.left = ix-1; myrect.right  = ix+2;
+							myrect.top  = iy-1; myrect.bottom = iy+2;
+						} else {
+							myrect.left = ix; myrect.right  = ix+1;
+							myrect.top  = iy; myrect.bottom = iy+1;
+						}
+						if (cv->pt_rgb != NULL) {
+							if (cv->pt_rgb[i] != 0) {
+								HPEN open;
+								HBRUSH hbrush;
+								
+								ipen = cv->pt_rgb[i];
+								hpen = CreatePen(PS_SOLID, 1, ipen);
+								open = SelectObject(hdc, hpen);
+								hbrush = CreateSolidBrush(ipen);
+								FillRect(hdc, &myrect, hbrush);
+								SelectObject(hdc,open);
+								DeleteObject(hpen);
+								DeleteObject(hbrush);
+							} else {
+								FillRect(hdc, &myrect, hbrush);
+							}
 						} else {
 							FillRect(hdc, &myrect, hbrush);
 						}
-					} else {
-							FillRect(hdc, &myrect, hbrush);
-					}
-					if (cv->s != NULL && graph->mode == GR_LINEAR) {
-						idy = (int) (cv->s[i]/(ymax-ymin)*iymax+0.5);
-						if (idy > 2) {
-							MoveToEx(hdc, ix, iy+idy, (LPPOINT) NULL);
-							LineTo(hdc, ix, iy-idy);
+						if (cv->s != NULL && graph->mode == GR_LINEAR) {
+							idy = (int) (cv->s[i]/(ymax-ymin)*iymax+0.5);
+							if (idy > 2) {
+								MoveToEx(hdc, ix, iy+idy, (LPPOINT) NULL);
+								LineTo(hdc, ix, iy-idy);
+							}
 						}
 					}
-				}
-				/* If we used unique colors, go back to default now */
-				if (cv->pt_rgb != NULL) {
-					ipen = (cv->rgb != 0) ? cv->rgb : dflt_colors[ig] ;
-					hpen = CreatePen(PS_SOLID, 1, ipen);
-					SelectObject(hdc, hpen);
-					hbrush = CreateSolidBrush(ipen);
+					/* If we used unique colors, go back to default now */
+					if (cv->pt_rgb != NULL) {
+						ipen = (cv->rgb != 0) ? cv->rgb : dflt_colors[ig] ;
+						hpen = CreatePen(PS_SOLID, 1, ipen);
+						SelectObject(hdc, hpen);
+						hbrush = CreateSolidBrush(ipen);
+					}
 				}
 
 				if (cv->draw_x_axis && ymin*ymax <= 0.0) {

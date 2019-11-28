@@ -159,7 +159,9 @@ void DlgCenterWindowEx(HWND hdlg, HWND parent) {
 	HWND hwndOwner; 
 	RECT rc, rcDlg, rcOwner; 
 
-	if (parent != NULL && IsWindow(parent)) {
+	if (parent == HWND_DESKTOP) {
+		hwndOwner = GetDesktopWindow();
+	} else if (parent != NULL && IsWindow(parent)) {
 		hwndOwner = parent;
 	} else if ((hwndOwner = GetParent(hdlg)) == NULL) {
 		hwndOwner = GetDesktopWindow();
