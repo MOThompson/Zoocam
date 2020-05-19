@@ -259,7 +259,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	};
 
 /* Recover the pointer to the graph data (actually set by WM_CREATE if starting */
-	graph = (GRAPH_DATA *) GetWindowLong(hwnd, 0);
+	graph = (GRAPH_DATA *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
 
 /* Display what is happening in this window */
 /*	SendMessage(hdlgLog, WMP_LOG_TEXT, (WPARAM) GetMsgInfo("GraphWndProc", msg, wParam, lParam), (LPARAM) 0); */
@@ -287,13 +287,13 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			graph->background_color = -1;							/* Mark as no color */
 			*graph->x_title = '\0';
 			*graph->y_title = '\0';
-			SetWindowLong(hwnd, 0, (LONG) graph);
+			SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG) graph);
 			return 0;
 
 		case WM_DESTROY:
 			SendMessage(hwnd, WMP_CLEAR, 0, 0);
 			if (graph != NULL) free(graph);
-			SetWindowLong(hwnd, 0, 0);
+			SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG) 0);
 			return 0;
 
 		case WM_RBUTTONDOWN:

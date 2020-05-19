@@ -351,14 +351,16 @@ void GenerateCrosshair(	DCX_WND_INFO *dcx, HWND hwnd) {
 
 	hdc = GetDC(hwnd);				/* Get DC */
 	if (! dcx->full_width_cursor) {
-		SetRect(&rect, max(ix-20,0),max(iy-1,0), min(ix+20,width),min(iy+2,height));
+		int isize;
+		isize = min(20,width/10);
+		SetRect(&rect, max(ix-isize,0),max(iy-1,0), min(ix+isize,width),min(iy+2,height));
 		FillRect(hdc, &rect, background);
-		SetRect(&rect, max(0,ix-1),max(0,iy-20), min(ix+2,width),min(iy+20,height));
+		SetRect(&rect, max(0,ix-1),max(0,iy-isize), min(ix+2,width),min(iy+isize,height));
 		FillRect(hdc, &rect, background);
 
 		SelectObject(hdc, hpen);
-		MoveToEx(hdc, max(ix-20,0), iy, NULL); LineTo(hdc, min(ix+20,width), iy);
-		MoveToEx(hdc, ix, max(iy-20,0), NULL); LineTo(hdc, ix, min(iy+20,height));
+		MoveToEx(hdc, max(ix-isize,0), iy, NULL); LineTo(hdc, min(ix+isize,width), iy);
+		MoveToEx(hdc, ix, max(iy-isize,0), NULL); LineTo(hdc, ix, min(iy+isize,height));
 	} else {
 		SetRect(&rect, 0,max(iy-1,0), width,min(iy+2,height));
 		FillRect(hdc, &rect, background);
