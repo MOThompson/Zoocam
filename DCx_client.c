@@ -198,7 +198,7 @@ int Init_DCx_Client(char *IP_address) {
 static int Error_Check(int rc, CS_MSG *reply, int expect_msg) {
 
 	if (rc != 0) {
-		fprintf(stderr, "ERROR: Unexpected error from StandardServerExchange (rc=%d)\n"); fflush(stderr);
+		fprintf(stderr, "ERROR: Unexpected error from StandardServerExchange (rc=%d)\n", rc); fflush(stderr);
 		return -1;
 	} else if (reply->msg != expect_msg) {
 		fprintf(stderr, "ERROR: Expected %d in reply message but got %d back\n", expect_msg, reply->msg); fflush(stderr);

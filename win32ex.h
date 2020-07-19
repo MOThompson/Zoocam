@@ -18,6 +18,9 @@ void ShowMsgInfo(char *routine, UINT msg, WPARAM wparam, LPARAM lparam);
 
 void DisableCloseButton(HWND hwnd);
 
+/* Write RTF text to a window (can be big and colorful */
+int SetDlgRTFText(HWND hdlg, int control, char *msg, int fSize, int colorindex);
+
 /******************************************************************************
    Macros
 ******************************************************************************/

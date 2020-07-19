@@ -287,7 +287,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			graph->background_color = -1;							/* Mark as no color */
 			*graph->x_title = '\0';
 			*graph->y_title = '\0';
-			SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG) graph);
+			SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR) graph);
 			return 0;
 
 		case WM_DESTROY:

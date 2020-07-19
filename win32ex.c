@@ -23,6 +23,7 @@
 /* from standard Windows library */
 #define STRICT						  /* define before including windows.h for stricter type checking */
 #include <windows.h>				  /* master include file for Windows applications */
+#include <richedit.h>
 #undef _POSIX_
 	#include <process.h>				  /* for process control fuctions (e.g. threads)        */
 #define _POSIX_
@@ -1082,4 +1083,81 @@ void AbortOnFatalError( char *rname, char *msg ) {
   sprintf_s(sz_text, sizeof(sz_text), "Error Code %d\n\n %s", GetLastError(), msg );
   MessageBox( NULL, sz_text, sz_caption, MB_OK | MB_ICONERROR | MB_TASKMODAL | MB_TOPMOST );
   exit(EXIT_FAILURE);
+}
+
+
+/* ===========================================================================
+-- Routine to write RTF text into a dialog box edit box
+--
+-- Usage: SetMyDlgRTFText(int control, char *msg, int fSize, int colorindex);
+--
+-- Input: control - ID Of dialog box to write text to
+--        msg     - pointer to string to display in the text region
+--        fSize   - font size (points)
+--        colorindex - which of defined colors to paint with
+--
+-- Output: none
+--
+-- Return: 0 if successful.  Otherwise failure of start dialog box.
+=========================================================================== */
+static DWORD CALLBACK RTF_TextFromStream(DWORD_PTR dwCookie, BYTE *buf, LONG cb, LONG *pcb) {
+	FILE *funit;
+
+	funit = (FILE *) dwCookie;					/* This is the file */
+	*pcb = (LONG) fread(buf, sizeof(*buf), cb, funit);
+	if (feof(funit) || ferror(funit)) fclose(funit);
+	return(0);
+}
+
+typedef struct _RTF_STR {
+	char *str;
+	int posn;
+} RTF_STR;
+
+
+static DWORD CALLBACK RTF_TextFromString(DWORD_PTR dwCookie, BYTE *buf, LONG cb, LONG *pcb) {
+
+	RTF_STR *ptr;
+	char *str;
+	int len;
+
+	ptr = (RTF_STR *) dwCookie;				/* Pointer to text info		*/
+	str = ptr->str + ptr->posn;				/* Current position			*/
+	len = (int) strlen(str);
+	len = min(len, cb);							/* No more than length		*/
+	*pcb = len;										/* And tell caller			*/
+	memcpy(buf, str, len);						/* Copy over amount wanted	*/
+	ptr->posn += len;								/* New position				*/
+
+	return(0);
+}
+
+int SetDlgRTFText(HWND hdlg, int control, char *msg, int fSize, int colorindex) {
+
+#define	NUM_COLORS	(5)
+	static char szTmp[256];
+	static char full[] = "{\\rtf1 \\ansi \\deff0 {\\fonttbl {\\f0 Times New Roman;}}\n"
+								"{\\colortbl;\\red0\\green0\\blue0;\\red192\\green0\\blue0;\\red0\\green176\\blue40;\\red0\\green0\\blue192;\\red255\\green255\\blue255;}\n"
+								"\\f0 \\fs%d \\cf%d %s\\cf0}\n";
+
+	char *aptr;
+	static RTF_STR rtf_text;						/* For using RTF in text areas */
+	EDITSTREAM stream;
+
+/* To do multiple lines, just use <text>\\line <text> */
+/* To get bold, \\b.  To get rid of bold, \\b0 */
+/* To get italics, \\i.  To get rid of italics, \\i0 */
+/* To set background color (not in edit box), \\cb1 */
+	if (colorindex < 0) colorindex = 0;
+	if (colorindex >= NUM_COLORS) colorindex = NUM_COLORS-1;
+	if ( (aptr = strchr(msg, '\n')) != NULL) *aptr = '\0';		/* One line only */
+	sprintf(szTmp, full, fSize, colorindex+1, msg);
+	rtf_text.str  = szTmp;
+	rtf_text.posn = 0;
+	stream.dwCookie = (DWORD_PTR) &rtf_text;
+	stream.dwError  = 0;
+	stream.pfnCallback = RTF_TextFromString;
+	SendDlgItemMessage(hdlg, control, EM_STREAMIN, (WPARAM) SF_RTF, (LPARAM) &stream);
+
+	return(0);
 }

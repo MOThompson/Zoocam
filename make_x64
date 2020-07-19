@@ -7,14 +7,7 @@ RFLAGS = /nologo
 DCx_LIB = \code\lab\DCx\Lib\uc480_64.lib 
 SYSLIBS = wsock32.lib user32.lib gdi32.lib comdlg32.lib comctl32.lib advapi32.lib vfw32.lib shell32.lib
 
-ALL: client.exe server.exe DCxLive.exe dcx.c.1
-
-# Cheap revisioning work
-dcx.c.1 : dcx.c
-	cp dcx.c.3 dcx.c.4
-	cp dcx.c.2 dcx.c.3
-	cp dcx.c.1 dcx.c.2
-	cp dcx.c dcx.c.1
+ALL: client.exe server.exe DCxLive.exe
 
 CLEAN: 
 	rm *.exe *.obj *.res
@@ -65,3 +58,5 @@ server_support.h : \code\lab\Server_Support\server_support.h
 	copy $** $@
 
 win32ex.obj : win32ex.h
+
+dcx.obj : dcx.h dcx_server.h uc480.h resource.h win32ex.h graph.h

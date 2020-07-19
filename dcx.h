@@ -1,6 +1,8 @@
 /* Global identifier of my window handle */
 HWND DCx_main_hdlg;
 
+#define USE_RINGS	(10)				/* Default ring buffer size */
+
 typedef enum _DCX_IMAGE_FORMAT { IMAGE_BMP, IMAGE_JPG, IMAGE_PNG } DCX_IMAGE_FORMAT;
 typedef enum _DCX_IMAGE_TYPE   { IMAGE_COLOR, IMAGE_MONOCHROME } DCX_IMAGE_TYPE;
 
@@ -167,13 +169,19 @@ int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate
 =========================================================================== */
 int DCx_Set_Gains(DCX_WND_INFO *dcx, int master, int red, int green, int blue, HWND hdlg);
 
-
 #ifdef INCLUDE_DCX_DETAIL_INFO
 
 typedef struct _DCX_WND_INFO {
 	HWND main_hdlg;							/* Handle to primary dialog box */
-	HANDLE FrameEvent;
-	BOOL RenderImageThreadActive;
+
+	HANDLE FrameEvent;						/* Event for new frame valid in memory buffer */
+	BOOL ProcessNewImageThreadActive;
+
+#ifdef USE_RINGS
+	HANDLE SequenceEvent;					/* Event for completion of a sequence (last buffer element) */
+	BOOL SequenceThreadActive;
+#endif
+
 	BOOL LiveVideo;							/* Are we in free-run mode? */
 
 	/* Associated with opening a camera */
@@ -191,14 +199,24 @@ typedef struct _DCX_WND_INFO {
 	int Image_Count;							/* Number of images processed - use to identify new data */
 	IMAGE_FORMAT_INFO *ImageFormatInfo;
 	int height, width;
+
+#ifdef USE_RINGS
+	int nRing,									/* Number of buffers in the ring */
+		 nLast,									/* Last buffer index used (from events) */
+		 nValid;									/* Highest buffer index used since reset */
+	int   *Image_PID;							/* Pointers to PIDs of each image in the ring */
+	char  **Image_Mem;						/* Pointers to the image memory */
+#else
 	int Image_PID;
 	char *Image_Mem;
-	int Image_Memory_Pitch;
+#endif
+	BOOL Image_Mem_Allocated;				/* Have we allocated (vis IS_AllocImageMem) the bufers */
+
 	double Image_Aspect;
 
 	HWND thumbnail;
-	double x_image_target, y_image_target;
-	BOOL full_width_cursor;
+	double x_image_target, y_image_target;		/* Fraction of [0,1) the way across image for the cursor (in screen coordinates) */
+	BOOL full_width_cursor;							/* Draw cursor full width of the image */
 
 	int red_saturate, green_saturate, blue_saturate;
 	GRAPH_CURVE *red_hist, *green_hist, *blue_hist;

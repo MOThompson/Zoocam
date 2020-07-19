@@ -371,6 +371,7 @@ int GetStandardServerRequest(SERVER_DATA_BLOCK *block, CS_MSG *request, void **p
 	return GetSocketMsg(block->socket, request, pdata);
 }
 int GetSocketMsg(SOCKET socket, CS_MSG *request, void **pdata) {
+	static char *rname = "GetSocketMsg";
 	int icnt;
 	
 	/* Initialize all the results in case there is any failure */
@@ -400,11 +401,11 @@ int GetSocketMsg(SOCKET socket, CS_MSG *request, void **pdata) {
 		if (icnt == 0) {
 			return 1;
 		} else if (icnt == SOCKET_ERROR) {
-			fprintf(stderr, "ERROR: recv() returned SOCKET_ERROR -- assuming client has been terminated\n");
+			fprintf(stderr, "ERROR[%s]: recv() returned SOCKET_ERROR -- assuming client has been terminated\n", rname);
 			fflush(stderr);
 			return 2;
 		} else if (icnt != request->data_len) {					/* At moment, just a warning */
-			fprintf(stderr, "ERROR[%s]: Expected %d bytes but only got %d\n", request->data_len, icnt); fflush(stderr);
+			fprintf(stderr, "ERROR[%s]: Expected %d bytes but only got %d\n", rname, request->data_len, icnt); fflush(stderr);
 		}
 
 		/* If crc32 is set, verify or output an error */
@@ -412,7 +413,7 @@ int GetSocketMsg(SOCKET socket, CS_MSG *request, void **pdata) {
 			uint32_t crc;
 			crc = CRC32(data, request->data_len);
 			if (crc != request->crc32) {
-				fprintf(stderr, "ERROR[%s]: CRC32 mistmatch (0x%8.8x versus 0x%8.8x)\n", crc, request->crc32); fflush(stderr);
+				fprintf(stderr, "ERROR[%s]: CRC32 mistmatch (0x%8.8x versus 0x%8.8x)\n", rname, crc, request->crc32); fflush(stderr);
 			}
 		}
 		
@@ -611,11 +612,7 @@ void htond_me(double *val) {
 
 	if (first) {
 		if (sizeof(int) != 4 || sizeof(double) != 8) {
-#ifdef __linux__
-			fprintf(stderr, "ERROR: Code assume sizeof(int) = 4 (saw %zd) and sizeof(double) = 8 (saw %zd)\n", sizeof(int), sizeof(double));
-#else
-			fprintf(stderr, "ERROR: Code assume sizeof(int) = 4 (saw %d) and sizeof(double) = 8 (saw %d)\n", sizeof(int), sizeof(double));
-#endif
+			fprintf(stderr, "ERROR: Code assume sizeof(int) = 4 (saw %zu) and sizeof(double) = 8 (saw %zu)\n", sizeof(int), sizeof(double));
 			fflush(stderr);
 			abort();
 		}			
