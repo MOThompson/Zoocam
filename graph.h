@@ -93,7 +93,8 @@
 		double *x, *y, *z;									/* Potential x,y,z values */
 		double *s;												/* Potential uncertainty in y */
 		int *pt_rgb;											/* If !NULL, individual point colors */
-		int npt;
+		int npt;													/* Number of valid points in x,y,z arrays */
+		int nptmax;												/* Unused by code ... caller may use to track allocated size */
 		int rgb;
 		int isize;												/* If 0, use default.  If !0, draws square +-n pixels */
 		BOOL master;											/* If TRUE, will be used to define graph xmin/xmax and axes */

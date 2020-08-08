@@ -38,10 +38,16 @@
 #define IDT_CAMERA_DATE                 2020
 #define IDT_CAMERA_COLOR_MODE           2021
 #define IDS_FRAME_RATE                  2022
+#define IDT_PIXEL_CLOCK_MIN             2022
 #define IDV_FRAME_RATE                  2023
+#define IDT_PIXEL_CLOCK_DEFAULT         2023
 #define IDT_FRAMERATE                   2024
+#define IDT_CAMERA_PIXEL_PITCH2         2024
+#define IDT_PIXEL_CLOCK_CURRENT         2024
 #define IDS_EXPOSURE_TIME               2025
+#define IDT_PIXEL_CLOCK_MAX             2025
 #define IDV_EXPOSURE_TIME               2026
+#define IDT_PIXEL_CLOCK_INC             2026
 #define IDS_GAMMA                       2027
 #define IDV_GAMMA                       2028
 #define IDB_GAMMA_NEUTRAL               2029
@@ -83,8 +89,30 @@
 #define IDT_CURSOR_Y_PIXEL              2064
 #define IDV_RING_SIZE                   2065
 #define IDT_FRAME_COUNT                 2066
-#define IDT_FRAME_COUNT2                2067
 #define IDT_FRAME_VALID                 2067
+#define IDV_PIXEL_CLOCK_SET             2067
+#define IDB_PIXEL_CLOCK_SET             2068
+#define IDV_CURRENT_FRAME               2068
+#define IDT_SHARPNESS                   2069
+#define IDB_SHARPNESS_DIALOG            2070
+#define IDB_LED_CONTROL                 2071
+#define IDV_COM_PORT                    2072
+#define IDC_ENABLE                      2073
+#define IDV_LED_ON                      2074
+#define IDV_LED_OFF                     2075
+#define IDR_LED_OFF                     2076
+#define IDR_LED_ON                      2077
+#define IDR_LED_TOGGLE                  2078
+#define IDG_FOCUS_GRAPH                 2079
+#define IDR_TIME_SEQUENCE               2080
+#define IDR_FOCUS_SWEEP                 2081
+#define IDC_PAUSE                       2082
+#define IDB_CLEAR_FOCUS_GRAPH           2083
+#define IDT_EST_FOCUS                   2084
+#define IDB_SET_EST_FOCUS               2085
+#define IDB_ARM                         2086
+#define IDB_PREV_FRAME                  2087
+#define IDB_NEXT_FRAME                  2088
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -92,9 +120,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        137
+#define _APS_NEXT_RESOURCE_VALUE        138
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2066
+#define _APS_NEXT_CONTROL_VALUE         2088
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

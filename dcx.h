@@ -183,6 +183,8 @@ typedef struct _DCX_WND_INFO {
 #endif
 
 	BOOL LiveVideo;							/* Are we in free-run mode? */
+	BOOL BurstModeArmed;						/* Have we armed camera for a burst capture */
+													/* Also abort if set to FALSE while waiting */
 
 	/* Associated with opening a camera */
 	HCAM hCam;
@@ -203,6 +205,7 @@ typedef struct _DCX_WND_INFO {
 #ifdef USE_RINGS
 	int nRing,									/* Number of buffers in the ring */
 		 nLast,									/* Last buffer index used (from events) */
+		 nShow,									/* Currently display frame */
 		 nValid;									/* Highest buffer index used since reset */
 	int   *Image_PID;							/* Pointers to PIDs of each image in the ring */
 	char  **Image_Mem;						/* Pointers to the image memory */
@@ -222,6 +225,21 @@ typedef struct _DCX_WND_INFO {
 	GRAPH_CURVE *red_hist, *green_hist, *blue_hist;
 	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b;
 	GRAPH_CURVE *horz_w, *horz_r, *horz_g, *horz_b;
+
+#ifdef USE_NUMATO
+	/* Elements for Numator DIO */
+	struct {
+		BOOL initialized;
+		int port;
+		BOOL enabled;
+		NUMATO *dio;
+		enum {DIO_UNKNOWN=0, DIO_INPUT=1, DIO_OUTPUT=2} bit_mode;
+		BOOL bit_is_output;
+		enum {DIO_OFF=0, DIO_ON=1, DIO_TOGGLE=2} mode;
+		int on, off, total, phase;
+	} numato;
+#endif
+
 } DCX_WND_INFO;
 
 #endif			/* INCLUDE_DCX_DETAIL_INFO */

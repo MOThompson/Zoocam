@@ -32,8 +32,11 @@ graph.obj : graph.c graph.h
 server_support.obj : server_support.c server_support.h
 	cl -c $(CFLAGS) server_support.c
 
-DCxLive.exe : DCx.obj DCx_server.obj DCx.res win32ex.obj graph.obj server_support.obj
-	cl $(CFLAGS) -FeDCxLive.exe DCx.obj DCx_server.obj win32ex.obj graph.obj server_support.obj DCx.res $(DCx_LIB) $(SYSLIBS)
+numato_dio.obj : numato_dio.c numato_dio.h
+	cl -c $(CFLAGS) numato_dio.c
+
+DCxLive.exe : DCx.obj DCx_server.obj DCx.res numato_dio.obj win32ex.obj graph.obj server_support.obj
+	cl $(CFLAGS) -FeDCxLive.exe DCx.obj DCx_server.obj numato_dio.obj win32ex.obj graph.obj server_support.obj DCx.res $(DCx_LIB) $(SYSLIBS)
 
 DCx.res : DCx.rc resource.h
 	rc $(RFLAGS) DCx.rc

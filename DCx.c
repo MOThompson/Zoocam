@@ -46,6 +46,14 @@
 #include "graph.h"
 #include "resource.h"
 
+#define	USE_NUMATO
+#define	USE_FOCUS
+
+#ifdef USE_NUMATO
+	#define	NUMATO_COM_PORT	3				/* Set to COM port to use */
+	#include "Numato_DIO.h"					/* For toggling an LED between images */
+#endif
+
 #define	_PURE_C
 	#include "uc480.h"
 #undef	_PURE_C
@@ -53,6 +61,11 @@
 #define	INCLUDE_DCX_DETAIL_INFO							/* Get all of the typedefs and internal details */
 #include "dcx.h"
 #include "dcx_server.h"
+
+#ifdef USE_FOCUS
+	#include "focus_client.h"
+#endif
+
 
 /* ------------------------------- */
 /* My local typedef's and defines  */
@@ -73,9 +86,10 @@
 #define	WMP_SHOW_COLOR_CORRECT	(WM_APP+7)
 #define	WMP_SHOW_GAINS				(WM_APP+8)
 #define	WMP_SHOW_CURSOR_POSN		(WM_APP+9)
+#define	WMP_BURST_TRIG_COMPLETE	(WM_APP+10)
 
 #define	MIN_FPS		(0.5)
-#define	MAX_FPS		(15)
+#define	MAX_FPS		(25)
 
 /* ------------------------------- */
 /* My external function prototypes */
@@ -100,7 +114,9 @@ static int AllocRingBuffers(DCX_WND_INFO *dcx, int nRing);
 static int SaveBurstImages(DCX_WND_INFO *dcx);
 
 static void show_camera_info_thread(void *arglist);
+static void show_sharpness_dialog_thread(void *arglist);
 BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
+BOOL CALLBACK LED_DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 
 static double my_timer(BOOL reset);
 
@@ -146,7 +162,7 @@ struct {
 int AllCameraControls[] = { 
 	IDB_CAMERA_DISCONNECT, IDC_CAMERA_MODES, IDB_CAMERA_DETAILS,
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
-	IDB_LIVE, IDB_UNDOCK, IDB_CAPTURE, IDB_SAVE,
+	IDB_LIVE, IDB_UNDOCK, IDB_SHARPNESS_DIALOG, IDB_ARM, IDB_CAPTURE, IDB_SAVE, IDB_BURST, IDV_RING_SIZE,
 	IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_FRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDR_COLOR_DISABLE, IDR_COLOR_ENABLE, IDR_COLOR_BG40, IDR_COLOR_HQ, IDR_COLOR_AUTO_IR, 
@@ -155,12 +171,14 @@ int AllCameraControls[] = {
 	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN,
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
 	IDC_SHOW_INTENSITY, IDC_SHOW_RGB,
+	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
 	ID_NULL
 };
+
 /* List of camera controls that get turned off when starting resolution change */
 int CameraOffControls[] = { 
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
-	IDB_LIVE, IDB_UNDOCK, IDB_CAPTURE, IDB_SAVE,
+	IDB_LIVE, IDB_UNDOCK, IDB_SHARPNESS_DIALOG, IDB_ARM, IDB_CAPTURE, IDB_SAVE, IDB_BURST, IDV_RING_SIZE,
 	IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_FRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDR_COLOR_DISABLE, IDR_COLOR_ENABLE, IDR_COLOR_BG40, IDR_COLOR_HQ, IDR_COLOR_AUTO_IR, IDV_COLOR_CORRECT_FACTOR,
@@ -169,21 +187,47 @@ int CameraOffControls[] = {
 	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN,
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
 	IDC_SHOW_INTENSITY, IDC_SHOW_RGB,
+	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
 	ID_NULL
 };
+
 /* List of camera controls that get turned on when resolution is set */
 int CameraOnControls[] = { 
 	IDC_CAMERA_LIST, IDC_CAMERA_MODES,
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
-	IDB_LIVE, IDB_UNDOCK, IDB_CAPTURE, IDB_SAVE,
+	IDB_LIVE, IDB_UNDOCK, IDB_SHARPNESS_DIALOG, IDB_ARM, IDB_CAPTURE, IDB_SAVE, IDB_BURST, IDV_RING_SIZE,
 	IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_FRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDV_COLOR_CORRECT_FACTOR,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
 	IDC_SHOW_INTENSITY, IDC_SHOW_RGB,
+#ifdef USE_RINGS
+	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
+#endif
 	ID_NULL
 };
+
+/* List of camera controls that get disabled while in "ARM" mode */
+int BurstArmControls[] = { 
+	IDC_CAMERA_LIST, IDC_CAMERA_MODES,
+	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
+	IDB_LIVE, IDB_UNDOCK, IDB_SHARPNESS_DIALOG, IDB_CAPTURE, IDB_SAVE, IDB_BURST, IDV_RING_SIZE,
+	IDB_NEXT_FRAME, IDB_PREV_FRAME,
+	ID_NULL
+};
+
+#ifdef USE_FOCUS
+	BOOL CALLBACK SharpnessDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
+
+	static struct {
+		HWND hdlg;								/* Handle to the dialog box */
+		enum {TIME_SEQUENCE=0, FOCUS_SWEEP=1} mode;
+		BOOL paused;
+		GRAPH_CURVE *cv;
+		GRAPH_CURVE *focus;					/* Focus position */
+	} SharpnessDlg = { NULL, TIME_SEQUENCE, FALSE, NULL};
+#endif
 
 /* ===========================================================================
 -- Simple test thread to verify calls for SPEC are working properly
@@ -395,6 +439,7 @@ void GenerateCrosshair(	DCX_WND_INFO *dcx, HWND hwnd) {
 -- through the list and return the matching one.
 --
 -- Usage: FindImagePID(DCX_WND_INFO *dcx, void *pMem, int *index);
+--        FindImagepMem(DCX_WND_INFO *dcx, int PID);
 --
 -- Inputs: dcx - pointer to valid structure for the window
 --         pMem - memory buffer returned from is_GetImageMem
@@ -404,8 +449,22 @@ void GenerateCrosshair(	DCX_WND_INFO *dcx, HWND hwnd) {
 -- Output: *index - actual index (0 based) into dcx->Image_PID, _Mem, and _Time
 --
 -- Returns: PID corresponding to the pMem if it exists.  Otherwise -1
+--          pMem corresponding to PID or NULL if invalid
 =========================================================================== */
-static int FindImagePID(DCX_WND_INFO *dcx, void *pMem, int *index) {
+unsigned char *FindImagepMem(DCX_WND_INFO *dcx, int index) {
+
+#ifndef USE_RINGS
+	return dcx->Image_pMem;
+#else
+	int i;
+	for (i=0; i<dcx->nRing; i++) {
+		if (dcx->Image_PID[i] == index) return dcx->Image_Mem[i];
+	}
+	return NULL;
+#endif
+}	
+
+static int FindImagePID(DCX_WND_INFO *dcx, unsigned char *pMem, int *index) {
 
 #ifndef USE_RINGS
 	return dcx->Image_PID;
@@ -444,13 +503,13 @@ static void SequenceThread(void *arglist) {
 
 	while (main_dcx != NULL) {
 
-		while (main_dcx->SequenceEvent == NULL) { Sleep(100); continue; }
+		while (main_dcx->SequenceEvent == NULL) { Sleep(1000); continue; }
 
 		if ( (rc = WaitForSingleObject(main_dcx->SequenceEvent, 1000)) != WAIT_OBJECT_0) continue;
 
 		if (main_dcx == NULL) break;					/* Make sure we are not invalid now */
 
-		fprintf(stderr, "INFO: Saw a SequenceEvent triggered\n");
+//		fprintf(stderr, "INFO: Saw a SequenceEvent triggered\n");
 	}											/* while (main_dcx != NULL) */
 
 	printf("SequenceThread exiting\n"); fflush(stdout);
@@ -458,6 +517,233 @@ static void SequenceThread(void *arglist) {
 }
 #endif
 
+
+/* ===========================================================================
+-- Routine to calculate the sharpness of an image in memory
+--
+-- Usage: int CalcSharpness(DCX_WND_INFO *dcx, unsigned char *pMem);
+--
+-- Inputs: dcx - pointer to all the info
+--         pMem - pointer to the image buffer in memory
+=========================================================================== */
+int CalcSharpness(DCX_WND_INFO *dcx, unsigned char *pMem) {
+	int rc, pitch, width, height;
+	int ix0, iy0, col, line, delta, delta_max;
+	unsigned char *aptr;
+
+	if (dcx == NULL || pMem == NULL) return 0;
+
+	/* Recover parameters */
+	height = dcx->height;
+	width  = dcx->width;
+	rc = is_GetImageMemPitch(dcx->hCam, &pitch);
+
+#define	BLOCK	(128)
+	ix0 = ((int) (width*dcx->x_image_target+0.5))  - BLOCK/2;				/* First column of test */
+	iy0 = ((int) (height*dcx->y_image_target+0.5)) - BLOCK/2;				/* First row of test */
+	if (ix0 < 0) ix0 = 0;
+	if (iy0 < 0) iy0 = 0;
+	if ((ix0 + BLOCK) > width)  ix0 = width-BLOCK;
+	if ((iy0 + BLOCK) > height) iy0 = height-BLOCK;
+	delta_max = 0;
+	for (col=ix0; col<ix0+BLOCK-1; col++) {
+		for (line=iy0; line<iy0+BLOCK-1; line++) {
+			aptr = pMem + line*pitch;
+			/* Consider horizontal changes */
+			if (dcx->SensorIsColor) {
+				delta = aptr[3*col+3]+aptr[3*col+4]+aptr[3*col+5] - (aptr[3*col+0]+aptr[3*col+1]+aptr[3*col+2]);
+			} else {
+				delta = aptr[col+1]-aptr[col];
+			}
+			if (abs(delta) > delta_max) delta_max = abs(delta);
+			/* And now vertical changes */
+			if (dcx->SensorIsColor) {
+				delta = aptr[3*col+pitch]+aptr[3*col+pitch+1]+aptr[3*col+pitch+2] - (aptr[3*col+0]+aptr[3*col+1]+aptr[3*col+2]);
+			} else {
+				delta = aptr[col+pitch]-aptr[col];
+			}
+			if (abs(delta) > delta_max) delta_max = abs(delta);
+		}
+	}
+	return delta_max;
+}
+
+
+/* ===========================================================================
+-- Display a specified image (PID) on windows with statistics
+--
+-- Usage: void ShowImage(DCX_WND_INFO *dcx, int PID);
+--
+-- Inputs: dcx - structure with all the info
+--         PID - index of image to display
+--         pSharp - pointer to variable to get sharpness estimate (if ! NULL)
+--
+-- Output: *pSharp - estimate of the sharpness (in some units)
+--
+-- Return: 0 - all info displayed
+--         1 - only images were shown ... main HDLG not a window
+=========================================================================== */
+int ShowImage(DCX_WND_INFO *dcx, int PID, int *pSharp) {
+
+	int i, rc, col, line, height, width, pitch;
+	int sharpness;
+	unsigned char *pMem, *aptr;
+
+	GRAPH_CURVE *red, *green, *blue;
+	GRAPH_CURVE *vert, *vert_r, *vert_g, *vert_b;
+	GRAPH_CURVE *horz, *horz_r, *horz_g, *horz_b;
+	GRAPH_SCALES scales;
+
+	HANDLE hdlg;
+
+	if (IsWindow(float_image_hwnd)) {
+		is_RenderBitmap(dcx->hCam, PID, float_image_hwnd, IS_RENDER_FIT_TO_WINDOW);
+		GenerateCrosshair(dcx, float_image_hwnd);
+	}
+	if (IsWindow(dcx->thumbnail)) {
+		is_RenderBitmap(dcx->hCam, PID, dcx->thumbnail, IS_RENDER_FIT_TO_WINDOW);
+		GenerateCrosshair(dcx, dcx->thumbnail);
+	}
+
+	/* If the maiin window isn't a window, don't bother with the histogram calculations */
+	if (! IsWindow(dcx->main_hdlg)) return 1;
+
+	/* Do the histogram calculations */
+	height = dcx->height;
+	width  = dcx->width;
+	hdlg   = dcx->main_hdlg;
+	rc = is_GetImageMemPitch(dcx->hCam, &pitch);
+	if ( (pMem = FindImagepMem(dcx, PID)) == NULL) return 1;
+
+	/* Split based on RGB or only monochrome */
+	/* For some strange reason, only works if in IS_CM_BGR8_PACKED mode */
+	/* Note that there is a function is_GetImageHistogram that could be used also, but would need to transfer */
+	red    = dcx->red_hist;
+	green  = dcx->green_hist;
+	blue   = dcx->blue_hist;
+	for (i=0; i<red->npt; i++) red->y[i] = green->y[i] = blue->y[i] = 0;
+	for (line=0; line<height; line++) {
+		aptr = pMem + line*pitch;					/* Pointer to this line */
+		for (col=0; col<width; col++) {
+			if (dcx->SensorIsColor) {
+				i = aptr[3*col+0]; if (i < 0) i = 0; if (i > 255) i = 255; blue->y[i]++;
+				i = aptr[3*col+1]; if (i < 0) i = 0; if (i > 255) i = 255; green->y[i]++;
+				i = aptr[3*col+2]; if (i < 0) i = 0; if (i > 255) i = 255; red->y[i]++;
+			} else {
+				i = aptr[col]; if (i < 0) i = 0; if (i > 255) i = 255; red->y[i]++;
+			}
+		}
+	}
+	if (dcx->SensorIsColor) {
+		SetDlgItemDouble(hdlg, IDT_RED_SATURATE,   "%.2f%%", (100.0*red->y[255]  )/(1.0*height*width));
+		SetDlgItemDouble(hdlg, IDT_GREEN_SATURATE, "%.2f%%", (100.0*green->y[255])/(1.0*height*width));
+		SetDlgItemDouble(hdlg, IDT_BLUE_SATURATE,  "%.2f%%", (100.0*blue->y[255] )/(1.0*height*width));
+		dcx->red_saturate   = (int) red->y[255];		red->y[255]   = 0;
+		dcx->green_saturate = (int) green->y[255];	green->y[255] = 0;
+		dcx->blue_saturate  = (int) blue->y[255];		blue->y[255]  = 0;
+		red->modified = green->modified = blue->modified = TRUE;
+		red->visible  = green->visible  = blue->visible  = TRUE;
+		red->rgb = RGB(255,0,0);
+		SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_REDRAW, 0, 0);
+	} else {
+		double rval;
+		rval = (100.0*red->y[255]  )/(1.0*height*width);
+		SetDlgItemDouble(hdlg, IDT_RED_SATURATE,   "%.2f%%", rval);
+		SetDlgItemDouble(hdlg, IDT_GREEN_SATURATE, "%.2f%%", rval);
+		SetDlgItemDouble(hdlg, IDT_BLUE_SATURATE,  "%.2f%%", rval);
+		dcx->red_saturate = dcx->green_saturate = dcx->blue_saturate = (int) red->y[255];
+		red->modified = TRUE;
+		red->visible = TRUE; green->visible = FALSE; blue->visible = FALSE;
+		red->rgb = RGB(225,225,255);
+		SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_REDRAW, 0, 0);
+	}
+
+	/* Do the horizontal profile at centerline */
+	horz = dcx->horz_w;
+	horz_r = dcx->horz_r;
+	horz_g = dcx->horz_g;
+	horz_b = dcx->horz_b;
+	if (horz->npt < width) {
+		horz->x   = realloc(horz->x, width*sizeof(*horz->x));
+		horz->y   = realloc(horz->y, width*sizeof(*horz->y));
+		horz_r->x = realloc(horz_r->x, width*sizeof(*horz_r->x));
+		horz_r->y = realloc(horz_r->y, width*sizeof(*horz_r->y));
+		horz_g->x = realloc(horz_g->x, width*sizeof(*horz_g->x));
+		horz_g->y = realloc(horz_g->y, width*sizeof(*horz_g->y));
+		horz_b->x = realloc(horz_b->x, width*sizeof(*horz_b->x));
+		horz_b->y = realloc(horz_b->y, width*sizeof(*horz_b->y));
+	}
+	horz->npt = horz_r->npt = horz_g->npt = horz_b->npt = width;
+	aptr = pMem + pitch*((int) (height*dcx->y_image_target+0.5));			/* Pointer to target line */
+	for (i=0; i<width; i++) {
+		horz->x[i] = horz_r->x[i] = horz_g->x[i] = horz_b->x[i] = i;
+		if (dcx->SensorIsColor) {
+			horz->y[i] = (aptr[3*i+0] + aptr[3*i+1] + aptr[3*i+2])/3.0 ;		/* Average intensity */
+			horz_r->y[i] = aptr[3*i+2];
+			horz_g->y[i] = aptr[3*i+1];
+			horz_b->y[i] = aptr[3*i+0];
+		} else {
+			horz->y[i] = horz_r->y[i] = horz_g->y[i] = horz_b->y[i] = aptr[i];
+		}
+	}
+	memset(&scales, 0, sizeof(scales));
+	scales.xmin = 0;	scales.xmax = width-1;
+	scales.ymin = 0;  scales.ymax = 256;
+	scales.autoscale_x = FALSE; scales.force_scale_x = TRUE;
+	scales.autoscale_y = FALSE; scales.force_scale_y = TRUE;
+	horz->modified = TRUE;
+	horz->modified = horz_r->modified = horz_g->modified = horz_b->modified = TRUE;
+	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_SET_SCALES, (WPARAM) &scales, (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_REDRAW, 0, 0);
+
+	vert = dcx->vert_w;
+	vert_r = dcx->vert_r;
+	vert_g = dcx->vert_g;
+	vert_b = dcx->vert_b;
+	if (vert->npt < height) {
+		vert->x = realloc(vert->x, height*sizeof(*vert->x));
+		vert->y = realloc(vert->y, height*sizeof(*vert->y));
+		vert_r->x = realloc(vert_r->x, height*sizeof(*vert_r->x));
+		vert_r->y = realloc(vert_r->y, height*sizeof(*vert_r->y));
+		vert_g->x = realloc(vert_g->x, height*sizeof(*vert_g->x));
+		vert_g->y = realloc(vert_g->y, height*sizeof(*vert_g->y));
+		vert_b->x = realloc(vert_b->x, height*sizeof(*vert_b->x));
+		vert_b->y = realloc(vert_b->y, height*sizeof(*vert_b->y));
+	}
+	vert->npt = vert_r->npt = vert_g->npt = vert_b->npt = height;
+	for (i=0; i<height; i++) {
+		vert->y[i] = vert_r->y[i] = vert_g->y[i] = vert_b->y[i] = height-1-i;
+		if (dcx->SensorIsColor) {
+			aptr = pMem + i*pitch + 3*((int) (width*dcx->x_image_target+0.5));	/* Access first of the column */
+			vert->x[i] = (3*256 - (aptr[0] + aptr[1] + aptr[2])) / 3.0;
+			vert_r->x[i] = 256 - aptr[2];
+			vert_g->x[i] = 256 - aptr[1];
+			vert_b->x[i] = 256 - aptr[0];
+		} else {
+			aptr = pMem + i*pitch + ((int) (width*dcx->x_image_target+0.5));		/* Access first of the column */
+			vert->x[i] = vert_r->x[i] = vert_g->x[i] = vert_b->x[i] = 256 - aptr[0];
+		}
+	}
+	memset(&scales, 0, sizeof(scales));
+	scales.xmin = 0; scales.xmax = 256;
+	scales.ymin = 0; scales.ymax = height-1;
+	scales.autoscale_x = FALSE;  scales.force_scale_x = TRUE;
+	scales.autoscale_y = FALSE;  scales.force_scale_y = TRUE;
+	vert->modified = vert_r->modified = vert_g->modified = vert_b->modified = TRUE;
+	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_SCALES, (WPARAM) &scales, (LPARAM) 0);
+	SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_REDRAW, 0, 0);
+
+	/* Calculate the sharpness - largest delta between pixels */
+	sharpness = CalcSharpness(dcx, pMem);
+
+	/* Put up the values on the main dialog window */
+	SetDlgItemInt(hdlg, IDT_SHARPNESS, sharpness, FALSE);
+	SetDlgItemInt(hdlg, IDV_CURRENT_FRAME, PID, FALSE);
+	dcx->nShow = PID;
+	
+	if (pSharp != NULL) *pSharp = sharpness;
+	return 0;
+}
 
 /* ===========================================================================
 -- Threads that handle events of a new image available in buffer memory
@@ -469,21 +755,32 @@ static void SequenceThread(void *arglist) {
 -- Usage: static void RenderImageThread(void *arglist);
 --        static void ActualRenderThread(void *arglist);
 =========================================================================== */
-
 static void ProcessNewImage(void *arglist) {
 
-	int i, rc, col, line, height, width, pitch, index;
-	unsigned char *pMem, *aptr;
-	GRAPH_CURVE *red, *green, *blue;
-	GRAPH_CURVE *vert, *vert_r, *vert_g, *vert_b;
-	GRAPH_CURVE *horz, *horz_r, *horz_g, *horz_b;
-	HANDLE hdlg;
+	int rc, index;
+	int delta_max;
+	unsigned char *pMem;
 	DCX_WND_INFO *dcx;
-	GRAPH_SCALES scales;
 	int PID;
+
+#ifdef USE_FOCUS
+	time_t time_last_check = 0;
+	int client_version, server_version;
+	double zposn;
+	char *server_IP;
+	BOOL Have_Focus_Client = FALSE;
+#endif
 
 	/* Just wait for events that mean I should render the images */
 	printf("ProcessNewImage thread started\n"); fflush(stdout);
+
+/* Check for the existence of the focus dialog first ... use if present */
+#ifdef USE_FOCUS
+	server_IP = LOOPBACK_SERVER_IP_ADDRESS;	/* Local test (server on same machine) */
+//		server_IP = "128.253.129.74";					/* Machine in laser room */
+//		server_IP = "128.253.129.71";					/* Machine in open lab room */
+	Have_Focus_Client = FALSE;
+#endif
 
 	while (main_dcx != NULL) {
 
@@ -493,14 +790,33 @@ static void ProcessNewImage(void *arglist) {
 		dcx->Image_Count++;								/* Increment number of images (we think) */
 		if (dcx->hCam <= 0) continue;
 
-		/* Determine the PID and pitch of last stored image */
+		/* Determine the PID of last stored image */
 		rc = is_GetImageMem(dcx->hCam, &pMem);
-		rc = is_GetImageMemPitch(dcx->hCam, &pitch);
 		if ( (PID = FindImagePID(dcx, pMem, &index)) == -1) continue;
+
+#ifdef USE_NUMATO
+		my_timer(TRUE);
+		if (dcx->numato.enabled && dcx->numato.dio == NULL) {
+			dcx->numato.dio = NumatoOpenDIO(dcx->numato.port, NULL);
+			if (dcx->numato.dio == NULL) dcx->numato.enabled = FALSE;
+			dcx->numato.bit_mode = DIO_UNKNOWN;
+			dcx->numato.phase = 0;
+		}
+		if (! dcx->numato.enabled && dcx->numato.dio != NULL && dcx->numato.bit_mode != DIO_INPUT) {
+			NumatoQueryBit(dcx->numato.dio, 0, NULL);
+			dcx->numato.bit_mode = DIO_INPUT;
+		}
+		if (dcx->numato.enabled && dcx->numato.dio != NULL) {
+			NumatoSetBit(dcx->numato.dio, 0, dcx->numato.phase < dcx->numato.on);
+			dcx->numato.bit_mode = DIO_OUTPUT;
+			if (++dcx->numato.phase >= dcx->numato.on+dcx->numato.off) dcx->numato.phase = 0;
+			if (my_timer(FALSE) > 0.005) fprintf(stderr, "DIO cost: %.6f\n", my_timer(FALSE)); fflush(stderr);
+		}
+#endif
 
 #ifdef USE_RINGS
 		/* Update the main dialog window with the number with the number of images in the ring */
-		dcx->nLast = index;
+		dcx->nLast = index;								/* Shown image will be same as last one valid */
 		if (index >= dcx->nValid) dcx->nValid = index+1;
 		if (IsWindow(dcx->main_hdlg)) {
 			SetDlgItemInt(dcx->main_hdlg, IDT_FRAME_COUNT, dcx->nLast+1, FALSE);
@@ -508,139 +824,60 @@ static void ProcessNewImage(void *arglist) {
 		}
 #endif
 
-		if (IsWindow(float_image_hwnd)) {
-			is_RenderBitmap(dcx->hCam, PID, float_image_hwnd, IS_RENDER_FIT_TO_WINDOW);
-			GenerateCrosshair(dcx, float_image_hwnd);
-		}
-		if (IsWindow(dcx->thumbnail)) {
-			is_RenderBitmap(dcx->hCam, PID, dcx->thumbnail, IS_RENDER_FIT_TO_WINDOW);
-			GenerateCrosshair(dcx, dcx->thumbnail);
-		}
-
-		/* If the maiin window isn't a window, don't bother with the histogram calculations */
+		ShowImage(dcx, PID, &delta_max);
 		if (! IsWindow(dcx->main_hdlg)) continue;
-		
-		/* Do the histogram calculations */
-		height = dcx->height;
-		width  = dcx->width;
-		hdlg   = dcx->main_hdlg;
-		
-		/* Split based on RGB or only monochrome */
-		/* For some strange reason, only works if in IS_CM_BGR8_PACKED mode */
-		red    = dcx->red_hist;
-		green  = dcx->green_hist;
-		blue   = dcx->blue_hist;
-		for (i=0; i<red->npt; i++) red->y[i] = green->y[i] = blue->y[i] = 0;
-		for (line=0; line<height; line++) {
-			aptr = pMem + line*pitch;					/* Pointer to this line */
-			for (col=0; col<width; col++) {
-				if (dcx->SensorIsColor) {
-					i = aptr[3*col+0]; if (i < 0) i = 0; if (i > 255) i = 255; blue->y[i]++;
-					i = aptr[3*col+1]; if (i < 0) i = 0; if (i > 255) i = 255; green->y[i]++;
-					i = aptr[3*col+2]; if (i < 0) i = 0; if (i > 255) i = 255; red->y[i]++;
+
+#ifdef USE_FOCUS
+		if (! Have_Focus_Client && time(NULL)>time_last_check+10) {						/* Only try every 10 seconds to reconnect */
+			time_last_check = time(NULL);
+			if ( (rc = Init_Focus_Client(server_IP)) != 0) {
+				fprintf(stderr, "ERROR: Unable to connect to the server at the specified IP address (%s)\n", server_IP);
+				fflush(stderr);
+			} else {
+				client_version = Focus_Remote_Query_Client_Version();
+				server_version = Focus_Remote_Query_Server_Version();
+				printf("Client/Server versions: %4.4d/%4.4d\n", client_version, server_version); fflush(stderr);
+				if (client_version != server_version) {
+					fprintf(stderr, "ERROR: Version mismatch between client and server.  Have to abort\n");
+					fflush(stderr);
 				} else {
-					i = aptr[col]; if (i < 0) i = 0; if (i > 255) i = 255; red->y[i]++;
+					Have_Focus_Client = TRUE;
 				}
 			}
 		}
-		if (dcx->SensorIsColor) {
-			SetDlgItemDouble(hdlg, IDT_RED_SATURATE,   "%.2f%%", (100.0*red->y[255]  )/(1.0*height*width));
-			SetDlgItemDouble(hdlg, IDT_GREEN_SATURATE, "%.2f%%", (100.0*green->y[255])/(1.0*height*width));
-			SetDlgItemDouble(hdlg, IDT_BLUE_SATURATE,  "%.2f%%", (100.0*blue->y[255] )/(1.0*height*width));
-			dcx->red_saturate   = (int) red->y[255];		red->y[255]   = 0;
-			dcx->green_saturate = (int) green->y[255];	green->y[255] = 0;
-			dcx->blue_saturate  = (int) blue->y[255];		blue->y[255]  = 0;
-			red->modified = green->modified = blue->modified = TRUE;
-			red->visible  = green->visible  = blue->visible  = TRUE;
-			red->rgb = RGB(255,0,0);
-			SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_REDRAW, 0, 0);
-		} else {
-			double rval;
-			rval = (100.0*red->y[255]  )/(1.0*height*width);
-			SetDlgItemDouble(hdlg, IDT_RED_SATURATE,   "%.2f%%", rval);
-			SetDlgItemDouble(hdlg, IDT_GREEN_SATURATE, "%.2f%%", rval);
-			SetDlgItemDouble(hdlg, IDT_BLUE_SATURATE,  "%.2f%%", rval);
-			dcx->red_saturate = dcx->green_saturate = dcx->blue_saturate = (int) red->y[255];
-			red->modified = TRUE;
-			red->visible = TRUE; green->visible = FALSE; blue->visible = FALSE;
-			red->rgb = RGB(225,225,255);
-			SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_REDRAW, 0, 0);
-		}
-		
-		/* Do the horizontal profile at centerline */
-		horz = dcx->horz_w;
-		horz_r = dcx->horz_r;
-		horz_g = dcx->horz_g;
-		horz_b = dcx->horz_b;
-		if (horz->npt < width) {
-			horz->x   = realloc(horz->x, width*sizeof(*horz->x));
-			horz->y   = realloc(horz->y, width*sizeof(*horz->y));
-			horz_r->x = realloc(horz_r->x, width*sizeof(*horz_r->x));
-			horz_r->y = realloc(horz_r->y, width*sizeof(*horz_r->y));
-			horz_g->x = realloc(horz_g->x, width*sizeof(*horz_g->x));
-			horz_g->y = realloc(horz_g->y, width*sizeof(*horz_g->y));
-			horz_b->x = realloc(horz_b->x, width*sizeof(*horz_b->x));
-			horz_b->y = realloc(horz_b->y, width*sizeof(*horz_b->y));
-		}
-		horz->npt = horz_r->npt = horz_g->npt = horz_b->npt = width;
-		aptr = pMem + pitch*((int) (height*dcx->y_image_target+0.5));			/* Pointer to target line */
-		for (i=0; i<width; i++) {
-			horz->x[i] = horz_r->x[i] = horz_g->x[i] = horz_b->x[i] = i;
-			if (dcx->SensorIsColor) {
-				horz->y[i] = (aptr[3*i+0] + aptr[3*i+1] + aptr[3*i+2])/3.0 ;		/* Average intensity */
-				horz_r->y[i] = aptr[3*i+2];
-				horz_g->y[i] = aptr[3*i+1];
-				horz_b->y[i] = aptr[3*i+0];
+
+		if (Have_Focus_Client && SharpnessDlg.hdlg != NULL && ! SharpnessDlg.paused) {			/* Do we have remote and the sharpness dialog up? */
+			int status;
+			GRAPH_CURVE *cv;
+			static BOOL InSweep=FALSE;
+
+			if ( (rc = Focus_Remote_Get_Focus_Status(&status)) != 0) {
+				fprintf(stderr, "ERROR: Looks like we lost the remote focus client.  Will recheck for it every 10 seconds.  (rc=%d)\n", rc); fflush(stderr);
+				Have_Focus_Client = FALSE;
+				InSweep = FALSE;
+			} else if ( SharpnessDlg.mode == TIME_SEQUENCE || (SharpnessDlg.mode == FOCUS_SWEEP && (status & FM_MOTOR_STATUS_SWEEP)) ) {
+				Focus_Remote_Get_Focus_Posn(&zposn);
+				if ( (cv = SharpnessDlg.cv) != NULL) {
+					if (SharpnessDlg.mode == FOCUS_SWEEP) {
+						if (! InSweep) cv->npt = 0;
+						InSweep = TRUE;
+					}
+					if (cv->npt >= cv->nptmax) {
+						cv->nptmax += 1024;
+						cv->x = realloc(cv->x, sizeof(*cv->x)*cv->nptmax);
+						cv->y = realloc(cv->y, sizeof(*cv->y)*cv->nptmax);
+					}
+					cv->x[cv->npt] = (SharpnessDlg.mode == FOCUS_SWEEP) ? zposn : cv->npt ;
+					cv->y[cv->npt] = delta_max;
+					cv->npt++;
+					cv->modified = TRUE;
+				}
 			} else {
-				horz->y[i] = horz_r->y[i] = horz_g->y[i] = horz_b->y[i] = aptr[i];
+				InSweep = FALSE;
 			}
 		}
-		memset(&scales, 0, sizeof(scales));
-		scales.xmin = 0;	scales.xmax = width-1;
-		scales.ymin = 0;  scales.ymax = 256;
-		scales.autoscale_x = FALSE; scales.force_scale_x = TRUE;
-		scales.autoscale_y = FALSE; scales.force_scale_y = TRUE;
-		horz->modified = TRUE;
-		horz->modified = horz_r->modified = horz_g->modified = horz_b->modified = TRUE;
-		SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_SET_SCALES, (WPARAM) &scales, (LPARAM) 0);
-		SendDlgItemMessage(hdlg, IDG_HORZ_PROFILE, WMP_REDRAW, 0, 0);
-		
-		vert = dcx->vert_w;
-		vert_r = dcx->vert_r;
-		vert_g = dcx->vert_g;
-		vert_b = dcx->vert_b;
-		if (vert->npt < height) {
-			vert->x = realloc(vert->x, height*sizeof(*vert->x));
-			vert->y = realloc(vert->y, height*sizeof(*vert->y));
-			vert_r->x = realloc(vert_r->x, height*sizeof(*vert_r->x));
-			vert_r->y = realloc(vert_r->y, height*sizeof(*vert_r->y));
-			vert_g->x = realloc(vert_g->x, height*sizeof(*vert_g->x));
-			vert_g->y = realloc(vert_g->y, height*sizeof(*vert_g->y));
-			vert_b->x = realloc(vert_b->x, height*sizeof(*vert_b->x));
-			vert_b->y = realloc(vert_b->y, height*sizeof(*vert_b->y));
-		}
-		vert->npt = vert_r->npt = vert_g->npt = vert_b->npt = height;
-		for (i=0; i<height; i++) {
-			vert->y[i] = vert_r->y[i] = vert_g->y[i] = vert_b->y[i] = height-1-i;
-			if (dcx->SensorIsColor) {
-				aptr = pMem + i*pitch + 3*((int) (width*dcx->x_image_target+0.5));	/* Access first of the column */
-				vert->x[i] = (3*256 - (aptr[0] + aptr[1] + aptr[2])) / 3.0;
-				vert_r->x[i] = 256 - aptr[2];
-				vert_g->x[i] = 256 - aptr[1];
-				vert_b->x[i] = 256 - aptr[0];
-			} else {
-				aptr = pMem + i*pitch + ((int) (width*dcx->x_image_target+0.5));		/* Access first of the column */
-				vert->x[i] = vert_r->x[i] = vert_g->x[i] = vert_b->x[i] = 256 - aptr[0];
-			}
-		}
-		memset(&scales, 0, sizeof(scales));
-		scales.xmin = 0; scales.xmax = 256;
-		scales.ymin = 0; scales.ymax = height-1;
-		scales.autoscale_x = FALSE;  scales.force_scale_x = TRUE;
-		scales.autoscale_y = FALSE;  scales.force_scale_y = TRUE;
-		vert->modified = vert_r->modified = vert_g->modified = vert_b->modified = TRUE;
-		SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_SCALES, (WPARAM) &scales, (LPARAM) 0);
-		SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_REDRAW, 0, 0);
+#endif
+
 	}
 
 	printf("ProcessNewImage thread exiting\n"); fflush(stdout);
@@ -754,6 +991,74 @@ static void AutoExposureThread(void *arglist) {
 		SetDlgItemText(hdlg, IDB_AUTO_EXPOSURE, "Auto");
 		EnableDlgItem(hdlg, IDB_AUTO_EXPOSURE, TRUE);
 	}
+
+	return;
+}
+
+/* ===========================================================================
+-- Thread from ARM ... waits for semaphore of a stripe starting, then
+-- turns on video.  Then waits for semaphore indicating the end of the
+-- stripe and turns off the video.  Call WMP_BURST_TRIG_COMPLETE when
+-- done to reset window controls.
+--
+-- Usage: _beginthread(AutoExposureThread, NULL);
+=========================================================================== */
+static void trigger_burst_mode(void *arglist) {
+
+	DCX_WND_INFO *dcx;
+	HWND hdlg;
+	HANDLE start, end;
+	char szTmp[256];
+	int rc;
+
+	static BOOL active=FALSE;
+
+	/* Get a pointer to the data structure */
+	dcx = (DCX_WND_INFO*) arglist;
+	hdlg = dcx->main_hdlg;
+	if (hdlg != NULL && ! IsWindow(hdlg)) hdlg = NULL;		/* Mark hdlg if not window */
+
+	/* Avoid multiple by just monitoring myself */
+	if (active) { Beep(300,200); return; }
+	active = TRUE;
+
+	/* Get the two global semaphores that LasGo uses to signal stripes */
+	start = OpenEvent(SYNCHRONIZE, FALSE, "LasGoStripeStart");
+	end   = OpenEvent(SYNCHRONIZE, FALSE, "LasGoStripeEnd");
+	if (start == NULL || end == NULL) {
+		sprintf_s(szTmp, sizeof(szTmp), "Unable to open the semaphore to the LasGo stripe triggers\n  start: %p  end: %p", start, end);
+		MessageBox(NULL, szTmp, "Arm failed", MB_ICONERROR | MB_OK);
+		goto ExitArmThread;
+	}
+
+	/* Wait for the start semaphore from a stripe */
+	/* Use 1000 ms wait to be able to watch for aborts */
+	while (TRUE) {
+		if (! dcx->BurstModeArmed) goto ExitArmThread;			/* Abort? */
+		if ( (rc = WaitForSingleObject(start, 500)) == WAIT_OBJECT_0) break;
+		if (rc != WAIT_TIMEOUT) {
+			sprintf_s(szTmp, sizeof(szTmp), "Wait for LasGoStripeStart semaphore returned error\n  rc=%d", rc);
+			MessageBox(NULL, szTmp, "Arm failed", MB_ICONERROR | MB_OK);
+			goto ExitArmThread;
+		}
+	}
+
+	/* Scan has started.  Turn on video and let it collect frames */
+	if (! dcx->BurstModeArmed) goto ExitArmThread;			/* Abort? */
+	dcx->nLast = dcx->nShow = dcx->nValid = 0;
+	dcx->LiveVideo = TRUE;
+	is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);	
+
+	/* Wait for the end signal ... but never more than 10 seconds */
+	rc = WaitForSingleObject(end, 10000);
+	is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
+	dcx->LiveVideo = FALSE;
+
+ExitArmThread:
+	if (start != NULL) CloseHandle(start);
+	if (end   != NULL) CloseHandle(end);
+	if (hdlg  != NULL) SendMessage(hdlg, WMP_BURST_TRIG_COMPLETE, 0, 0);
+	active = FALSE;
 
 	return;
 }
@@ -1326,7 +1631,7 @@ int DCx_Select_Resolution(HWND hdlg, DCX_WND_INFO *dcx, int ImageFormatID) {
 	if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
 		is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
 		dcx->LiveVideo = TRUE;
-		dcx->nLast = dcx->nValid = 0;
+		dcx->nLast = dcx->nShow = dcx->nValid = 0;
 		EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
 	} else {
 		SetDlgItemCheck(hdlg, IDB_LIVE, FALSE);
@@ -1413,7 +1718,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 	/* Make <ENTER> equivalent to losing focus */
 	static int DfltEnterList[] = {					
 		IDV_EXPOSURE_TIME, IDV_FRAME_RATE, IDV_GAMMA,IDT_CURSOR_X_PIXEL, IDT_CURSOR_Y_PIXEL,
-		IDV_RING_SIZE,
+		IDV_RING_SIZE, IDV_CURRENT_FRAME,
 		ID_NULL };
 
 	DCX_WND_INFO *dcx;
@@ -1469,12 +1774,16 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			SetDlgItemInt(hdlg, IDV_RING_SIZE, dcx->nRing, FALSE);
 			SetDlgItemInt(hdlg, IDT_FRAME_COUNT, 0, FALSE);
 			SetDlgItemInt(hdlg, IDT_FRAME_VALID, 0, FALSE);
+			SetDlgItemInt(hdlg, IDV_CURRENT_FRAME, 0, FALSE);
 #else
 			SetDlgItemInt(hdlg, IDV_RING_SIZE, 1, FALSE);
 			SetDlgItemInt(hdlg, IDT_FRAME_COUNT, 0, FALSE);
 			SetDlgItemInt(hdlg, IDT_FRAME_VALID, 0, FALSE);
+			SetDlgItemInt(hdlg, IDV_CURRENT_FRAME, 0, FALSE);
 			EnableDlgItem(hdlg, IDV_RING_SIZE, FALSE);
 			EnableDlgItem(hdlg, IDB_BURST, FALSE);
+			EnableDlgItem(hdlg, IDB_NEXT_FRAME, FALSE);
+			EnableDlgItem(hdlg, IDB_PREV_FRAME, FALSE);
 #endif
 
 			/* Now, initialize the rest of the windows (will fill in parts of dcx */
@@ -1531,7 +1840,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					if ( DCx_Select_Resolution(hdlg, dcx, nformat) == 0) {
 						ComboBoxSetByIntValue(hdlg, IDC_CAMERA_MODES, nformat);
 						is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
-						dcx->nLast = dcx->nValid = 0;
+						dcx->nLast = dcx->nShow = dcx->nValid = 0;
 						dcx->LiveVideo = TRUE;
 						SetDlgItemCheck(hdlg, IDB_LIVE, TRUE);
 						EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
@@ -1551,6 +1860,22 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				_beginthread(SequenceThread, 0, NULL);
 				dcx->SequenceThreadActive = TRUE;
 			}
+#endif
+
+#ifdef USE_NUMATO
+			if (! dcx->numato.initialized) {
+				dcx->numato.port        = NUMATO_COM_PORT;
+				dcx->numato.enabled     = FALSE;
+				dcx->numato.initialized = TRUE;
+			}
+			if (dcx->numato.on == 0) dcx->numato.on = 1;
+			dcx->numato.total = dcx->numato.on + dcx->numato.off;
+			dcx->numato.phase = 0;
+			ShowWindow(GetDlgItem(hdlg, IDB_LED_CONTROL), TRUE);
+#endif
+
+#ifndef USE_FOCUS
+			ShowWindow(GetDlgItem(hdlg, IDB_SHARPNESS_DIALOG, FALSE);
 #endif
 
 			/* Update the cursor position to initial value (probably 0) */
@@ -1706,6 +2031,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 		case WMP_SHOW_CURSOR_POSN:
 			SetDlgItemInt(hdlg, IDT_CURSOR_X_PIXEL, nint((dcx->x_image_target-0.5)*dcx->width),  TRUE);
 			SetDlgItemInt(hdlg, IDT_CURSOR_Y_PIXEL, nint((0.5-dcx->y_image_target)*dcx->height), TRUE);	/* Remember Y is top down */
+			if (dcx->hCam != 0) ShowImage(dcx, dcx->nShow, NULL);
 			rc = TRUE; break;
 
 		case WMP_SET_GAMMA:
@@ -1785,6 +2111,14 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETPOS, TRUE, i);
 			rcode = TRUE; break;
 
+		case WMP_BURST_TRIG_COMPLETE:
+			if (dcx->BurstModeArmed) {
+				for (i=0; BurstArmControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, BurstArmControls[i], TRUE);
+				SetDlgItemText(hdlg, IDB_ARM, "Arm");
+				dcx->BurstModeArmed = FALSE;
+			}
+			rcode = TRUE; break;
+
 		case WM_COMMAND:
 			wID = LOWORD(wParam);									/* Control sending message	*/
 			wNotifyCode = HIWORD(wParam);							/* Type of notification		*/
@@ -1801,6 +2135,9 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 								DCx_Set_Exposure(dcx, GetDlgItemDouble(hdlg, IDV_EXPOSURE_TIME), TRUE, hdlg);
 							} else if (*hptr == IDV_GAMMA) {
 								SendMessage(hdlg, WMP_SET_GAMMA, (int) (100*GetDlgItemDouble(hdlg, IDV_GAMMA)+0.5), 0);
+							} else if (*hptr == IDV_CURRENT_FRAME) {
+								SendMessage(hdlg, WM_COMMAND, MAKEWPARAM(IDV_CURRENT_FRAME, EN_KILLFOCUS), 0L);
+								SendDlgItemMessage(hdlg, IDV_CURRENT_FRAME, EM_SETSEL, 0, -1);
 							} else {
 								PostMessage(hdlg, WM_NEXTDLGCTL, 0, 0L);
 							}
@@ -1817,6 +2154,59 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					dcx->EnableErrorReports = GetDlgItemCheck(hdlg, wID);
 					is_SetErrorReport(0, dcx->EnableErrorReports ? IS_ENABLE_ERR_REP : IS_DISABLE_ERR_REP);
 					rcode = TRUE; break;
+
+#ifdef USE_RINGS
+				case IDB_NEXT_FRAME:
+				case IDB_PREV_FRAME:
+					if (dcx->LiveVideo) {
+						Beep(300,200);
+					} else if (dcx->nValid > 0) {
+						i = dcx->nShow + ((wID == IDB_NEXT_FRAME) ? +1 : -1);
+						if (i < 1) i = dcx->nValid;
+						if (i > dcx->nValid) i = 1;
+						ShowImage(dcx, i, NULL);
+					}
+					rcode = TRUE; break;
+
+				case IDV_CURRENT_FRAME:													/* Can be modified */
+					if (wNotifyCode == EN_KILLFOCUS) {
+						if (dcx->LiveVideo) {
+							Beep(300,200);
+						} else {
+							i = GetDlgItemIntEx(hdlg, wID);
+							if (i < 1) i = dcx->nValid;
+							if (i > dcx->nValid) i = 1;
+							ShowImage(dcx, i, NULL);
+						}
+					}
+					rcode = TRUE; break;
+#endif
+					
+				case IDB_ARM:																/* Arm for a single sweep of the laser stripe */
+					if (dcx->BurstModeArmed) {											/* We are to abort the mode */
+						dcx->BurstModeArmed = FALSE;									/* Mark for abort */
+						Sleep(500);															/* Most of the time until abort should be recognized */
+						for (i=0; BurstArmControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, BurstArmControls[i], TRUE);
+						SetDlgItemText(hdlg, IDB_ARM, "Arm");
+					} else {
+						if (dcx->LiveVideo) {
+							is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
+							dcx->LiveVideo = FALSE;
+							EnableDlgItem(hdlg, IDB_CAPTURE, TRUE);
+							SetDlgItemCheck(hdlg, IDB_LIVE, FALSE);
+						}
+						for (i=0; BurstArmControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, BurstArmControls[i], FALSE);
+						SetDlgItemText(hdlg, IDB_ARM, "Abort");
+						dcx->BurstModeArmed = TRUE;
+						_beginthread(trigger_burst_mode, 0, dcx);
+					}
+					rcode = TRUE; break;
+					
+#ifdef USE_FOCUS
+				case IDB_SHARPNESS_DIALOG:
+					_beginthread(show_sharpness_dialog_thread, 0, NULL);
+					rcode = TRUE; break;
+#endif
 					
 				case IDB_AUTO_EXPOSURE:
 					_beginthread(AutoExposureThread, 0, dcx);
@@ -1866,7 +2256,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 								is_StopLiveVideo(dcx->hCam, IS_WAIT);
 								is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
 								dcx->LiveVideo = TRUE;
-								dcx->nLast = dcx->nValid = 0;
+								dcx->nLast = dcx->nShow = dcx->nValid = 0;
 								SetDlgItemCheck(hdlg, IDB_LIVE, TRUE);
 								EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
 								SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
@@ -1887,7 +2277,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 							is_StopLiveVideo(dcx->hCam, IS_WAIT);
 							is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
 							dcx->LiveVideo = TRUE;
-							dcx->nLast = dcx->nValid = 0;
+							dcx->nLast = dcx->nShow = dcx->nValid = 0;
 							SetDlgItemCheck(hdlg, IDB_LIVE, TRUE);
 							EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
 							SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
@@ -2030,7 +2420,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
 						is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
 						dcx->LiveVideo = TRUE;
-						dcx->nLast = dcx->nValid = 0;
+						dcx->nLast = dcx->nShow = dcx->nValid = 0;
 						EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
 					} else {
 						is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
@@ -2057,7 +2447,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 					if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
 						is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
-						dcx->nLast = dcx->nValid = 0;
+						dcx->nLast = dcx->nShow = dcx->nValid = 0;
 						dcx->LiveVideo = TRUE;
 					}
 					rcode = TRUE; break;
@@ -2066,6 +2456,13 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					SaveBurstImages(dcx);
 					rcode = TRUE; break;
 
+				/* Process the LED control values */
+				case IDB_LED_CONTROL:
+#ifdef USE_NUMATO
+					DialogBox(hInstance, "IDD_LED_CONTROL", hdlg, (DLGPROC) LED_DlgProc);
+#endif
+					rcode = TRUE; break;
+					
 				/* Intentionally unused IDs */
 				case IDT_RED_SATURATE:
 				case IDT_GREEN_SATURATE:
@@ -2073,6 +2470,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case IDT_FRAMERATE:
 				case IDT_FRAME_COUNT:
 				case IDT_FRAME_VALID:
+				case IDT_SHARPNESS:
 					break;
 
 				default:
@@ -2086,9 +2484,26 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 static void show_camera_info_thread(void *arglist) {
-	DialogBox(hInstance, "IDD_CAMERA_INFO", main_dcx->main_hdlg, (DLGPROC) CameraInfoDlgProc);
+	static BOOL running = FALSE;
+	if (! running) {
+		running = TRUE;
+		DialogBox(hInstance, "IDD_CAMERA_INFO", HWND_DESKTOP, (DLGPROC) CameraInfoDlgProc);
+		running = FALSE;
+	}
 	return;
 }
+
+#ifdef USE_FOCUS
+static void show_sharpness_dialog_thread(void *arglist) {
+	static BOOL running = FALSE;
+	if (! running) {
+		running = TRUE;
+		DialogBox(hInstance, "IDD_FOCUS_MONITOR", HWND_DESKTOP, (DLGPROC) SharpnessDlgProc);
+		running = FALSE;
+	}
+	return;
+}
+#endif
 
 static int SaveBurstImages(DCX_WND_INFO *dcx) {
 
@@ -2182,7 +2597,7 @@ static int SaveBurstImages(DCX_WND_INFO *dcx) {
 		
 		if (wasLive) {
 			is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
-			dcx->nLast = dcx->nValid = 0;
+			dcx->nLast = dcx->nShow = dcx->nValid = 0;
 			dcx->LiveVideo = TRUE;
 		}
 	}
@@ -2190,6 +2605,286 @@ static int SaveBurstImages(DCX_WND_INFO *dcx) {
 #endif
 }
 
+
+#ifdef USE_NUMATO
+/* ===========================================================================
+=========================================================================== */
+BOOL CALLBACK LED_DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+	static char *rname = "LED_DlgProc";
+
+	DCX_WND_INFO *dcx;
+	int wID, wNotifyCode, rcode;
+
+	/* Copy the source of all information */
+	dcx = main_dcx;
+
+/* The message loop */
+	rcode = FALSE;
+	switch (msg) {
+
+		case WM_INITDIALOG:
+			SetDlgItemInt(hdlg, IDV_COM_PORT, dcx->numato.port, FALSE);
+			SetDlgItemCheck(hdlg, IDC_ENABLE, dcx->numato.enabled);
+			SetDlgItemInt(hdlg, IDV_LED_ON, dcx->numato.on, FALSE);
+			SetDlgItemInt(hdlg, IDV_LED_OFF, dcx->numato.off, FALSE);
+			SetRadioButtonIndex(hdlg, IDR_LED_OFF, IDR_LED_TOGGLE, dcx->numato.mode);
+			rcode = TRUE; break;
+
+		case WM_CLOSE:
+			EndDialog(hdlg,0);
+			rcode = TRUE; break;
+
+		case WM_COMMAND:
+			wID = LOWORD(wParam);									/* Control sending message	*/
+			wNotifyCode = HIWORD(wParam);							/* Type of notification		*/
+
+			switch (wID) {
+				case IDOK:												/* Default response for pressing <ENTER> */
+				case IDCANCEL:
+					SendMessage(hdlg, WM_CLOSE, 0, 0);
+					rcode = TRUE; break;
+
+				case IDV_COM_PORT:
+					if (wNotifyCode == EN_KILLFOCUS) {
+						if (GetDlgItemIntEx(hdlg, wID) != dcx->numato.port) {
+							if (dcx->numato.dio != NULL) {
+								NumatoQueryBit(dcx->numato.dio, 0, NULL);
+								NumatoCloseDIO(dcx->numato.dio);
+							}
+							dcx->numato.dio = NULL;
+							dcx->numato.port = GetDlgItemIntEx(hdlg, wID);
+						}
+					}
+					rcode = TRUE; break;
+
+				case IDC_ENABLE:
+					dcx->numato.enabled = GetDlgItemCheck(hdlg, wID);
+					rcode = TRUE; break;
+					
+				case IDV_LED_ON:
+					if (wNotifyCode == EN_KILLFOCUS) {
+						dcx->numato.on = GetDlgItemIntEx(hdlg, wID);
+						if (dcx->numato.on == 0) {
+							dcx->numato.on = 1;
+							SetDlgItemInt(hdlg, wID, 1, FALSE);
+						}
+						dcx->numato.total = dcx->numato.on + dcx->numato.off;
+						dcx->numato.phase = 0;
+					}
+					rcode = TRUE; break;
+
+				case IDV_LED_OFF:
+					if (wNotifyCode == EN_KILLFOCUS) {
+						dcx->numato.off = GetDlgItemIntEx(hdlg, wID);
+						dcx->numato.total = dcx->numato.on + dcx->numato.off;
+						dcx->numato.phase = 0;
+					}
+					rcode = TRUE; break;
+					
+				case IDR_LED_OFF:
+				case IDR_LED_ON:
+				case IDR_LED_TOGGLE:
+					dcx->numato.mode = GetRadioButtonIndex(hdlg, IDR_LED_OFF, IDR_LED_TOGGLE);
+					rcode = TRUE; break;
+
+				default:
+					printf("Unused wID in %s: %d\n", rname, wID); fflush(stdout);
+					break;
+			}
+
+			return rcode;
+	}
+	return 0;
+}
+
+#endif
+
+/* ===========================================================================
+=========================================================================== */
+#ifdef USE_FOCUS
+
+#define	TIMER_FOCUS_GRAPH_REDRAW	1
+
+BOOL CALLBACK SharpnessDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+	static char *rname = "SharpnessDlgProc";
+
+	DCX_WND_INFO *dcx;
+	int rc, wID, wNotifyCode, rcode;
+	GRAPH_CURVE *cv;
+	double zposn;
+
+	/* Copy the source of all information */
+	dcx = main_dcx;
+
+/* The message loop */
+	rcode = FALSE;
+	switch (msg) {
+
+		case WM_INITDIALOG:
+			DlgCenterWindowEx(hdlg, main_dcx->main_hdlg);
+			SharpnessDlg.hdlg = hdlg;											/* Okay, we are live now */
+			SharpnessDlg.mode = FOCUS_SWEEP;
+			SetRadioButtonIndex(hdlg, IDR_TIME_SEQUENCE, IDR_FOCUS_SWEEP, SharpnessDlg.mode);
+			SetDlgItemCheck(hdlg, IDC_PAUSE, SharpnessDlg.paused);
+			EnableDlgItem(hdlg, IDB_SET_EST_FOCUS, FALSE);
+
+			if (SharpnessDlg.cv == NULL) {
+				cv = calloc(sizeof(GRAPH_CURVE), 1);
+				cv->ID = 1;											/* reference curve */
+				strcpy_m(cv->legend, sizeof(cv->legend), "focus");
+				cv->master        = TRUE;
+				cv->visible       = TRUE;
+				cv->free_on_clear = FALSE;
+				cv->draw_x_axis   = cv->draw_y_axis   = TRUE;
+				cv->force_scale_x = cv->force_scale_y = FALSE;
+				cv->autoscale_x   = TRUE;	cv->autoscale_y = FALSE;
+				cv->npt = 0;
+				cv->nptmax = 1280;									/* Normally large enough, but will expand when set */
+				cv->isize = 2;
+				cv->x = calloc(sizeof(*cv->x), cv->nptmax);
+				cv->y = calloc(sizeof(*cv->y), cv->nptmax);
+				cv->rgb = RGB(150,255,150);
+				SharpnessDlg.cv = cv;
+			}
+			SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_CLEAR, (WPARAM) 0, (LPARAM) 0);
+			SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_SET_X_TITLE, (WPARAM) (SharpnessDlg.mode == TIME_SEQUENCE ? "frame" : "Z position [mm]"), (LPARAM) 0);
+			SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_SET_Y_TITLE, (WPARAM) "sharpness [counts/pixel]", (LPARAM) 0);
+			SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_ADD_CURVE, (WPARAM) SharpnessDlg.cv,  (LPARAM) 0);
+//			SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_SET_LABEL_VISIBILITY, 0, 0);
+//			SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_SET_TITLE_VISIBILITY, 0, 0);
+//			SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_SET_NO_MARGINS, 1, 0);
+//			SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_SET_BACKGROUND_COLOR, RGB(0,0,64), 0);
+//			memset(&parms, 0, sizeof(parms));
+//			parms.suppress_grid = parms.suppress_ticks = TRUE;
+//			SendDlgItemMessage(hdlg, IDG_VERT_PROFILE, WMP_SET_AXIS_PARMS, (WPARAM) &parms, (LPARAM) 0);
+
+			if (SharpnessDlg.focus == NULL) {
+				cv = calloc(sizeof(GRAPH_CURVE), 1);
+				cv->ID = 2;											/* reference curve */
+				strcpy_m(cv->legend, sizeof(cv->legend), "best focus");
+				cv->master        = FALSE;
+				cv->visible       = TRUE;
+				cv->free_on_clear = FALSE;
+				cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
+				cv->force_scale_x = cv->force_scale_y = FALSE;
+				cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
+				cv->npt = 0;
+				cv->nptmax = 100;									/* Normally large enough, but will expand when set */
+				cv->x = calloc(sizeof(*cv->x), cv->nptmax);
+				cv->y = calloc(sizeof(*cv->y), cv->nptmax);
+				cv->rgb = RGB(128,128,255);
+				SharpnessDlg.focus = cv;
+			}
+			SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_ADD_CURVE, (WPARAM) SharpnessDlg.focus,  (LPARAM) 0);
+
+			SetTimer(hdlg, TIMER_FOCUS_GRAPH_REDRAW, 200, NULL);									/* Redraw at max 5 Hz rate */
+			rcode = TRUE; break;
+
+		case WM_CLOSE:
+			SharpnessDlg.hdlg = NULL;											/* Okay, we are now alive */
+			EndDialog(hdlg,0);
+			rcode = TRUE; break;
+
+		case WM_TIMER:
+			if (wParam == TIMER_FOCUS_GRAPH_REDRAW && SharpnessDlg.cv != NULL && SharpnessDlg.cv->modified) {
+				int i;
+				double x0,y0,ymin,ymax,s0,sxy,sy;
+
+				cv = SharpnessDlg.cv;
+				if (SharpnessDlg.mode == FOCUS_SWEEP && cv->npt > 10) {
+					ymin = ymax = cv->y[0];
+					for (i=0; i<cv->npt; i++) {
+						if (cv->y[i] > ymax) ymax = cv->y[i];
+						if (cv->y[i] < ymin) ymin = cv->y[i];
+					}
+					x0 = cv->x[cv->npt/2];
+					y0 = ymin + 0.25*(ymax-ymin);								/* Only include y points 25% baseline */
+					s0 = sxy = sy = 0.0;
+					for (i=0; i<cv->npt; i++) {
+						if (cv->y[i] > y0) {
+							s0  += 1.0;
+							sy  += pow(cv->y[i],2);
+							sxy += pow(cv->y[i],2)*(cv->x[i]-x0);
+						}
+					}
+					x0 += (sy > 0) ? sxy/sy : 0;
+					cv = SharpnessDlg.focus;
+					cv->npt = cv->nptmax;
+					for (i=0; i<cv->npt; i++) {
+						cv->x[i] = x0;
+						cv->y[i] = ymin + (ymax-ymin)*i/(cv->npt-1.0);
+					}
+					cv->modified = TRUE;
+					SetDlgItemDouble(hdlg, IDT_EST_FOCUS, "%.3f", x0);
+					EnableDlgItem(hdlg, IDB_SET_EST_FOCUS, TRUE);
+				}
+				SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_REDRAW, 0L, 0L);
+			}
+			rcode = TRUE; break;
+			
+		case WM_COMMAND:
+			wID = LOWORD(wParam);									/* Control sending message	*/
+			wNotifyCode = HIWORD(wParam);							/* Type of notification		*/
+
+			switch (wID) {
+				case IDOK:												/* Default response for pressing <ENTER> */
+				case IDCANCEL:
+					SendMessage(hdlg, WM_CLOSE, 0, 0);
+					rcode = TRUE; break;
+
+				case IDR_TIME_SEQUENCE:
+				case IDR_FOCUS_SWEEP:
+					rc = GetRadioButtonIndex(hdlg, IDR_TIME_SEQUENCE, IDR_FOCUS_SWEEP);
+					if (rc != SharpnessDlg.mode) {
+						SharpnessDlg.mode = rc;
+						SendDlgItemMessage(hdlg, IDG_FOCUS_GRAPH, WMP_SET_X_TITLE, (WPARAM) (SharpnessDlg.mode == TIME_SEQUENCE ? "frame" : "Z position [mm]"), (LPARAM) 0);
+						if (SharpnessDlg.cv != NULL) {
+							SharpnessDlg.cv->npt = 0;
+							SharpnessDlg.focus->npt = 0;
+							SharpnessDlg.cv->modified = TRUE;
+						}
+						EnableDlgItem(hdlg, IDB_SET_EST_FOCUS, FALSE);
+						SetDlgItemText(hdlg, IDT_EST_FOCUS, "");
+					}
+					rcode = TRUE; break;
+
+				case IDC_PAUSE:
+					SharpnessDlg.paused = GetDlgItemCheck(hdlg, wID);
+					rcode = TRUE; break;
+
+				case IDB_CLEAR_FOCUS_GRAPH:
+					if (SharpnessDlg.cv != NULL) {
+						SharpnessDlg.cv->npt = 0;
+						SharpnessDlg.focus->npt = 0;
+						SharpnessDlg.cv->modified = TRUE;
+					}
+					EnableDlgItem(hdlg, IDB_SET_EST_FOCUS, FALSE);
+					SetDlgItemText(hdlg, IDT_EST_FOCUS, "");
+					rcode = TRUE; break;
+
+				case IDB_SET_EST_FOCUS:
+					zposn = GetDlgItemDouble(hdlg, IDT_EST_FOCUS);
+					if (zposn != 0) {
+						Focus_Remote_Set_Focus_Posn(zposn, TRUE);
+					} else {
+						Beep(300,200);
+					}
+					rcode = TRUE; break;
+
+				/* Known unused items */
+				case IDT_EST_FOCUS:
+					rcode = TRUE; break;
+					
+				default:
+					printf("Unused wID in %s: %d\n", rname, wID); fflush(stdout);
+					break;
+			}
+
+			return rcode;
+	}
+	return 0;
+}
+#endif
 
 /* ===========================================================================
 =========================================================================== */
@@ -2201,6 +2896,7 @@ BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPara
 	char szTmp[256];
 	CAMINFO camInfo;
 	SENSORINFO SensorInfo;
+	UINT nRange[3], nPixelClock, newPixelClock;
 
 	/* Copy the source of all information */
 	dcx = main_dcx;
@@ -2210,6 +2906,7 @@ BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPara
 	switch (msg) {
 
 		case WM_INITDIALOG:
+			DlgCenterWindowEx(hdlg, main_dcx->main_hdlg);
 			rc = is_GetCameraInfo(dcx->hCam, &camInfo);
 			if (rc == IS_SUCCESS) {
 				SetDlgItemText(hdlg, IDT_CAMERA_SERIAL_NO,		camInfo.SerNo);
@@ -2229,6 +2926,18 @@ BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPara
 				SetDlgItemInt(hdlg, IDT_CAMERA_PIXEL_PITCH, SensorInfo.wPixelSize, FALSE);
 			}
 
+			/* Get pixel clock data */
+			rc = is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_GET_RANGE, (void *) &nRange, sizeof(nRange));
+			if (rc == 0) {
+				SetDlgItemInt(hdlg, IDT_PIXEL_CLOCK_MIN, nRange[0], FALSE);
+				SetDlgItemInt(hdlg, IDT_PIXEL_CLOCK_MAX, nRange[1], FALSE);
+				SetDlgItemInt(hdlg, IDT_PIXEL_CLOCK_INC, nRange[2], FALSE);
+			}
+			rc = is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_GET, (void *) &nPixelClock, sizeof(nPixelClock));
+			if (rc == 0) SetDlgItemInt(hdlg, IDT_PIXEL_CLOCK_CURRENT, nPixelClock, FALSE);
+			rc = is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_GET_DEFAULT, (void *) &nPixelClock, sizeof(nPixelClock));
+			if (rc == 0) SetDlgItemInt(hdlg, IDT_PIXEL_CLOCK_DEFAULT, nPixelClock, FALSE);
+
 			rcode = TRUE; break;
 
 		case WM_CLOSE:
@@ -2245,7 +2954,24 @@ BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPara
 					SendMessage(hdlg, WM_CLOSE, 0, 0);
 					rcode = TRUE; break;
 
+				case IDB_PIXEL_CLOCK_SET:
+					newPixelClock = GetDlgItemIntEx(hdlg, IDV_PIXEL_CLOCK_SET);
+					is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_GET_RANGE, (void *) &nRange, sizeof(nRange));
+					if (newPixelClock < nRange[0]) newPixelClock = nRange[0];
+					if (newPixelClock > nRange[1]) newPixelClock = nRange[1];
+					SetDlgItemInt(hdlg, IDV_PIXEL_CLOCK_SET, newPixelClock, FALSE);
+					is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_SET, (void *) &newPixelClock, sizeof(newPixelClock));
+					is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_GET, (void *) &nPixelClock, sizeof(nPixelClock));
+					SetDlgItemInt(hdlg, IDT_PIXEL_CLOCK_CURRENT, nPixelClock, FALSE);
+					rcode = TRUE; break;
+
 				/* Intentionally unused IDs */
+				case IDV_PIXEL_CLOCK_SET:
+				case IDT_PIXEL_CLOCK_MIN:
+				case IDT_PIXEL_CLOCK_MAX:
+				case IDT_PIXEL_CLOCK_INC:
+				case IDT_PIXEL_CLOCK_CURRENT:
+				case IDT_PIXEL_CLOCK_DEFAULT:
 				case IDT_CAMERA_MANUFACTURER:
 				case IDT_CAMERA_MODEL:
 				case IDT_CAMERA_SERIAL_NO:
@@ -2730,7 +3456,7 @@ int DCx_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMA
 
 	if (dcx->LiveVideo) {
 		is_CaptureVideo(hCam, IS_DONT_WAIT);
-		dcx->nLast = dcx->nValid = 0;
+		dcx->nLast = dcx->nShow = dcx->nValid = 0;
 	}
 	
 	return rc;
@@ -2823,7 +3549,7 @@ int DCx_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer) {
 
 	if (dcx->LiveVideo) {
 		is_CaptureVideo(hCam, IS_DONT_WAIT);
-		dcx->nLast = dcx->nValid = 0;
+		dcx->nLast = dcx->nShow = dcx->nValid = 0;
 	}
 	return 0;
 }
@@ -3113,8 +3839,7 @@ static int AllocRingBuffers(DCX_WND_INFO *dcx, int nRing) {
 			fprintf(stderr, "  Adding image to the list failed (rc=%d)\n", rc); fflush(stderr);
 		}
 	}
-	dcx->nLast = dcx->nValid = 0;
-	printf("  Allocated %d images for ring buffer\n", dcx->nRing); fflush(stdout);
+	dcx->nLast = dcx->nShow = dcx->nValid = 0;
 #endif
 
 	dcx->Image_Mem_Allocated = TRUE;
@@ -3123,7 +3848,7 @@ static int AllocRingBuffers(DCX_WND_INFO *dcx, int nRing) {
 	if (LiveVideo_Hold) {
 		is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);			/* If live, need to turn off to reset */
 		dcx->LiveVideo = TRUE;
-		dcx->nLast = dcx->nValid = 0;
+		dcx->nLast = dcx->nShow = dcx->nValid = 0;
 	}
 
 	return 0;
