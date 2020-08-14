@@ -233,7 +233,6 @@ typedef struct _DCX_WND_INFO {
 		int port;
 		BOOL enabled;
 		NUMATO *dio;
-		enum {DIO_UNKNOWN=0, DIO_INPUT=1, DIO_OUTPUT=2} bit_mode;
 		BOOL bit_is_output;
 		enum {DIO_OFF=0, DIO_ON=1, DIO_TOGGLE=2} mode;
 		int on, off, total, phase;

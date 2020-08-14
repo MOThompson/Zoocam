@@ -50,7 +50,7 @@
 #define	USE_FOCUS
 
 #ifdef USE_NUMATO
-	#define	NUMATO_COM_PORT	3				/* Set to COM port to use */
+	#define	NUMATO_COM_PORT	4			/* Set to COM port to use */
 	#include "Numato_DIO.h"					/* For toggling an LED between images */
 #endif
 
@@ -795,22 +795,11 @@ static void ProcessNewImage(void *arglist) {
 		if ( (PID = FindImagePID(dcx, pMem, &index)) == -1) continue;
 
 #ifdef USE_NUMATO
-		my_timer(TRUE);
-		if (dcx->numato.enabled && dcx->numato.dio == NULL) {
-			dcx->numato.dio = NumatoOpenDIO(dcx->numato.port, NULL);
-			if (dcx->numato.dio == NULL) dcx->numato.enabled = FALSE;
-			dcx->numato.bit_mode = DIO_UNKNOWN;
-			dcx->numato.phase = 0;
-		}
-		if (! dcx->numato.enabled && dcx->numato.dio != NULL && dcx->numato.bit_mode != DIO_INPUT) {
-			NumatoQueryBit(dcx->numato.dio, 0, NULL);
-			dcx->numato.bit_mode = DIO_INPUT;
-		}
-		if (dcx->numato.enabled && dcx->numato.dio != NULL) {
+		if (dcx->numato.enabled && dcx->numato.mode == DIO_TOGGLE) {
+			my_timer(TRUE);
 			NumatoSetBit(dcx->numato.dio, 0, dcx->numato.phase < dcx->numato.on);
-			dcx->numato.bit_mode = DIO_OUTPUT;
 			if (++dcx->numato.phase >= dcx->numato.on+dcx->numato.off) dcx->numato.phase = 0;
-			if (my_timer(FALSE) > 0.005) fprintf(stderr, "DIO cost: %.6f\n", my_timer(FALSE)); fflush(stderr);
+			if (my_timer(FALSE) > 0.005) { fprintf(stderr, "DIO cost: %.6f\n", my_timer(FALSE)); fflush(stderr); }
 		}
 #endif
 
@@ -2653,38 +2642,48 @@ BOOL CALLBACK LED_DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 							}
 							dcx->numato.dio = NULL;
 							dcx->numato.port = GetDlgItemIntEx(hdlg, wID);
+							SetDlgItemCheck(hdlg, IDC_ENABLE, FALSE);
+							dcx->numato.enabled = FALSE;
 						}
 					}
 					rcode = TRUE; break;
 
 				case IDC_ENABLE:
-					dcx->numato.enabled = GetDlgItemCheck(hdlg, wID);
+					if (dcx->numato.enabled = GetDlgItemCheck(hdlg, wID)) {
+						if ( (dcx->numato.dio = NumatoOpenDIO(dcx->numato.port, FALSE)) == NULL ) {
+							SetDlgItemCheck(hdlg, IDC_ENABLE, FALSE);
+							dcx->numato.enabled = FALSE;
+						} else if (dcx->numato.mode != DIO_TOGGLE) {
+							NumatoSetBit(dcx->numato.dio, 0, dcx->numato.mode == DIO_ON);
+						}
+					} else if (dcx->numato.dio != NULL) {
+						NumatoQueryBit(dcx->numato.dio, 0, NULL);
+						NumatoCloseDIO(dcx->numato.dio);
+						dcx->numato.dio = NULL;
+					}
 					rcode = TRUE; break;
 					
 				case IDV_LED_ON:
+				case IDV_LED_OFF:
 					if (wNotifyCode == EN_KILLFOCUS) {
-						dcx->numato.on = GetDlgItemIntEx(hdlg, wID);
-						if (dcx->numato.on == 0) {
+						dcx->numato.on  = GetDlgItemIntEx(hdlg, IDV_LED_ON);
+						dcx->numato.off = GetDlgItemIntEx(hdlg, IDV_LED_OFF);
+						if (dcx->numato.on <= 0) {
 							dcx->numato.on = 1;
-							SetDlgItemInt(hdlg, wID, 1, FALSE);
+							SetDlgItemInt(hdlg, IDV_LED_ON, 1, FALSE);
 						}
 						dcx->numato.total = dcx->numato.on + dcx->numato.off;
 						dcx->numato.phase = 0;
 					}
 					rcode = TRUE; break;
 
-				case IDV_LED_OFF:
-					if (wNotifyCode == EN_KILLFOCUS) {
-						dcx->numato.off = GetDlgItemIntEx(hdlg, wID);
-						dcx->numato.total = dcx->numato.on + dcx->numato.off;
-						dcx->numato.phase = 0;
-					}
-					rcode = TRUE; break;
-					
 				case IDR_LED_OFF:
 				case IDR_LED_ON:
 				case IDR_LED_TOGGLE:
 					dcx->numato.mode = GetRadioButtonIndex(hdlg, IDR_LED_OFF, IDR_LED_TOGGLE);
+					if (dcx->numato.enabled && dcx->numato.mode != DIO_TOGGLE) {
+						NumatoSetBit(dcx->numato.dio, 0, dcx->numato.mode == DIO_ON);
+					}
 					rcode = TRUE; break;
 
 				default:
