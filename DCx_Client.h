@@ -12,18 +12,57 @@
 /* =============================
 -- Port that the server runs
 ============================= */
-#define	DCX_ACCESS_PORT		(985)					/* Port for client/server connections */
+#define	DCX_ACCESS_PORT		(1916)				/* Port for client/server connections */
 
 #define	DFLT_SERVER_IP_ADDRESS	"128.253.129.93"		/* "127.0.0.1" for loop-back */
 #define	LOOPBACK_SERVER_IP_ADDRESS	"127.0.0.1"			/* Server on this computer */
 
 /* List of the allowed requests */
-#define SERVER_END				(0)		/* Shut down server (please don't use) */
-#define DCX_QUERY_VERSION		(1)		/* Return version of the server code */
-#define DCX_GET_CAMERA_INFO	(2)		/* Return structure with camera data */
-#define DCX_ACQUIRE_IMAGE		(3)		/* Acquire image only (local storage) */
-#define DCX_GET_IMAGE_INFO		(4)		/* Return info on the image */
-#define DCX_GET_IMAGE_DATA		(5)		/* Transfer the actual image data */
+#define SERVER_END				 (0)		/* Shut down server (please don't use) */
+#define DCX_QUERY_VERSION		 (1)		/* Return version of the server code */
+#define DCX_GET_CAMERA_INFO	 (2)		/* Return structure with camera data */
+#define DCX_ACQUIRE_IMAGE		 (3)		/* Acquire image only (local storage) */
+#define DCX_GET_IMAGE_INFO		 (4)		/* Return info on the image acquired by DCX_ACQUIRE_IMAGE */
+#define DCX_GET_CURRENT_IMAGE	 (5)		/* Transfer the actual image data from DCX_ACQUIRE_IMAGE */
+	#define DCX_GET_IMAGE_DATA	 (5)		/* Older #define for DCX_GET_CURRENT_IMAGE */
+#define DCX_GET_CAMERA_PARMS	 (6)		/* Query the current image capture parameters */
+#define DCX_SET_CAMERA_PARMS 	 (7)		/* Set one or more of the image capture parameters */
+
+
+/* See DCx_Ring_Actions() for return values */
+#define DCX_RING_INFO			 (8)		/* Return DCX_REMOTE_RING_INFO structure with parameters for buffer rings */
+#define DCX_RING_GET_SIZE		 (9)		/* Return current number of buffers (maximum frames) in the ring */
+#define DCX_RING_SET_SIZE		 (10)		/* Set the number of buffers in the ring (will reset all frames) */
+#define DCX_RING_GET_FRAME_CNT (11)		/* Get number of frames in ring that are active */
+#define DCX_RING_IMAGE_N_DATA	 (12)		/* Return image data for frame buffer N (option) */
+
+/* See DCx_Burst_Actions() for return values */
+#define DCX_BURST_ARM			 (13)		/* Arm the burst (returns immediately) */
+#define DCX_BURST_ABORT			 (14)		/* Abort awaiting burst (returns immediately) */
+#define DCX_BURST_STATUS		 (15)		/* Query status of the burst (is it armed, complete, etc.) */
+#define DCX_BURST_WAIT			 (16)		/* Wait for burst to complete (request.option = msTimeout) */
+
+#define DCX_LED_SET_STATE		 (17)		/* Set LED current supply either on or off (or query) */
+#define DCX_SAVE_IMAGE_BUFFERS (18)		/* Save image buffers based on template pathname */
+
+/* Structures */
+#pragma pack(4)
+typedef struct _DCX_REMOTE_RING_INFO {
+	int nRing,									/* Number of buffers in the ring */
+	nLast,										/* Last buffer index used (from events) */
+	nShow,										/* Currently display frame */
+	nValid;										/* Highest buffer index used since reset */
+} DCX_REMOTE_RING_INFO;
+#pragma pack()
+
+#pragma pack(4)
+typedef struct _DCX_REMOTE_RING_IMAGE {
+	double tstamp;								/* Time of image (seconds w/ ms resolution) */
+	int width, height;						/* Image size */
+	int pitch;									/* Byte offset between rows (also gives bytes/pixel) */
+	char data[0];								/* width x height data immediately follows */
+} DCX_REMOTE_RING_IMAGE;
+#pragma pack()
 
 /* ===========================================================================
 -- Routine to open and initialize the socket to the DCx server

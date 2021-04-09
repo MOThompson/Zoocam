@@ -13,6 +13,31 @@
 #define IDC_WINDOWSPROJECT1             109
 #define IDR_MAINFRAME                   128
 #define IDB_LOGO                        135
+#define IDD_DIALOG1                     138
+#define IDB_YELLOW_LED                  139
+#define IDB_RED_LED                     140
+#define IDB_GREEN_LED                   141
+#define IDB_GRAY_LED                    142
+#define IDV_CURRENT                     1000
+#define IDV_VOLTAGE                     1001
+#define IDB_CURRENT_ON                  1002
+#define IDT_CURRENT                     1003
+#define IDB_CURRENT_OFF                 1004
+#define ID_LED                          1005
+#define IDT_VOLTAGE                     1006
+#define IDT_LEVELS                      1007
+#define IDT_STATUS                      1009
+#define IDB_SET_I                       1010
+#define IDB_SET_V                       1011
+#define IDC_CONNECT                     1015
+#define IDC_B0                          1016
+#define IDC_B1                          1017
+#define IDC_B2                          1018
+#define IDC_B3                          1019
+#define IDC_B4                          1020
+#define IDT_SRQ                         1021
+#define IDB_STATUS_UPDATE               1022
+#define IDC_STATUS_ON                   1023
 #define IDB_SAVE                        1998
 #define IDT_COMPILE_VERSION             1999
 #define IDC_STATIC_ABOUT_COMPANY        2000
@@ -97,6 +122,7 @@
 #define IDB_SHARPNESS_DIALOG            2070
 #define IDB_LED_CONTROL                 2071
 #define IDV_COM_PORT                    2072
+#define IDC_TRACK_CENTROID              2072
 #define IDC_ENABLE                      2073
 #define IDV_LED_ON                      2074
 #define IDV_LED_OFF                     2075
@@ -113,6 +139,7 @@
 #define IDB_ARM                         2086
 #define IDB_PREV_FRAME                  2087
 #define IDB_NEXT_FRAME                  2088
+#define IDC_GPIB                        2401
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -120,9 +147,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        138
+#define _APS_NEXT_RESOURCE_VALUE        143
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2088
+#define _APS_NEXT_CONTROL_VALUE         2091
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

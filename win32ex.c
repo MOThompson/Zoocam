@@ -296,11 +296,15 @@ int GetRadioButtonIndex(HWND hdlg, int nID_first, int nID_last) {
 -- associated with the selected item, as well as choosing an item based
 -- on the value rather than index in the list.
 --
--- Usage: int ComboBoxFillIntList(HWND hdlg, int wID, CB_INT_LIST *list, int n);
---        int ComboBoxClearSelection(HWND hdlg, int wID);
+-- Usage: int ComboBoxClearList(HWND hdlg, int wID);
+--			 int ComboBoxClearSelection(HWND hdlg, int wID);
+--
+--			 int ComboBoxGetIndex(HWND hdlg, int wID);
+--			 int ComboBoxSetByIndex(HWND hdlg, int wID, int index);
+--
+--        int ComboBoxFillIntList(HWND hdlg, int wID, CB_INT_LIST *list, int n);
 --        int ComboBoxGetIntValue(HWND hdlg, int wID);
 --        int ComboBoxSetByIntValue(HWND hdlg, int wID, int ival);
---			 int ComboBoxClearList(HWND hdlg, int wID);
 --
 --        int ComboBoxFillPtrList(HWND hdlg, int wID, CB_PTR_LIST *list, int n);
 --        void *ComboBoxGetPtrValue(HWND hdlg, int wID);
@@ -331,6 +335,17 @@ int ComboBoxClearList(HWND hdlg, int wID) {
 int ComboBoxClearSelection(HWND hdlg, int wID) {
 	SendDlgItemMessage(hdlg, wID, CB_SETCURSEL, (WPARAM) -1, (LPARAM) 0);
 	return 0;
+}
+
+int ComboBoxGetIndex(HWND hdlg, int wID) {
+	int item;
+	item = (int) SendDlgItemMessage(hdlg, wID, CB_GETCURSEL, (WPARAM) 0, (LPARAM) 0);
+	if (item == CB_ERR) item = 0;
+	return item;
+}
+
+int ComboBoxSetByIndex(HWND hdlg, int wID, int index) {
+	return SendDlgItemMessage(hdlg, wID, CB_SETCURSEL, index, (LPARAM) 0);
 }
 
 int ComboBoxFillIntList(HWND hdlg, int wID, CB_INT_LIST *list, int n) {
@@ -1095,6 +1110,7 @@ void AbortOnFatalError( char *rname, char *msg ) {
 --        msg     - pointer to string to display in the text region
 --        fSize   - font size (points)
 --        colorindex - which of defined colors to paint with
+--          [0..4] ==> black, red, green, blue, white
 --
 -- Output: none
 --

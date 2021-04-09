@@ -4,7 +4,6 @@
 /* Feature test macros            */
 /* ------------------------------ */
 #define _POSIX_SOURCE						/* Always require POSIX standard */
-#define _CRT_SECURE_NO_WARNINGS	/* Turn off for this routine (intentional use of strncpy) */
 
 /* To use the double buffering with a memory device context, define USE_MEMORY_DC and set ERASE... to FALSE */
 #define	USE_MEMORY_DC
@@ -405,7 +404,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				ymax = graph->ymax;
 				if (graph->autoy) {
 					if (cv != NULL) {
-						ymin = cv->logymin; xmax = cv->logymax;
+						ymin = cv->logymin; ymax = cv->logymax;
 					} else {
 						ymin = DBL_MAX; ymax = -DBL_MAX;
 						for (i=0; i<graph->ncurves; i++) {
@@ -898,7 +897,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			if ((int) lParam != 0) *((void **) lParam) = NULL;		/* Default return value	 */
 			i = (int) wParam;													/* What curve do we want */
 			if (i > 0 && i <= graph->ncurves) {
-				if ((int) lParam != 0) *((GRAPH_CURVE **) lParam) = graph->curve[i];
+				if ((int) lParam != 0) *((GRAPH_CURVE **) lParam) = graph->curve[i-1];
 				rc = 0;															/* Curve does exist */
 			}
 			break;
@@ -1055,7 +1054,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 		case WMP_SET_X_TITLE:
 			if ( ((char *) wParam) != NULL) {
-				strncpy(graph->x_title, (char *) wParam, sizeof(graph->x_title));
+				strcpy_s(graph->x_title, sizeof(graph->x_title), (char *) wParam);
 				graph->x_title[sizeof(graph->x_title)-1] = '\0';
 			} else {
 				*graph->x_title = '\0';
@@ -1065,7 +1064,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 		case WMP_SET_Y_TITLE:
 			if ( ((char *) wParam) != NULL) {
-				strncpy(graph->y_title, (char *) wParam, sizeof(graph->y_title));
+				strcpy_s(graph->y_title, sizeof(graph->y_title), (char *) wParam);
 				graph->y_title[sizeof(graph->y_title)-1] = '\0';
 			} else {
 				*graph->y_title = '\0';

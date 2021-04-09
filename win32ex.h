@@ -24,10 +24,11 @@ int SetDlgRTFText(HWND hdlg, int control, char *msg, int fSize, int colorindex);
 /******************************************************************************
    Macros
 ******************************************************************************/
-#define GetDlgItemCheck( hwnd, ID )	( SendDlgItemMessage( hwnd, ID, BM_GETCHECK, 0, 0 ) == BST_CHECKED )
-#define SetDlgItemCheck( hwnd, ID, mark )	SendDlgItemMessage( hwnd, ID, BM_SETCHECK, ( mark ? BST_CHECKED : BST_UNCHECKED ), 0 )
-#define ClickDlgItem( hwnd, ID ) SendMessage( hdlg, WM_COMMAND, MAKEWPARAM( ID, BN_CLICKED ), 0 )
-#define EnableDlgItem(hdlg, wID, flag) EnableWindow(GetDlgItem(hdlg, wID), flag)
+#define GetDlgItemCheck( hwnd, ID )			( SendDlgItemMessage( hwnd, ID, BM_GETCHECK, 0, 0 ) == BST_CHECKED )
+#define SetDlgItemCheck( hwnd, ID, mark )	( SendDlgItemMessage( hwnd, ID, BM_SETCHECK, ( mark ? BST_CHECKED : BST_UNCHECKED ), 0 ) )
+#define ClickDlgItem( hwnd, ID )				( SendMessage( hdlg, WM_COMMAND, MAKEWPARAM( ID, BN_CLICKED ), 0 ) )
+#define EnableDlgItem(hdlg, wID, flag)		( EnableWindow(GetDlgItem(hdlg, wID), flag) )
+#define ShowDlgItem(hdlg, wID, flag)		( ShowWindow(GetDlgItem(hdlg, wID), flag) )
 
 /* **************************************************************************
    Routines to determine which radio button is checked
@@ -73,6 +74,10 @@ typedef struct _CB_PTR_LIST {
 
 int ComboBoxClearList(HWND hdlg, int wID);
 int ComboBoxClearSelection(HWND hdlg, int wID);
+
+int ComboBoxGetIndex(HWND hdlg, int wID);
+int ComboBoxSetByIndex(HWND hdlg, int wID, int index);
+
 int ComboBoxFillIntList(HWND hdlg, int wID, CB_INT_LIST *list, int n);
 int ComboBoxGetIntValue(HWND hdlg, int wID);
 int ComboBoxSetByIntValue(HWND hdlg, int wID, int ival);

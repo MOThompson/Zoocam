@@ -21,6 +21,7 @@
 /* ------------------------------ */
 #include "server_support.h"		/* Server support routine */
 #include "DCx.h"						/* Access to the DCX info */
+#include "Ki224.h"					/* Access to the current control */
 #include "DCx_server.h"				/* Prototypes for main	  */
 #include "DCx_client.h"				/* Version info and port  */
 
@@ -128,12 +129,17 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 	CS_MSG request, reply;
 	void *received_data, *reply_data;
 	BOOL ServerActive;
-
+	int rvals[4];										/* Return values */
 	DCX_STATUS camera_info;
+	double tstamp;
+	int width, height, pitch;
+	char *pMem;
 
 	/* These refer to the last captured image */
 	static DCX_IMAGE_INFO image_info;
 	static char *image_data;
+	static DCX_REMOTE_RING_INFO   ring_info;
+	static DCX_REMOTE_RING_IMAGE *ring_image=NULL;
 
 /* Get standard request from client and process */
 	ServerActive = TRUE;
@@ -185,14 +191,82 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 					reply_data = (void *) &image_info;				}
 				break;
 
-			case DCX_GET_IMAGE_DATA:
-				fprintf(stderr, "  DCx msg server: DCX_GET_IMAGE_DATA()\n");	fflush(stderr);
+			case DCX_GET_CURRENT_IMAGE:
+				fprintf(stderr, "  DCx msg server: DCX_GET_CURRENT_IMAGE()\n");	fflush(stderr);
 				if (image_data == NULL) {
 					reply.rc = -1;
 				} else {
 					reply.rc = 0; 
 					reply.data_len = image_info.memory_pitch * image_info.height;
-					reply_data = (void *) image_data;				}
+					reply_data = (void *) image_data;
+				}
+				break;
+
+			case DCX_RING_IMAGE_N_DATA:
+				fprintf(stderr, "  DCx msg server: DCX_RING_IMAGE_N_DATA()\n");	fflush(stderr);
+				reply.rc = DCx_Query_Frame_Data(request.option, &tstamp, &width, &height, &pitch, &pMem);
+				if (reply.rc == 0) {
+					if (ring_image != NULL) free(ring_image);
+					reply.data_len = pitch*height + sizeof(*ring_image);
+					reply_data = (void *) ring_image = malloc(reply.data_len);
+					ring_image->tstamp = tstamp;
+					ring_image->width  = width;
+					ring_image->height = height;
+					ring_image->pitch  = pitch;
+					memcpy(&ring_image->data[0], pMem, pitch*height);
+				} 
+				break;
+				
+			case DCX_RING_INFO:
+				fprintf(stderr, "  DCx msg server: DCX_RING_INFO()\n");	fflush(stderr);
+				reply.rc = DCx_Ring_Actions(RING_GET_INFO, 0, rvals);
+				ring_info.nRing = rvals[0];
+				ring_info.nLast = rvals[1];
+				ring_info.nShow = rvals[2];
+				ring_info.nValid = rvals[3];
+				reply.data_len = sizeof(ring_info);
+				reply_data = (void *) &ring_info;
+				break;
+				
+			case DCX_RING_GET_SIZE:
+				fprintf(stderr, "  DCx msg server: DCX_RING_GET_SIZE()\n");	fflush(stderr);
+				DCx_Ring_Actions(RING_GET_SIZE, 0, &reply.rc);
+				break;
+
+			case DCX_RING_SET_SIZE:
+				fprintf(stderr, "  DCx msg server: DCX_RING_SET_SIZE(%d)\n", request.option);	fflush(stderr);
+				reply.rc = DCx_Ring_Actions(RING_SET_SIZE, request.option, &reply.rc);
+				break;
+
+			case DCX_RING_GET_FRAME_CNT:
+				fprintf(stderr, "  DCx msg server: DCX_RING_GET_FRAME_CNT()\n");	fflush(stderr);
+				DCx_Ring_Actions(RING_GET_ACTIVE_CNT, 0, &reply.rc);
+				break;
+
+			case DCX_BURST_ARM:
+				fprintf(stderr, "  DCx msg server: DCX_BURST_ARM()\n");	fflush(stderr);
+				DCx_Burst_Actions(BURST_ARM, 0, &reply.rc);			/* Arm the burst */
+				break;
+
+			case DCX_BURST_ABORT:
+				fprintf(stderr, "  DCx msg server: DCX_BURST_ABORT()\n");	fflush(stderr);
+				DCx_Burst_Actions(BURST_ABORT, 0, &reply.rc);		/* Abort existing request */
+				break;
+
+			case DCX_BURST_STATUS:
+				fprintf(stderr, "  DCx msg server: DCX_BURST_STATUS()\n");	fflush(stderr);
+				DCx_Burst_Actions(BURST_STATUS, 0, &reply.rc);		/* Query the status */
+				break;
+				
+			case DCX_BURST_WAIT:
+				fprintf(stderr, "  DCx msg server: DCX_BURST_WAIT()\n");	fflush(stderr);
+				DCx_Burst_Actions(BURST_WAIT, request.option, &reply.rc);	/* Wait for stripe to occur */
+				break;
+				
+			/* 0 => off, 1 => on, otherwise no change; returns current on/off BOOL state */
+			case DCX_LED_SET_STATE:
+				fprintf(stderr, "  DCx msg server: DCX_LED_SET_STATE()\n");	fflush(stderr);
+				reply.rc = Keith224_Output(request.option);
 				break;
 
 			default:

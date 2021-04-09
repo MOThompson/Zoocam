@@ -12,7 +12,7 @@
 /* =============================
 -- Port that the server runs
 ============================= */
-#define	FOCUS_ACCESS_PORT		(980)					/* Port for client/server connections */
+#define	FOCUS_ACCESS_PORT		(1911)				/* Port for client/server connections */
 
 #define	DFLT_SERVER_IP_ADDRESS	"128.253.129.93"		/* "127.0.0.1" for loop-back */
 #define	LOOPBACK_SERVER_IP_ADDRESS	"127.0.0.1"			/* Server on this computer */

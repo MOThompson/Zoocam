@@ -46,12 +46,17 @@
 #include "graph.h"
 #include "resource.h"
 
-#define	USE_NUMATO
+// #define	USE_NUMATO
+#define	USE_KEITHLEY
 #define	USE_FOCUS
 
 #ifdef USE_NUMATO
 	#define	NUMATO_COM_PORT	4			/* Set to COM port to use */
 	#include "Numato_DIO.h"					/* For toggling an LED between images */
+#endif
+
+#ifdef USE_KEITHLEY
+	#include "ki224.h"
 #endif
 
 #define	_PURE_C
@@ -86,7 +91,9 @@
 #define	WMP_SHOW_COLOR_CORRECT	(WM_APP+7)
 #define	WMP_SHOW_GAINS				(WM_APP+8)
 #define	WMP_SHOW_CURSOR_POSN		(WM_APP+9)
-#define	WMP_BURST_TRIG_COMPLETE	(WM_APP+10)
+#define	WMP_BURST_ARM				(WM_APP+10)
+#define	WMP_BURST_ABORT			(WM_APP+11)
+#define	WMP_BURST_TRIG_COMPLETE	(WM_APP+12)
 
 #define	MIN_FPS		(0.5)
 #define	MAX_FPS		(25)
@@ -170,7 +177,7 @@ int AllCameraControls[] = {
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
 	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN,
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
-	IDC_SHOW_INTENSITY, IDC_SHOW_RGB,
+	IDC_SHOW_INTENSITY, IDC_SHOW_RGB, IDC_TRACK_CENTROID,
 	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
 	ID_NULL
 };
@@ -186,7 +193,7 @@ int CameraOffControls[] = {
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
 	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN,
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
-	IDC_SHOW_INTENSITY, IDC_SHOW_RGB,
+	IDC_SHOW_INTENSITY, IDC_SHOW_RGB, IDC_TRACK_CENTROID,
 	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
 	ID_NULL
 };
@@ -201,7 +208,7 @@ int CameraOnControls[] = {
 	IDV_COLOR_CORRECT_FACTOR,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
-	IDC_SHOW_INTENSITY, IDC_SHOW_RGB,
+	IDC_SHOW_INTENSITY, IDC_SHOW_RGB, IDC_TRACK_CENTROID,
 #ifdef USE_RINGS
 	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
 #endif
@@ -585,7 +592,7 @@ int CalcSharpness(DCX_WND_INFO *dcx, unsigned char *pMem) {
 =========================================================================== */
 int ShowImage(DCX_WND_INFO *dcx, int PID, int *pSharp) {
 
-	int i, rc, col, line, height, width, pitch;
+	int i, rc, col, line, height, width, pitch, w_max;
 	int sharpness;
 	unsigned char *pMem, *aptr;
 
@@ -605,7 +612,7 @@ int ShowImage(DCX_WND_INFO *dcx, int PID, int *pSharp) {
 		GenerateCrosshair(dcx, dcx->thumbnail);
 	}
 
-	/* If the maiin window isn't a window, don't bother with the histogram calculations */
+	/* If the main window isn't a window, don't bother with the histogram calculations */
 	if (! IsWindow(dcx->main_hdlg)) return 1;
 
 	/* Do the histogram calculations */
@@ -623,15 +630,19 @@ int ShowImage(DCX_WND_INFO *dcx, int PID, int *pSharp) {
 	blue   = dcx->blue_hist;
 	for (i=0; i<red->npt; i++) red->y[i] = green->y[i] = blue->y[i] = 0;
 	for (line=0; line<height; line++) {
+		int b,g,r,w;									/* Values of R,G,B and W (grey) intensities */
 		aptr = pMem + line*pitch;					/* Pointer to this line */
+		w_max = 0;
 		for (col=0; col<width; col++) {
 			if (dcx->SensorIsColor) {
-				i = aptr[3*col+0]; if (i < 0) i = 0; if (i > 255) i = 255; blue->y[i]++;
-				i = aptr[3*col+1]; if (i < 0) i = 0; if (i > 255) i = 255; green->y[i]++;
-				i = aptr[3*col+2]; if (i < 0) i = 0; if (i > 255) i = 255; red->y[i]++;
+				b = aptr[3*col+0]; if (b < 0) b = 0; if (b > 255) b = 255; blue->y[b]++;
+				g = aptr[3*col+1]; if (g < 0) g = 0; if (g > 255) g = 255; green->y[g]++;
+				r = aptr[3*col+2]; if (r < 0) r = 0; if (r > 255) r = 255; red->y[r]++;
+				w = (b+g+r)/3;
 			} else {
-				i = aptr[col]; if (i < 0) i = 0; if (i > 255) i = 255; red->y[i]++;
+				w = aptr[col]; if (w < 0) w = 0; if (w > 255) w = 255; red->y[w]++;
 			}
+			if (w > w_max) w_max = w;				/* Track maximum for centroid calculations */
 		}
 	}
 	if (dcx->SensorIsColor) {
@@ -656,6 +667,37 @@ int ShowImage(DCX_WND_INFO *dcx, int PID, int *pSharp) {
 		red->visible = TRUE; green->visible = FALSE; blue->visible = FALSE;
 		red->rgb = RGB(225,225,255);
 		SendDlgItemMessage(hdlg, IDG_HISTOGRAMS, WMP_REDRAW, 0, 0);
+	}
+
+	/* Should we move the cursor based on the centroid of intensity */
+	/* Algorithm is to only consider intensities 50% of maximum and above */
+	if (dcx->track_centroid) {
+		double z0,xz,yz,zi;
+		xz = yz = z0 = 0;
+		for (line=0; line<height; line++) {
+			aptr = pMem + line*pitch;					/* Pointer to this line */
+			for (col=0; col<width; col++) {
+				if (dcx->SensorIsColor) {
+					zi = aptr[3*col+0]+aptr[3*col+1]+aptr[3*col+2];
+				} else {
+					zi = aptr[col];
+				}
+				if (zi > w_max/2) {
+					xz += col*zi;
+					yz += line*zi;
+					z0 += zi;
+				}
+			}
+		}
+		if (z0 > 0 && width  > 0) {
+			dcx->x_image_target = xz/z0/width;
+			SetDlgItemInt(hdlg, IDT_CURSOR_X_PIXEL, nint(xz/z0), FALSE);
+		}
+		if (z0 > 0 && height > 0) {
+			dcx->y_image_target = yz/z0/height;
+			SetDlgItemInt(hdlg, IDT_CURSOR_Y_PIXEL, nint(yz/z0), FALSE);
+		}
+//		fprintf(stderr, "New cursor at: %f %f\n", xz/z0, yz/z0); fflush(stderr);
 	}
 
 	/* Do the horizontal profile at centerline */
@@ -757,7 +799,7 @@ int ShowImage(DCX_WND_INFO *dcx, int PID, int *pSharp) {
 =========================================================================== */
 static void ProcessNewImage(void *arglist) {
 
-	int rc, index;
+	int rc, CurrentImageIndex;
 	int delta_max;
 	unsigned char *pMem;
 	DCX_WND_INFO *dcx;
@@ -792,7 +834,7 @@ static void ProcessNewImage(void *arglist) {
 
 		/* Determine the PID of last stored image */
 		rc = is_GetImageMem(dcx->hCam, &pMem);
-		if ( (PID = FindImagePID(dcx, pMem, &index)) == -1) continue;
+		if ( (PID = FindImagePID(dcx, pMem, &CurrentImageIndex)) == -1) continue;
 
 #ifdef USE_NUMATO
 		if (dcx->numato.enabled && dcx->numato.mode == DIO_TOGGLE) {
@@ -805,8 +847,8 @@ static void ProcessNewImage(void *arglist) {
 
 #ifdef USE_RINGS
 		/* Update the main dialog window with the number with the number of images in the ring */
-		dcx->nLast = index;								/* Shown image will be same as last one valid */
-		if (index >= dcx->nValid) dcx->nValid = index+1;
+		dcx->nLast = CurrentImageIndex;						/* Shown image will be same as last one valid */
+		if (CurrentImageIndex >= dcx->nValid) dcx->nValid = CurrentImageIndex+1;
 		if (IsWindow(dcx->main_hdlg)) {
 			SetDlgItemInt(dcx->main_hdlg, IDT_FRAME_COUNT, dcx->nLast+1, FALSE);
 			SetDlgItemInt(dcx->main_hdlg, IDT_FRAME_VALID, dcx->nValid, FALSE);
@@ -817,30 +859,35 @@ static void ProcessNewImage(void *arglist) {
 		if (! IsWindow(dcx->main_hdlg)) continue;
 
 #ifdef USE_FOCUS
-		if (! Have_Focus_Client && time(NULL)>time_last_check+10) {						/* Only try every 10 seconds to reconnect */
-			time_last_check = time(NULL);
-			if ( (rc = Init_Focus_Client(server_IP)) != 0) {
-				fprintf(stderr, "ERROR: Unable to connect to the server at the specified IP address (%s)\n", server_IP);
-				fflush(stderr);
-			} else {
-				client_version = Focus_Remote_Query_Client_Version();
-				server_version = Focus_Remote_Query_Server_Version();
-				printf("Client/Server versions: %4.4d/%4.4d\n", client_version, server_version); fflush(stderr);
-				if (client_version != server_version) {
-					fprintf(stderr, "ERROR: Version mismatch between client and server.  Have to abort\n");
-					fflush(stderr);
-				} else {
-					Have_Focus_Client = TRUE;
-				}
-			}
-		}
-
-		if (Have_Focus_Client && SharpnessDlg.hdlg != NULL && ! SharpnessDlg.paused) {			/* Do we have remote and the sharpness dialog up? */
+		/* Only need the dialog if we have the sharpness dialog */
+		if (SharpnessDlg.hdlg != NULL && ! SharpnessDlg.paused) {			/* Do we have remote and the sharpness dialog up? */
 			int status;
 			GRAPH_CURVE *cv;
 			static BOOL InSweep=FALSE;
 
-			if ( (rc = Focus_Remote_Get_Focus_Status(&status)) != 0) {
+			if (! Have_Focus_Client) {
+				if (time(NULL)>time_last_check+10) {								/* Only try every 10 seconds to reconnect */
+					time_last_check = time(NULL);
+					if ( (rc = Init_Focus_Client(server_IP)) != 0) {
+						fprintf(stderr, "ERROR: Unable to connect to the server at the specified IP address (%s)\n", server_IP);
+						fflush(stderr);
+					} else {
+						client_version = Focus_Remote_Query_Client_Version();
+						server_version = Focus_Remote_Query_Server_Version();
+						printf("Client/Server versions: %4.4d/%4.4d\n", client_version, server_version); fflush(stderr);
+						if (client_version != server_version) {
+							fprintf(stderr, "ERROR: Version mismatch between client and server.  Have to abort\n");
+							fflush(stderr);
+						} else {
+							Have_Focus_Client = TRUE;
+						}
+					}
+				}
+			}
+
+			if (! Have_Focus_Client) {
+				InSweep = FALSE;
+			} else if ( (rc = Focus_Remote_Get_Focus_Status(&status)) != 0) {
 				fprintf(stderr, "ERROR: Looks like we lost the remote focus client.  Will recheck for it every 10 seconds.  (rc=%d)\n", rc); fflush(stderr);
 				Have_Focus_Client = FALSE;
 				InSweep = FALSE;
@@ -955,10 +1002,11 @@ static void AutoExposureThread(void *arglist) {
 			if (peak >= 245) break;															/* We are done */
 
 			exposure *= 250.0/peak;															/* New estimated exposure */
-			if (exposure > upper_bound) exposure = (upper_bound + lower_bound) / 2.0;
+			if (exposure > upper_bound) exposure = lower_bound + 0.95*(upper_bound-lower_bound);		/* Go 95% of the way */
 
 		}
-		if (fabs(exposure - last_exposure) < min_increment) break;				/* Not enough change to be done */
+		if (fabs(exposure-last_exposure) < min_increment) break;												/* Not enough change to be done */
+		if ( (exposure > last_exposure) && ((exposure-last_exposure) < 0.03*last_exposure)) break;	/* Don't both going up by less than 3% */
 
 		/* Reset the gain now and collect a few images to stabilize */
 		DCx_Set_Exposure(dcx, exposure, TRUE, dcx->main_hdlg);
@@ -1022,18 +1070,28 @@ static void trigger_burst_mode(void *arglist) {
 
 	/* Wait for the start semaphore from a stripe */
 	/* Use 1000 ms wait to be able to watch for aborts */
+	dcx->BurstModeStatus = BURST_STATUS_ARMED;					/* Mark that we are really armed now */
 	while (TRUE) {
-		if (! dcx->BurstModeArmed) goto ExitArmThread;			/* Abort? */
+		if (! dcx->BurstModeArmed) {									/* Abort? */
+			dcx->BurstModeStatus = BURST_STATUS_ABORT;
+			goto ExitArmThread;
+		}
 		if ( (rc = WaitForSingleObject(start, 500)) == WAIT_OBJECT_0) break;
 		if (rc != WAIT_TIMEOUT) {
 			sprintf_s(szTmp, sizeof(szTmp), "Wait for LasGoStripeStart semaphore returned error\n  rc=%d", rc);
 			MessageBox(NULL, szTmp, "Arm failed", MB_ICONERROR | MB_OK);
+			dcx->BurstModeStatus = BURST_STATUS_FAIL;
 			goto ExitArmThread;
 		}
 	}
 
 	/* Scan has started.  Turn on video and let it collect frames */
-	if (! dcx->BurstModeArmed) goto ExitArmThread;			/* Abort? */
+	if (! dcx->BurstModeArmed) {									/* Abort? */
+		dcx->BurstModeStatus = BURST_STATUS_ABORT;
+		goto ExitArmThread;
+	}
+
+	dcx->BurstModeStatus = BURST_STATUS_RUNNING;
 	dcx->nLast = dcx->nShow = dcx->nValid = 0;
 	dcx->LiveVideo = TRUE;
 	is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);	
@@ -1042,6 +1100,7 @@ static void trigger_burst_mode(void *arglist) {
 	rc = WaitForSingleObject(end, 10000);
 	is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
 	dcx->LiveVideo = FALSE;
+	dcx->BurstModeStatus = BURST_STATUS_COMPLETE;
 
 ExitArmThread:
 	if (start != NULL) CloseHandle(start);
@@ -1863,6 +1922,10 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			ShowWindow(GetDlgItem(hdlg, IDB_LED_CONTROL), TRUE);
 #endif
 
+#ifdef USE_KEITHLEY
+			ShowWindow(GetDlgItem(hdlg, IDB_LED_CONTROL), TRUE);
+#endif
+
 #ifndef USE_FOCUS
 			ShowWindow(GetDlgItem(hdlg, IDB_SHARPNESS_DIALOG, FALSE);
 #endif
@@ -2100,6 +2163,22 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETPOS, TRUE, i);
 			rcode = TRUE; break;
 
+
+		/* Reset dialog controls to reflect that burst mode has been armed (from DCx_Burst_Actions()) */
+		case WMP_BURST_ARM:
+			EnableDlgItem(hdlg, IDB_CAPTURE, TRUE);						/* Can now do capture, but not live */
+			SetDlgItemCheck(hdlg, IDB_LIVE, FALSE);						/* Live video would have been turned off */
+			for (i=0; BurstArmControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, BurstArmControls[i], FALSE);
+			SetDlgItemText(hdlg, IDB_ARM, "Abort");
+			rcode = TRUE; break;
+
+		/* Reset dialog controls to reflect that burst mode has been aborted (from DCx_Burst_Actions()) */
+		case WMP_BURST_ABORT:
+			for (i=0; BurstArmControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, BurstArmControls[i], TRUE);
+			SetDlgItemText(hdlg, IDB_ARM, "Arm");
+			rcode = TRUE; break;
+
+		/* Called after a trigger is complete to return to normal */
 		case WMP_BURST_TRIG_COMPLETE:
 			if (dcx->BurstModeArmed) {
 				for (i=0; BurstArmControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, BurstArmControls[i], TRUE);
@@ -2171,32 +2250,18 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 #endif
 					
-				case IDB_ARM:																/* Arm for a single sweep of the laser stripe */
-					if (dcx->BurstModeArmed) {											/* We are to abort the mode */
-						dcx->BurstModeArmed = FALSE;									/* Mark for abort */
-						Sleep(500);															/* Most of the time until abort should be recognized */
-						for (i=0; BurstArmControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, BurstArmControls[i], TRUE);
-						SetDlgItemText(hdlg, IDB_ARM, "Arm");
-					} else {
-						if (dcx->LiveVideo) {
-							is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
-							dcx->LiveVideo = FALSE;
-							EnableDlgItem(hdlg, IDB_CAPTURE, TRUE);
-							SetDlgItemCheck(hdlg, IDB_LIVE, FALSE);
-						}
-						for (i=0; BurstArmControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, BurstArmControls[i], FALSE);
-						SetDlgItemText(hdlg, IDB_ARM, "Abort");
-						dcx->BurstModeArmed = TRUE;
-						_beginthread(trigger_burst_mode, 0, dcx);
-					}
+				/* Enable or abort based on current status ... */
+				/* WMP_BURST_ABORT or WMP_BURST_ARM message will be sent by DCx_Burst_Actions() */
+				case IDB_ARM:
+					DCx_Burst_Actions(dcx->BurstModeArmed ? BURST_ABORT : BURST_ARM, 0, NULL);
 					rcode = TRUE; break;
-					
+				
 #ifdef USE_FOCUS
 				case IDB_SHARPNESS_DIALOG:
 					_beginthread(show_sharpness_dialog_thread, 0, NULL);
 					rcode = TRUE; break;
 #endif
-					
+
 				case IDB_AUTO_EXPOSURE:
 					_beginthread(AutoExposureThread, 0, dcx);
 					rcode = TRUE; break;
@@ -2205,7 +2270,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					dcx->x_image_target = dcx->y_image_target = 0.5;
 					SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
 					rcode = TRUE; break;
-					
+
 				case IDC_SHOW_INTENSITY:
 					dcx->vert_w->visible = dcx->horz_w->visible = GetDlgItemCheck(hdlg, wID);
 					rcode = TRUE; break;
@@ -2214,11 +2279,15 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					dcx->vert_r->visible = dcx->vert_g->visible = dcx->vert_b->visible = GetDlgItemCheck(hdlg, wID);
 					dcx->horz_r->visible = dcx->horz_g->visible = dcx->horz_b->visible = GetDlgItemCheck(hdlg, wID);
 					rcode = TRUE; break;
-					
+
+				case IDC_TRACK_CENTROID:
+					dcx->track_centroid = GetDlgItemCheck(hdlg, wID);
+					rcode = TRUE; break;
+
 				case IDC_FULL_WIDTH_CURSOR:
 					dcx->full_width_cursor = GetDlgItemCheck(hdlg, wID);
 					rcode = TRUE; break;
-							
+
 				case IDB_CAMERA_DISCONNECT:
 					if (dcx->hCam > 0) {
 						ReleaseRingBuffers(dcx);
@@ -2449,7 +2518,10 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case IDB_LED_CONTROL:
 #ifdef USE_NUMATO
 					DialogBox(hInstance, "IDD_LED_CONTROL", hdlg, (DLGPROC) LED_DlgProc);
+#else if USE_KEITHLEY
+					DialogBox(hInstance, "IDD_KEITHLEY_224", hdlg, (DLGPROC) Keith224DlgProc);
 #endif
+
 					rcode = TRUE; break;
 					
 				/* Intentionally unused IDs */
@@ -2494,11 +2566,31 @@ static void show_sharpness_dialog_thread(void *arglist) {
 }
 #endif
 
-static int SaveBurstImages(DCX_WND_INFO *dcx) {
-
+/* ===========================================================================
+-- Save all valid images that would have been collected in burst run
+--
+-- Usage: SaveBurstImages(DCX_WND_INFO *dcx);
+--
+-- Inputs: dcx - pointer to current descriptor
+--
+-- Output: Saves images as a series of bitmaps
+--
+-- Return: 0 ==> successful
+--         1 ==> rings are not enabled in the code
+--         2 ==> buffers have not yet been allocated (no data)
+--         3 ==> save abandoned by choice in FileOpen dialog
+=========================================================================== */
 #ifndef USE_RINGS
-	return 0;
+
+static int SaveBurstImages(DCX_WND_INFO *dcx) {
+	return 1;
+}
+
 #else
+
+static int SaveBurstImages(DCX_WND_INFO *dcx) {
+	static char *rname="SaveBurstImages";
+	
 	int i, rc, inow, icount;
 	size_t cnt;
 	BOOL wasLive;
@@ -2514,85 +2606,91 @@ static int SaveBurstImages(DCX_WND_INFO *dcx) {
 
 	static char local_dir[PATH_MAX] = "";
 
-	if (dcx->Image_Mem_Allocated) {
-		if ( (wasLive = dcx->LiveVideo) ) {					/* Try to make sure we are stopped */
-			rc = is_FreezeVideo(dcx->hCam, IS_WAIT);
-			is_GetFramesPerSecond(dcx->hCam, &fps);						
-			Sleep((int) (2000/fps+1));
-		}
-		dcx->LiveVideo = FALSE;
-		
-		/* Get the pattern for the save (directory and name without the extension */
-		strcpy_m(pattern, sizeof(pattern), "basename");			/* Default name must be initialized with something */
-		ofn.lStructSize       = sizeof(ofn);
-		ofn.hwndOwner         = dcx->main_hdlg;
-		ofn.lpstrTitle        = "Burst image database save";
-		ofn.lpstrFilter       = "Excel csv file (*.csv)\0*.csv\0\0";
-		ofn.lpstrCustomFilter = NULL;
-		ofn.nMaxCustFilter    = 0;
-		ofn.nFilterIndex      = 1;
-		ofn.lpstrFile         = pattern;					/* Full path */
-		ofn.nMaxFile          = sizeof(pattern);
-		ofn.lpstrFileTitle    = NULL;						/* Partial path */
-		ofn.nMaxFileTitle     = 0;
-		ofn.lpstrDefExt       = "csv";
-		ofn.lpstrInitialDir   = (*local_dir=='\0' ? NULL : local_dir);
-		ofn.Flags = OFN_LONGNAMES | OFN_NOCHANGEDIR | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
-		
-		if (GetSaveFileName(&ofn)) {									/* If aborted, just skip and go back to re-enabling the image */
-			
-			/* Save the directory for the next time */
-			strcpy_m(local_dir, sizeof(local_dir), pattern);
-			local_dir[ofn.nFileOffset-1] = '\0';					/* Save for next time! */
-			
-			aptr = pattern + strlen(pattern) - 4;					/* Should be the ".csv" */
-			if (_stricmp(aptr, ".csv") == 0) *aptr = '\0';
-			
-			sprintf_s(pathname, sizeof(pathname), "%s.csv", pattern);
-			fopen_s(&csv_log, pathname, "w");
-			fprintf(csv_log, "/* Index,filename,t_relative,t_clock\n");
-			
-			if (dcx->nValid < dcx->nRing) {
-				inow = 0; 
-				icount = dcx->nValid;
-			} else {
-				inow = (dcx->nLast+1) % dcx->nRing;
-				icount = dcx->nRing;
-			}
-			
-			/* Prepopulate the parameters for the call */
-			ImageParams.nQuality     = 0;
-			ImageParams.nFileType    = IS_IMG_BMP;
-			ImageParams.pwchFileName = wc_pathname;
-			
-			for (i=0; i<icount; i++) {
-				is_GetImageInfo(dcx->hCam, dcx->Image_PID[inow], &ImageInfo, sizeof(ImageInfo));
-				tstamp = ImageInfo.u64TimestampDevice*100E-9;
-				if (i == 0) tstamp_0 = tstamp;
-				
-				sprintf_s(pathname, sizeof(pathname), "%s_%3.3d.bmp", pattern, i);
-				fprintf(csv_log, "%d,%s,%.4f,%4.4d.%2.2d.%2.2d %2.2d:%2.2d:%2.2d.%3.3d\n", i, pathname, tstamp-tstamp_0,
-						  ImageInfo.TimestampSystem.wYear, ImageInfo.TimestampSystem.wMonth, ImageInfo.TimestampSystem.wDay, ImageInfo.TimestampSystem.wHour, ImageInfo.TimestampSystem.wMinute, ImageInfo.TimestampSystem.wSecond, ImageInfo.TimestampSystem.wMilliseconds);
-				mbstowcs_s(&cnt, wc_pathname, PATH_MAX, pathname, _TRUNCATE);
-				
-				ImageParams.pnImageID    = &dcx->Image_PID[inow];
-				ImageParams.ppcImageMem  = &dcx->Image_Mem[inow];
-				rc = is_ImageFile(dcx->hCam, IS_IMAGE_FILE_CMD_SAVE, &ImageParams, sizeof(ImageParams));
-				inow = (inow+1) % dcx->nRing;
-			}
-			if (csv_log != NULL) fclose(csv_log);
-			
-		}
-		
-		if (wasLive) {
-			is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
-			dcx->nLast = dcx->nShow = dcx->nValid = 0;
-			dcx->LiveVideo = TRUE;
-		}
+	/* Can't save if we haven't allocated ... return error */
+	if (! dcx->Image_Mem_Allocated) return 2;
+
+	if ( (wasLive = dcx->LiveVideo) ) {					/* Try to make sure we are stopped */
+		rc = is_FreezeVideo(dcx->hCam, IS_WAIT);
+		is_GetFramesPerSecond(dcx->hCam, &fps);						
+		Sleep((int) (2000/fps+1));
 	}
-	return 0;
-#endif
+	dcx->LiveVideo = FALSE;
+		
+	/* Get the pattern for the save (directory and name without the extension */
+	strcpy_m(pattern, sizeof(pattern), "basename");			/* Default name must be initialized with something */
+	ofn.lStructSize       = sizeof(ofn);
+	ofn.hwndOwner         = dcx->main_hdlg;
+	ofn.lpstrTitle        = "Burst image database save";
+	ofn.lpstrFilter       = "Excel csv file (*.csv)\0*.csv\0\0";
+	ofn.lpstrCustomFilter = NULL;
+	ofn.nMaxCustFilter    = 0;
+	ofn.nFilterIndex      = 1;
+	ofn.lpstrFile         = pattern;					/* Full path */
+	ofn.nMaxFile          = sizeof(pattern);
+	ofn.lpstrFileTitle    = NULL;						/* Partial path */
+	ofn.nMaxFileTitle     = 0;
+	ofn.lpstrDefExt       = "csv";
+	ofn.lpstrInitialDir   = (*local_dir=='\0' ? NULL : local_dir);
+	ofn.Flags = OFN_LONGNAMES | OFN_NOCHANGEDIR | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
+		
+	if (! GetSaveFileName(&ofn)) {								/* If aborted, just skip and go back to re-enabling the image */
+		rc = 3;															/* Abandoned by choice */
+
+	} else {
+			
+		/* Save the directory for the next time */
+		strcpy_m(local_dir, sizeof(local_dir), pattern);
+		local_dir[ofn.nFileOffset-1] = '\0';					/* Save for next time! */
+		
+		aptr = pattern + strlen(pattern) - 4;					/* Should be the ".csv" */
+		if (_stricmp(aptr, ".csv") == 0) *aptr = '\0';
+		
+		sprintf_s(pathname, sizeof(pathname), "%s.csv", pattern);
+		fopen_s(&csv_log, pathname, "w");
+		fprintf(csv_log, "/* Index,filename,t_relative,t_clock\n");
+		
+		if (dcx->nValid < dcx->nRing) {
+			inow = 0; 
+			icount = dcx->nValid;
+		} else {
+			inow = (dcx->nLast+1) % dcx->nRing;
+			icount = dcx->nRing;
+		}
+		
+		/* Prepopulate the parameters for the call */
+		ImageParams.nQuality     = 0;
+		ImageParams.nFileType    = IS_IMG_BMP;
+		ImageParams.pwchFileName = wc_pathname;
+		
+		for (i=0; i<icount; i++) {
+			is_GetImageInfo(dcx->hCam, dcx->Image_PID[inow], &ImageInfo, sizeof(ImageInfo));
+			tstamp = ImageInfo.u64TimestampDevice*100E-9;
+			if (i == 0) tstamp_0 = tstamp;
+			
+			sprintf_s(pathname, sizeof(pathname), "%s_%3.3d.bmp", pattern, i);
+			fprintf(csv_log, "%d,%s,%.4f,%4.4d.%2.2d.%2.2d %2.2d:%2.2d:%2.2d.%3.3d\n", i, pathname, tstamp-tstamp_0,
+					  ImageInfo.TimestampSystem.wYear, ImageInfo.TimestampSystem.wMonth, ImageInfo.TimestampSystem.wDay, ImageInfo.TimestampSystem.wHour, ImageInfo.TimestampSystem.wMinute, ImageInfo.TimestampSystem.wSecond, ImageInfo.TimestampSystem.wMilliseconds);
+			mbstowcs_s(&cnt, wc_pathname, PATH_MAX, pathname, _TRUNCATE);
+				
+			ImageParams.pnImageID    = &dcx->Image_PID[inow];
+			ImageParams.ppcImageMem  = &dcx->Image_Mem[inow];
+			rc = is_ImageFile(dcx->hCam, IS_IMAGE_FILE_CMD_SAVE, &ImageParams, sizeof(ImageParams));
+			inow = (inow+1) % dcx->nRing;
+		}
+		if (csv_log != NULL) fclose(csv_log);
+		rc = 0;
+	}
+		
+	if (wasLive) {
+		is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+		dcx->nLast = dcx->nShow = dcx->nValid = 0;
+		dcx->LiveVideo = TRUE;
+	}
+
+	return rc;
 }
+
+#endif
 
 
 #ifdef USE_NUMATO
@@ -3460,6 +3558,225 @@ int DCx_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMA
 	
 	return rc;
 }
+
+/* ===========================================================================
+-- Interface to the RING functions
+--
+-- Usage: int DCX_Ring_Actions(DCX_RING_ACTION request, int option, int *response);
+--
+-- Inputs: request - what to do
+--           (0) RING_GET_SIZE        ==> return number of buffers in the ring
+--           (1) RING_SET_SIZE        ==> set number of buffers in the ring
+--           (2) RING_GET_ACTIVE_CNT  ==> returns number of buffers currently with data
+--         option - various use
+--         response - pointer to for return code (beyond success)
+--
+-- Output: *response - action dependent return codes if ! NULL
+--         Sets internal parameters as necessary
+--         Sends message to mainhdlg (if !NULL) to modify controls
+--
+-- Return: 0 if successful, 1 if rings are unavailable, 2 other errors
+--
+-- *response codes
+--     RING_GET_SIZE:			configured number of rings
+--		 RING_SET_SIZE:			new configured number of rings
+--		 RING_GET_ACTIVE_CNT:	number of buffers with image data
+=========================================================================== */
+int DCx_Ring_Actions(DCX_RING_ACTION request, int option, int *response) {
+	static char *rname = "DCx_Ring_Actions";
+
+	DCX_WND_INFO *dcx;
+	HWND hdlg;
+	int rc[4];												/* 4 elements in the INFO request */
+
+	/* Set response code to -1 to indicate major error */
+	if (response == NULL) response = rc;			/* So don't have to check */
+	*response = -1;
+
+	/* Must have been started at some point to be able to do anything */
+	if (main_dcx == NULL || main_dcx->hCam <= 0) return 1;
+	dcx  = main_dcx;
+	hdlg = dcx->main_hdlg;
+	if (hdlg != NULL && ! IsWindow(hdlg)) hdlg = NULL;		/* Mark hdlg if not window */
+
+	switch (request) {
+		case RING_GET_INFO:
+			response[0] = dcx->nRing;
+			response[1] = dcx->nLast;
+			response[2] = dcx->nShow;
+			response[3] = dcx->nValid;
+			break;
+			
+		case RING_GET_SIZE:
+			*response = dcx->nRing;
+			break;
+
+		case RING_SET_SIZE:
+			AllocRingBuffers(dcx, option);					/* 0 or 1 will reallocate same count */
+			if (hdlg != NULL) SetDlgItemInt(hdlg, IDV_RING_SIZE, dcx->nRing, FALSE);
+			*response = dcx->nRing;
+			break;
+			
+		case RING_GET_ACTIVE_CNT:
+			*response = dcx->nValid;
+			break;
+
+		default:
+			return 2;
+	}
+
+	return 0;
+}
+
+/* ===========================================================================
+-- Interface to the BURST functions
+--
+-- Usage: int DCx_Query_Frame_Data(int frame, double *tstamp, int *width, int *height, int *pitch, char **pMem);
+--
+-- Inputs: frame         - which frame to transfer
+--         tstamp        - variable pointer for timestamp of image
+--         width, height - variable pointers for frame size
+--         pitch         - variable pointer for pitch of row data
+--         pMem          - variable pointer for array data
+--
+-- Output: *tstamp         - time image transferred (resolution of 1 ms)
+--         *width, *height - if !NULL, filled with image size
+--         *pitch          - if !NULL, bytes between start of rows in image
+--         *pMem           - if !NULL, pointer to first element of data
+--
+-- Return: 0 ==> successful
+--         1 ==> no camera initialized
+--         2 ==> requested frame invalid
+=========================================================================== */
+int DCx_Query_Frame_Data(int frame, double *tstamp, int *width, int *height, int *pitch, char **pMem) {
+	static char *rname = "DCx_Query_Frame_Data";
+
+	DCX_WND_INFO *dcx;
+	UC480IMAGEINFO ImageInfo;
+
+	/* Default return values */
+	if (tstamp != NULL) *tstamp = 0.0;
+	if (width  != NULL) *width  = 0;
+	if (height != NULL) *height = 0;
+	if (pitch  != NULL) *pitch  = 0;
+	if (pMem   != NULL) *pMem   = NULL;
+
+	/* Must have been started at some point to be able to do anything */
+	if (main_dcx == NULL || main_dcx->hCam <= 0) return 1;
+	dcx  = main_dcx;
+
+	/* Can't return something we don't have */
+	if (frame < 0 || frame >= dcx->nValid) return 2;
+
+	/* Okay, return the data */
+	is_GetImageInfo(dcx->hCam, dcx->Image_PID[frame], &ImageInfo, sizeof(ImageInfo));
+	if (tstamp != NULL) *tstamp = ImageInfo.u64TimestampDevice*100E-9;
+	if (width  != NULL) *width  = dcx->width;
+	if (height != NULL) *height = dcx->height;
+	if (pitch  != NULL) is_GetImageMemPitch(dcx->hCam, pitch);
+	if (pMem   != NULL) *pMem   = dcx->Image_Mem[frame];
+	
+	return 0;
+}
+
+/* ===========================================================================
+-- Interface to the BURST functions
+--
+-- Usage: int DCX_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
+--
+-- Inputs: request - what to do
+--           (0) BURST_STATUS ==> return status
+--           (1) BURST_ARM    ==> arm the burst mode
+--           (2) BURST_ABORT  ==> abort burst if enabled
+--           (3) BURST_WAIT   ==> wait for burst to complete (timeout active)
+--         msTimeout - timeout for some operations (wait)
+--         response - pointer to for return code (beyond success)
+--
+-- Output: *response - action dependent return codes if ! NULL
+--         Sets internal parameters for the burst mode capture
+--         Sends message to mainhdlg (if !NULL) to modify controls
+--
+-- Return: 0 if successful, 1 if burst mode is unavailable, 2 other errors
+--
+-- *response codes
+--     BURST_STATUS: status byte
+--				(0) BURST_STATUS_INIT				Initial value on program start ... no request ever received
+--				(1) BURST_STATUS_ARM_REQUEST		An arm request received ... but thread not yet running
+--				(2) BURST_STATUS_ARMED				Armed and awaiting a stripe start message
+--				(3) BURST_STATUS_RUNNING			In stripe run
+--				(4) BURST_STATUS_COMPLETE			Stripe completed with images saved
+--				(5) BURST_STATUS_ABORT				Capture was aborted
+--				(6) BURST_STATUS_FAIL				Capture failed for other reason (no semaphores, etc.)
+--		BURST_ARM:		0 if successful (or if already armed)
+--		BURST_ABORT:	0 if successful (or wasn't armed)
+--		BURST_WAIT:		0 if complete, 1 on timeout
+=========================================================================== */
+int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response) {
+	static char *rname = "DCx_Burst_Actions";
+
+	DCX_WND_INFO *dcx;
+	HWND hdlg;
+	int rc;
+
+	/* Set response code to -1 to indicate major error */
+	if (response == NULL) response = &rc;			/* So don't have to check */
+	*response = -1;
+
+	/* Must have been started at some point to be able to do anything */
+	if (main_dcx == NULL || main_dcx->hCam <= 0) return 1;
+	dcx  = main_dcx;
+	hdlg = dcx->main_hdlg;
+	if (hdlg != NULL && ! IsWindow(hdlg)) hdlg = NULL;		/* Mark hdlg if not window */
+
+	switch (request) {
+		case BURST_STATUS:
+			*response = dcx->BurstModeStatus;
+			break;
+			
+		case BURST_ARM:
+			if (! dcx->BurstModeArmed) {
+				if (dcx->LiveVideo) {
+					is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
+					dcx->LiveVideo = FALSE;
+				}
+				if (hdlg != NULL) SendMessage(hdlg, WMP_BURST_ARM, 0, 0);
+				dcx->BurstModeArmed = TRUE;
+				dcx->BurstModeStatus = BURST_STATUS_ARM_REQUEST;	/* Not active */
+				_beginthread(trigger_burst_mode, 0, dcx);
+				Sleep(30);														/* Time for thread to start running */
+			}
+			*response = 0;	break;
+			
+		case BURST_ABORT:
+			if (dcx->BurstModeArmed) {
+				dcx->BurstModeArmed = FALSE;							/* Mark for abort */
+				Sleep(600);													/* Timeout within the thread */
+				if (hdlg != NULL) SendMessage(hdlg, WMP_BURST_ABORT, 0, 0);
+			}
+			*response = 0;	break;
+
+		case BURST_WAIT:
+			if (dcx->BurstModeArmed) {
+				if (msTimeout <= 0) msTimeout = 60000;					/* Maximum 1 minute wait */
+				if (msTimeout > 60000) msTimeout = 60000;				/* Also don't allow requests for more than 1 minute */
+				*response = 1;													/* Indicate timeout before done */
+				while (msTimeout > 0) {
+					if (! dcx->BurstModeArmed) { *response = 0; break; }
+					Sleep(min(100, msTimeout));							/* Wait in 100 ms blocks */
+					msTimeout -= 100;											/* May go negative but who cares */
+				}
+			} else {
+				*response = 0;
+			}
+			break;
+			
+		default:
+			return 2;
+	}
+
+	return 0;
+}
+
 
 /* ===========================================================================
 -- Interface routine to accept a request to grab and store an image in memory 

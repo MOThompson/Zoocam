@@ -1,4 +1,4 @@
-he table below has more detailed information about available commands.
+The table below has more detailed information about available commands.
 
 No.	Command	Example	Description
 1	ver	ver	Returns current firmware version.

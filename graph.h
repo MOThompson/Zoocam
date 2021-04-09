@@ -87,9 +87,11 @@
 		BOOL autoscale_x, force_scale_x;					/* auto ==> scan data for range,  force ==> don't make nice */
 		BOOL autoscale_y, force_scale_y;					/* auto ==> scan data for range,  force ==> don't make nice */
 		BOOL autoscale_z, force_scale_z;					/* auto ==> scan data for range,  force ==> don't make nice */
+		/* Values below are either manual when not autoscaling, or automatically updated with data if autoscaling */
 		double xmin,xmax, logxmin, logxmax;				/* Values used as scales */
 		double ymin,ymax, logymin, logymax;				/* Values used as scales */
 		double zmin,zmax, logzmin, logzmax;				/* Values used as scales */
+		/* End of optional values */
 		double *x, *y, *z;									/* Potential x,y,z values */
 		double *s;												/* Potential uncertainty in y */
 		int *pt_rgb;											/* If !NULL, individual point colors */

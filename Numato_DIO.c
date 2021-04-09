@@ -15,10 +15,10 @@
 #include <limits.h>
 
 #undef	_POSIX_
-	#include <io.h>
+//	#include <io.h>
 	#include <windows.h>
 #define	_POSIX_
-
+	
 /* ------------------------------ */
 /* Local include files            */
 /* ------------------------------ */
@@ -319,6 +319,9 @@ int NumatoSetIOmask(NUMATO *dio, unsigned int flags) {
 --         call (IOdir equivalent automatically)
 --
 -- Return: 0 on success, otherwise error from NumatoQuery
+--
+-- Timing: Minimum pulse width is 20 ms.  SET/CLEAR period is 40 ms.
+--         Jitter on pulse width is small. +/- 0.25 ms max (high or low)
 =========================================================================== */
 int NumatoSetBit(NUMATO *dio, int bit, BOOL on) {
 	
@@ -405,11 +408,11 @@ int NumatoReadAll(NUMATO *dio, unsigned int *flags) {
 int main(int argc, char *argv[]) {
 
 	NUMATO *dio;
-	int rc;
+	int i, rc;
 	char szTmp[256];
 	unsigned int flags;
 
-	if ( (dio = NumatoOpenDIO(3, &rc)) == NULL) {
+	if ( (dio = NumatoOpenDIO(5, &rc)) == NULL) {
 		fprintf(stderr, "Numato open failed (rc = %d)\n", rc); fflush(stderr);
 		return 3;
 	}
@@ -421,6 +424,11 @@ int main(int argc, char *argv[]) {
 	NumatoQuery(dio, "id set 12345678", NULL, 0);
 	if (NumatoQuery(dio, "id get", szTmp, sizeof(szTmp)) == 0) { printf("ID:  %s\n", szTmp); fflush(stdout); }
 
+	for (i=0; i<10000; i++) {
+		if (i%1000 == 0) { fprintf(stdout, "[%4.4d]\n", i); fflush(stdout); }
+		rc = NumatoSetBit(dio, 0, TRUE);			/* 40 ms period (high to high) */
+		rc = NumatoSetBit(dio, 0, FALSE);
+	}		
 	rc = NumatoSetBit(dio, 0, TRUE);
 	rc = NumatoSetBit(dio, 1, TRUE);
 	rc = NumatoSetBit(dio, 6, TRUE);

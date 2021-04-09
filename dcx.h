@@ -169,6 +169,85 @@ int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate
 =========================================================================== */
 int DCx_Set_Gains(DCX_WND_INFO *dcx, int master, int red, int green, int blue, HWND hdlg);
 
+
+/* ===========================================================================
+-- Interface to the BURST functions
+--
+-- Usage: int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
+--
+-- Inputs: request - what to do
+--           (0) BURST_STATUS ==> return status
+--           (1) BURST_ARM    ==> arm the burst mode
+--           (2) BURST_ABORT  ==> abort burst if enabled
+--           (3) BURST_WAIT   ==> wait for burst to complete (timeout active)
+--         msTimeout - timeout for some operations (wait)
+--         response - pointer to for return code (beyond success)
+--
+-- Output: *response - action dependent return codes if ! NULL
+--         Sets internal parameters for the burst mode capture
+--
+-- Return: 0 if successful, 1 if burst mode is unavailable, 2 other errors
+--
+-- *response codes
+--     ACTION = 0 (STATUS)
+=========================================================================== */
+typedef enum _DCX_BURST_ACTION {BURST_STATUS=0, BURST_ARM=1, BURST_ABORT=2, BURST_WAIT=3} DCX_BURST_ACTION;
+
+int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
+
+/* ===========================================================================
+-- Interface to the RING functions
+--
+-- Usage: int DCX_Ring_Actions(DCX_RING_ACTION request, int option, int *response);
+--
+-- Inputs: request - what to do
+--           (0) RING_GET_SIZE        ==> return number of buffers in the ring
+--           (1) RING_SET_SIZE        ==> set number of buffers in the ring
+--           (2) RING_GET_ACTIVE_CNT  ==> returns number of buffers currently with data
+--         option - various use
+--         response - pointer to for return code (beyond success)
+--
+-- Output: *response - action dependent return codes if ! NULL
+--         Sets internal parameters as necessary
+--         Sends message to mainhdlg (if !NULL) to modify controls
+--
+-- Return: 0 if successful, 1 if rings are unavailable, 2 other errors
+--
+-- *response codes
+--     RING_GET_SIZE:			configured number of rings
+--		 RING_SET_SIZE:			new configured number of rings
+--		 RING_GET_ACTIVE_CNT:	number of buffers with image data
+=========================================================================== */
+typedef enum _DCX_RING_ACTION {RING_GET_INFO=0, RING_GET_SIZE=1, RING_SET_SIZE=2, RING_GET_ACTIVE_CNT=3} DCX_RING_ACTION;
+
+int DCx_Ring_Actions(DCX_RING_ACTION request, int option, int *response);
+
+/* ===========================================================================
+-- Interface to the BURST functions
+--
+-- Usage: int DCx_Query_Frame_Data(int frame, double *tstamp, int *width, int *height, int *pitch, char **pMem);
+--
+-- Inputs: frame         - which frame to transfer
+--         tstamp        - variable pointer for timestamp of image
+--         width, height - variable pointers for frame size
+--         pitch         - variable pointer for pitch of row data
+--         pMem          - variable pointer for array data
+--
+-- Output: *tstamp         - time image transferred (resolution of 1 ms)
+--         *width, *height - if !NULL, filled with image size
+--         *pitch          - if !NULL, bytes between start of rows in image
+--         *pMem           - if !NULL, pointer to first element of data
+--
+-- Return: 0 ==> successful
+--         1 ==> no camera initialized
+--         2 ==> requested frame invalid
+=========================================================================== */
+int DCx_Query_Frame_Data(int frame, double *tstamp, int *width, int *height, int *pitch, char **pMem);
+
+
+/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
+
+
 #ifdef INCLUDE_DCX_DETAIL_INFO
 
 typedef struct _DCX_WND_INFO {
@@ -184,7 +263,15 @@ typedef struct _DCX_WND_INFO {
 
 	BOOL LiveVideo;							/* Are we in free-run mode? */
 	BOOL BurstModeArmed;						/* Have we armed camera for a burst capture */
-													/* Also abort if set to FALSE while waiting */
+													/* Set to FALSE after arm'd to abort */
+	enum {BURST_STATUS_INIT=0,				/* Initial value on program start ... no request ever received */
+			BURST_STATUS_ARM_REQUEST=1,	/* An arm request received ... but thread not yet running */
+			BURST_STATUS_ARMED=2,			/* Armed and awaiting a stripe start message */
+			BURST_STATUS_RUNNING=2,			/* In stripe run */
+			BURST_STATUS_COMPLETE=3,		/* Stripe completed with images saved */
+			BURST_STATUS_ABORT=4,			/* Capture was aborted */
+			BURST_STATUS_FAIL=5				/* Capture failed for other reason (no semaphores, etc.) */
+	} BurstModeStatus;						/* Internal status */
 
 	/* Associated with opening a camera */
 	HCAM hCam;
@@ -221,6 +308,7 @@ typedef struct _DCX_WND_INFO {
 	double x_image_target, y_image_target;		/* Fraction of [0,1) the way across image for the cursor (in screen coordinates) */
 	BOOL full_width_cursor;							/* Draw cursor full width of the image */
 
+	BOOL track_centroid;								/* Continuously update cursor at centroid */
 	int red_saturate, green_saturate, blue_saturate;
 	GRAPH_CURVE *red_hist, *green_hist, *blue_hist;
 	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b;
