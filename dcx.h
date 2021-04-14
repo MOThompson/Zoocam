@@ -1,10 +1,11 @@
 /* Global identifier of my window handle */
 HWND DCx_main_hdlg;
 
-#define USE_RINGS	(10)				/* Default ring buffer size */
+#define USE_RINGS						/* Use ring buffers */
+#define DFLT_RING_SIZE	(10)		/* Default number of frames in ring */
 
-typedef enum _DCX_IMAGE_FORMAT { IMAGE_BMP, IMAGE_JPG, IMAGE_PNG } DCX_IMAGE_FORMAT;
-typedef enum _DCX_IMAGE_TYPE   { IMAGE_COLOR, IMAGE_MONOCHROME } DCX_IMAGE_TYPE;
+typedef enum _DCX_IMAGE_FORMAT { IMAGE_BMP=0, IMAGE_JPG=1, IMAGE_PNG=2 } DCX_IMAGE_FORMAT;
+typedef enum _DCX_IMAGE_TYPE   { IMAGE_MONOCHROME=0, IMAGE_COLOR=1 } DCX_IMAGE_TYPE;
 
 /* Camera/window information structure */
 typedef struct _DCX_WND_INFO DCX_WND_INFO;
@@ -43,6 +44,36 @@ typedef struct _DCX_STATUS {
 	uint32_t color_correction;		/* 0,1,2,4,8 corresponding to disable, enable, BG40, HQ, IR Auto */
 	double color_correction_factor;
 } DCX_STATUS;
+#pragma pack()
+
+/* Structure used by DCX_CLIENT to allow changes to exposure */
+#pragma pack(4)
+/* Or'd bit-flags in option to control setting parameters */
+/* Exposure always has priority over FPS, but FPS will be maximized if not modified with exposure */
+	#define	DCXF_MODIFY_EXPOSURE		(0x01)	/* Modify exposure (value in ms) */
+	#define	DCXF_MODIFY_FPS			(0x02)	/* Modify frames per second */
+	#define	DCXF_MODIFY_GAMMA			(0x04)	/* Modify gamma */
+	#define	DCXF_MODIFY_MASTER_GAIN	(0x08)	/* Modify master gain */
+	#define	DCXF_MODIFY_RED_GAIN		(0x10)	/* Red channel gain */
+	#define	DCXF_MODIFY_GREEN_GAIN	(0x20)	/* Green channel gain */
+	#define	DCXF_MODIFY_BLUE_GAIN	(0x40)	/* Blue channel gain */
+typedef struct _DCX_EXPOSURE_PARMS {
+	double exposure;									/* Exposure time in ms				*/
+	double fps;											/* Frame rate (per second)			*/
+	uint32_t gamma;									/* Gamma value (0 < gamma < 100)	*/
+	uint32_t master_gain;							/* Master gain (0 < gain < 100)	*/
+	uint32_t red_gain, green_gain, blue_gain;	/* Individual channel gains		*/
+} DCX_EXPOSURE_PARMS;
+#pragma pack()
+
+/* Structure use for communicating ring size information in client/server */
+#pragma pack(4)
+typedef struct _DCX_RING_INFO {
+	int nSize;									/* Number of buffers in the ring */
+	int nValid;									/* Number of frames valid since last reset */
+	int iLast;									/* index of last buffer used (from events) */
+	int iShow;									/* index of currently displayed frame */
+} DCX_RING_INFO;
 #pragma pack()
 
 /* ===========================================================================
@@ -198,29 +229,27 @@ int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
 /* ===========================================================================
 -- Interface to the RING functions
 --
--- Usage: int DCX_Ring_Actions(DCX_RING_ACTION request, int option, int *response);
+-- Usage: int DCX_Ring_Actions(DCX_RING_ACTION request, int option, DCX_RING_INFO *response);
 --
 -- Inputs: request - what to do
---           (0) RING_GET_SIZE        ==> return number of buffers in the ring
---           (1) RING_SET_SIZE        ==> set number of buffers in the ring
---           (2) RING_GET_ACTIVE_CNT  ==> returns number of buffers currently with data
---         option - various use
---         response - pointer to for return code (beyond success)
+--           (0) RING_GET_INFO        ==> return structure ... also # of frames
+--           (0) RING_GET_SIZE        ==> return number of frames in the ring
+--           (1) RING_SET_SIZE        ==> set number of frames in the ring
+--           (2) RING_GET_ACTIVE_CNT  ==> returns number of frames currently with data
+--         option - For RING_SET_SIZE, desired number
+--         response - pointer to for return of DCX_RING_INFO data
 --
--- Output: *response - action dependent return codes if ! NULL
---         Sets internal parameters as necessary
---         Sends message to mainhdlg (if !NULL) to modify controls
+-- Output: *response - if !NULL, gets current DCX_RING_INFO data
 --
--- Return: 0 if successful, 1 if rings are unavailable, 2 other errors
---
--- *response codes
---     RING_GET_SIZE:			configured number of rings
---		 RING_SET_SIZE:			new configured number of rings
---		 RING_GET_ACTIVE_CNT:	number of buffers with image data
+-- Return: On error, -1 ==> or -2 ==> invalid request (not in enum)
+--             RING_GET_INFO:       configured number of rings
+--             RING_GET_SIZE:			configured number of rings
+--		         RING_SET_SIZE:			new configured number of rings
+--		         RING_GET_ACTIVE_CNT:	number of buffers with image data
 =========================================================================== */
 typedef enum _DCX_RING_ACTION {RING_GET_INFO=0, RING_GET_SIZE=1, RING_SET_SIZE=2, RING_GET_ACTIVE_CNT=3} DCX_RING_ACTION;
 
-int DCx_Ring_Actions(DCX_RING_ACTION request, int option, int *response);
+int DCx_Ring_Actions(DCX_RING_ACTION request, int option, DCX_RING_INFO *response);
 
 /* ===========================================================================
 -- Interface to the BURST functions
@@ -245,6 +274,44 @@ int DCx_Ring_Actions(DCX_RING_ACTION request, int option, int *response);
 int DCx_Query_Frame_Data(int frame, double *tstamp, int *width, int *height, int *pitch, char **pMem);
 
 
+/* ===========================================================================
+-- DCx_Set_Exposure_Parms
+--
+-- Usage: int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual) {
+--
+-- Inputs: options - OR'd bitwise flag indicating parameters that will be modified
+--         request - pointer to structure with values for the selected conditions
+--         actual  - pointer to variable to receive the actual settings (all updated)
+--
+-- Output: *actual - if not NULL, values of all parameters after modification
+--
+-- Return: 0 ==> successful
+--         1 ==> no camera initialized
+--
+-- Notes:
+--    1) Parameters are validated but out-of-bound will not generate failure
+--    2) exposure is prioritized if both DCX_MODIFY_EXPOSURE and DCX_MODIFY_FPS
+--       are specified.  FPS will be modified only if lower than max possible
+--    3) If DCX_MODIFY_EXPOSURE is given without DCX_MODIFY_FPS,
+--       maximum FPS will be set
+--    4) Trying DCXF_MODIFY_BLUE_GAIN on a monochrome camera is a NOP
+=========================================================================== */
+int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual);
+
+
+/* ===========================================================================
+-- Routine to enable or disable Live Video (from client/server)
+--
+-- Usage: int DCx_Enable_Live_Video(int state);
+--
+-- Inputs: state - 0 => disable, 1 => enable, other => just return current
+--
+-- Output: Optionally enables or disables live video
+--
+-- Return: 0 or 1 for current state (or -1 on no camera error)
+=========================================================================== */
+int DCx_Enable_Live_Video(int state);
+
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
 
@@ -262,7 +329,8 @@ typedef struct _DCX_WND_INFO {
 #endif
 
 	BOOL LiveVideo;							/* Are we in free-run mode? */
-	BOOL BurstModeArmed;						/* Have we armed camera for a burst capture */
+	BOOL PauseImageRendering;				/* Critical sections where buffers maybe changing ... disable access */
+	BOOL BurstModeActive;					/* Are we in an active mode with burst (wait, collecting, etc.) */
 													/* Set to FALSE after arm'd to abort */
 	enum {BURST_STATUS_INIT=0,				/* Initial value on program start ... no request ever received */
 			BURST_STATUS_ARM_REQUEST=1,	/* An arm request received ... but thread not yet running */
@@ -290,10 +358,7 @@ typedef struct _DCX_WND_INFO {
 	int height, width;
 
 #ifdef USE_RINGS
-	int nRing,									/* Number of buffers in the ring */
-		 nLast,									/* Last buffer index used (from events) */
-		 nShow,									/* Currently display frame */
-		 nValid;									/* Highest buffer index used since reset */
+	DCX_RING_INFO rings;						/* Info regarding the rings */
 	int   *Image_PID;							/* Pointers to PIDs of each image in the ring */
 	char  **Image_Mem;						/* Pointers to the image memory */
 #else

@@ -79,6 +79,7 @@ typedef struct _CLIENT_DATA_BLOCK {
 
 int InitSockets(void);
 int ShutdownSockets(void);
+int DebugSockets(int level);				/* Enable a level of debug messages for sockets (all to stderr) */
 
 /* Routines to start a server activity on a particular port */
 int RunServer      (char *name, unsigned short port, void (*ServerHandler)(void *), void (*reset)(void));

@@ -54,7 +54,32 @@ static uint32_t CRC32(void *buffer, int count);
 /* ------------------------------- */
 /* Locally defined global vars     */
 /* ------------------------------- */
+int DebugLevel = 2;									/* All errors by default */
 
+/* ===========================================================================
+-- Routine to start a server listening on specific port
+--
+-- Usage: int DebugSockets(int level);
+--
+-- Inputs: level - debug noise level
+--            0 ==> only fatal errors
+--            1 ==> all errors 
+--            2 ==> all warnings
+--            3 ==> verbose
+--
+-- Output: Sets internal flag
+--
+-- Return: previous level
+=========================================================================== */
+int DebugSockets(int level) {
+	int rc;
+
+	rc = DebugLevel;
+	if (level < 0) level = 0;
+	if (level > 3) level = 3;
+	DebugLevel = level;
+	return rc;
+}
 
 /* ===========================================================================
 -- Routine to start a server listening on specific port
@@ -156,7 +181,7 @@ int RunServer(char *pname, unsigned short port, void (*ClientHandler)(void *), v
 
 /* Now sit and accept connections until someone says uncle */
 	thread_count = 0;
-	fprintf(stderr, "TCP %s server: Waiting for clients on port %d\n", name, port); fflush(stderr);
+	if (DebugLevel >= 2) { fprintf(stderr, "TCP %s server: Waiting for clients on port %d\n", name, port); fflush(stderr); }
 	while (TRUE) {
 		c_socket = SOCKET_ERROR;
 		while ( c_socket == SOCKET_ERROR ) c_socket = accept( m_socket, NULL, NULL );
@@ -167,7 +192,7 @@ int RunServer(char *pname, unsigned short port, void (*ClientHandler)(void *), v
 		if (_beginthread(ClientHandler, 0, block) == -1L) {
 			fprintf(stderr, "TCP %s server: Error starting thread for connection on port %d\n", name, port); fflush(stderr);
 		} else {
-			fprintf(stderr, "TCP %s server: Connection on port %d established\n", name, port); fflush(stderr);
+			if (DebugLevel >= 2) { fprintf(stderr, "TCP %s server: Connection on port %d established\n", name, port); fflush(stderr); }
 			thread_count++;
 		}
 	}
@@ -382,8 +407,7 @@ int GetSocketMsg(SOCKET socket, CS_MSG *request, void **pdata) {
 	icnt = recv(socket, (char *) request, sizeof(*request), 0);
 	if (icnt == 0) return 1;
 	if (icnt == SOCKET_ERROR) {
-		fprintf(stderr, "ERROR: recv() returned SOCKET_ERROR - assuming client terminated\n"); 
-		fflush(stderr);
+		if (DebugLevel >= 1) { fprintf(stderr, "ERROR: recv() returned SOCKET_ERROR - assuming client terminated\n"); fflush(stderr); }
 		return 2;
 	}
 	request->msg      = ntohl(request->msg);
@@ -395,24 +419,35 @@ int GetSocketMsg(SOCKET socket, CS_MSG *request, void **pdata) {
 
 	/* If we are to get additional data, grab it now */
 	if (request->data_len > 0) {
-		char *data;
-		data = calloc(1, request->data_len);
-		icnt = recv( socket, data, request->data_len, 0 );
-		if (icnt == 0) {
-			return 1;
-		} else if (icnt == SOCKET_ERROR) {
-			fprintf(stderr, "ERROR[%s]: recv() returned SOCKET_ERROR -- assuming client has been terminated\n", rname);
-			fflush(stderr);
-			return 2;
-		} else if (icnt != request->data_len) {					/* At moment, just a warning */
-			fprintf(stderr, "ERROR[%s]: Expected %d bytes but only got %d\n", rname, request->data_len, icnt); fflush(stderr);
+#define	MAX_RETRIES	(10)
+		char *data, *aptr;
+		int ineed, itry;
+
+		ineed = request->data_len;										/* How many bytes of additional data should be coming */
+		aptr = data = calloc(1, ineed);								/* Storage plus pointer for next pieces */
+		for (itry=0; itry<MAX_RETRIES && ineed>0; itry++) {
+			if (itry != 0 && DebugLevel >= 2) { fprintf(stderr, "recv() retry [%d]: expect=%d  remaining=%d\n", itry, request->data_len, ineed); fflush(stderr); }
+			icnt = recv(socket, aptr, ineed, 0);
+			if (icnt == 0) {
+				return 1;
+			} else if (icnt == SOCKET_ERROR) {
+				fprintf(stderr, "ERROR[%s]: recv() returned SOCKET_ERROR -- assuming client has been terminated\n", rname);
+				fflush(stderr);
+				return 2;
+			}
+			ineed -= icnt;
+			aptr  += icnt;
+			Sleep(100);
 		}
+
+		/* At least warn if we were unsuccessful ... but go ahead and return */
+		if (ineed != 0 && DebugLevel >= 1) { fprintf(stderr, "ERROR[%s]: Expected %d bytes but only got %d\n", rname, request->data_len, icnt); fflush(stderr); }
 
 		/* If crc32 is set, verify or output an error */
 		if (request->crc32 != 0) {
 			uint32_t crc;
 			crc = CRC32(data, request->data_len);
-			if (crc != request->crc32) {
+			if (crc != request->crc32 && DebugLevel >= 1) {
 				fprintf(stderr, "ERROR[%s]: CRC32 mistmatch (0x%8.8x versus 0x%8.8x)\n", rname, crc, request->crc32); fflush(stderr);
 			}
 		}

@@ -84,6 +84,9 @@ int Init_DCx_Server(void) {
 		return 1;
 	}
 
+/* Enable debug information */
+	DebugSockets(2);									/* All warnings and errors */
+
 /* Bring up the message based server */
 	if ( ! (DCx_Msg_Server_Up = (RunServerThread("DCx", DCX_ACCESS_PORT, server_msg_handler, NULL) == 0)) ) {
 		fprintf(stderr, "ERROR[%s]: Unable to start the DCx message based remote server\n", rname); fflush(stderr);
@@ -129,17 +132,19 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 	CS_MSG request, reply;
 	void *received_data, *reply_data;
 	BOOL ServerActive;
-	int rvals[4];										/* Return values */
-	DCX_STATUS camera_info;
 	double tstamp;
 	int width, height, pitch;
 	char *pMem;
 
 	/* These refer to the last captured image */
-	static DCX_IMAGE_INFO image_info;
-	static char *image_data;
-	static DCX_REMOTE_RING_INFO   ring_info;
-	static DCX_REMOTE_RING_IMAGE *ring_image=NULL;
+	DCX_IMAGE_INFO image_info;
+	char *image_data = NULL;
+
+	/* And more information buffers that get transferred - some need to be kept */
+	DCX_STATUS camera_info;
+	DCX_EXPOSURE_PARMS exposure;
+	DCX_RING_INFO ring_info;
+	DCX_REMOTE_RING_IMAGE *ring_image=NULL;
 
 /* Get standard request from client and process */
 	ServerActive = TRUE;
@@ -172,6 +177,21 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				reply.rc = DCx_Status(&camera_info);			/* Get the information */
 				reply.data_len = sizeof(camera_info);
 				reply_data = (void *) &camera_info;
+				break;
+
+			case DCX_GET_EXPOSURE_PARMS:
+				fprintf(stderr, "  DCx msg server: DCX_GET_EXPOSURE_PARMS()\n");	fflush(stderr);
+				reply.rc = DCx_Set_Exposure_Parms(0, NULL, &exposure);
+				reply.data_len = sizeof(exposure);
+				reply_data = (void *) &exposure;
+				break;
+
+			case DCX_SET_EXPOSURE_PARMS:
+				fprintf(stderr, "  DCx msg server: DCX_SET_EXPOSURE_PARMS()\n");	fflush(stderr);
+				if (request.data_len < sizeof(DCX_EXPOSURE_PARMS)) received_data = NULL;
+				reply.rc = DCx_Set_Exposure_Parms(request.option, received_data, &exposure);
+				reply.data_len = sizeof(exposure);
+				reply_data = (void *) &exposure;
 				break;
 
 			case DCX_ACQUIRE_IMAGE:
@@ -217,30 +237,26 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				} 
 				break;
 				
-			case DCX_RING_INFO:
-				fprintf(stderr, "  DCx msg server: DCX_RING_INFO()\n");	fflush(stderr);
-				reply.rc = DCx_Ring_Actions(RING_GET_INFO, 0, rvals);
-				ring_info.nRing = rvals[0];
-				ring_info.nLast = rvals[1];
-				ring_info.nShow = rvals[2];
-				ring_info.nValid = rvals[3];
-				reply.data_len = sizeof(ring_info);
+			case DCX_RING_GET_INFO:
+				fprintf(stderr, "  DCx msg server: DCX_RING_GET_INFO()\n");	fflush(stderr);
+				reply.rc = DCx_Ring_Actions(RING_GET_INFO, 0, &ring_info);
+				reply.data_len   = sizeof(ring_info);
 				reply_data = (void *) &ring_info;
 				break;
 				
 			case DCX_RING_GET_SIZE:
 				fprintf(stderr, "  DCx msg server: DCX_RING_GET_SIZE()\n");	fflush(stderr);
-				DCx_Ring_Actions(RING_GET_SIZE, 0, &reply.rc);
+				reply.rc = DCx_Ring_Actions(RING_GET_SIZE, 0, NULL);
 				break;
 
 			case DCX_RING_SET_SIZE:
 				fprintf(stderr, "  DCx msg server: DCX_RING_SET_SIZE(%d)\n", request.option);	fflush(stderr);
-				reply.rc = DCx_Ring_Actions(RING_SET_SIZE, request.option, &reply.rc);
+				reply.rc = DCx_Ring_Actions(RING_SET_SIZE, request.option, NULL);
 				break;
 
 			case DCX_RING_GET_FRAME_CNT:
 				fprintf(stderr, "  DCx msg server: DCX_RING_GET_FRAME_CNT()\n");	fflush(stderr);
-				DCx_Ring_Actions(RING_GET_ACTIVE_CNT, 0, &reply.rc);
+				reply.rc = DCx_Ring_Actions(RING_GET_ACTIVE_CNT, 0, NULL);
 				break;
 
 			case DCX_BURST_ARM:
@@ -269,6 +285,12 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				reply.rc = Keith224_Output(request.option);
 				break;
 
+			/* 0 => off, 1 => on, otherwise no change; returns current on/off BOOL state */
+			case DCX_VIDEO_ENABLE:
+				fprintf(stderr, "  DCx msg server: DCX_VIDEO_ENABLE()\n");	fflush(stderr);
+				reply.rc = DCx_Enable_Live_Video(request.option);
+				break;
+				
 			default:
 				fprintf(stderr, "ERROR: DCx server message received (%d) that was not recognized.\n"
 						  "       Will be ignored with rc=-1 return code.\n", request.msg);
@@ -285,6 +307,10 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 			fflush(stderr);
 		}
 	}
+
+	/* Free any memory we might have allocated */
+	if (image_data != NULL) free(image_data);
+	if (ring_image != NULL) free(ring_image);
 
 	EndServerHandler(block);								/* Cleanly exit the server structure always */
 	return 0;

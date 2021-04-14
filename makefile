@@ -13,18 +13,18 @@ SYSLIBS = wsock32.lib user32.lib gdi32.lib comdlg32.lib comctl32.lib advapi32.li
 # server.exe  -- removed since must now be able to access the dialog box
 ALL: client.exe DCxLive.exe
 
-INSTALL: z:\lab\exes\DCxLive.exe
+INSTALL: z:\lab\exes\DCxLive.exe z:\lab\exes\client.exe
 
 CLEAN: 
 	rm *.exe *.obj *.res
 
-client.exe : DCx_client.c DCx_client.h server_support.obj server_support.h
+client.exe : DCx_client.c DCx_client.h DCx.h server_support.obj server_support.h
 	cl -Feclient.exe -DLOCAL_CLIENT_TEST $(CFLAGS) DCx_client.c server_support.obj $(SYSLIBS)
 
 server.exe : server_test.c DCx_server.obj server_support.obj server_support.h DCx_server.h DCx_client.h 
 	cl -Feserver.exe $(CFLAGS) server_test.c DCx_server.obj server_support.obj $(SYSLIBS)
 
-DCx.obj : DCx.c uc480.h resource.h win32ex.h graph.h
+DCx.obj : DCx.c DCx.h DCx_client.h uc480.h resource.h win32ex.h graph.h
 	cl -c -DSTANDALONE $(CFLAGS) DCx.c
 
 win32ex.obj : win32ex.c win32ex.h
@@ -50,6 +50,9 @@ DCx.res : DCx.rc resource.h
 
 # Distribution for the lab use
 z:\lab\exes\DCxLive.exe : DCxLive.exe
+	copy $** $@
+
+z:\lab\exes\client.exe : client.exe
 	copy $** $@
 
 # ---------------------------------------------------------------------------
