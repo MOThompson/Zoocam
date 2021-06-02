@@ -1,6 +1,6 @@
 typedef struct _KI224_INFO {
 	int active;							/* Is unit initialized and active		*/
-	HWND hdlg;							/* Handle of an active Keith224 dialog	*/
+	HWND last, hdlg;					/* Handle of last and current Keith224 dialog */
 	int board, address;				/* GPIB board and address					*/
 	int handle;							/* GPIB handle for accessing the board */
 	double V_set, I_set;				/* V and I values set in dialog box		*/
@@ -9,6 +9,7 @@ typedef struct _KI224_INFO {
 } KI224_INFO;
 
 KI224_INFO *ki224_info;
+HWND hwnd_Keith224;
 
 INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 

@@ -205,7 +205,7 @@ BOOL WritePrivateProfileInt(LPCTSTR lpAppName, LPCTSTR lpKeyName, int ival, LPCT
 
 BOOL WritePrivateProfileDouble(LPCTSTR lpAppName, LPCTSTR lpKeyName, double rval, LPCTSTR lpFileName) {
 	char buf[80];
-	sprintf_s(buf, sizeof(buf), "%f", rval);
+	sprintf_s(buf, sizeof(buf), "%g", rval);
 	return WritePrivateProfileString(lpAppName, lpKeyName, buf, lpFileName);
 }
 
@@ -345,7 +345,7 @@ int ComboBoxGetIndex(HWND hdlg, int wID) {
 }
 
 int ComboBoxSetByIndex(HWND hdlg, int wID, int index) {
-	return SendDlgItemMessage(hdlg, wID, CB_SETCURSEL, index, (LPARAM) 0);
+	return (int) SendDlgItemMessage(hdlg, wID, CB_SETCURSEL, index, (LPARAM) 0);
 }
 
 int ComboBoxFillIntList(HWND hdlg, int wID, CB_INT_LIST *list, int n) {

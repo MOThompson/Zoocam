@@ -169,33 +169,44 @@ static void free_function(GRAPH_FNC *fnc) {
 /* ===========================================================================
 -- Routines to convert a given x/y with graph min/max to pixels in range [0,imax]
 --
--- Usage: int get_ix(double x, double xmin, double xmax, int ixmax);
---        int get_iy(double y, double ymin, double ymax, int iymax);
+-- Usage: int get_ix(double x, double xmin, double xmax, GRAPH_DATA *graph);
+--        int get_iy(double y, double ymin, double ymax, GRAPH_DATA *graph);
+--        double get_x(int ix, double xmin, double xmax, GRAPH_DATA *graph);
+--        double get_y(int iy, double ymin, double ymax, GRAPH_DATA *graph);
 --
 -- Inputs: x,y - real value to plot
+--         ix,iy - screen locations (bounded [0,cxClient], [1,cyClient])
 --         xmin,xmax - min/max desired for the graph
---         ixmax,iymax - limits to the screen graph
+--         graph->cxClient - limits to the screen area in x
+--         graph->cyClient - limits to the screen area in y
+--			  graph->...margin..
 =========================================================================== */
-#define	LABEL_MARGIN	(20)
-#define	TITLE_MARGIN	(16)
-#define	RIGHT_MARGIN	(5)
-
-int x_left_margin  = LABEL_MARGIN;
-int x_right_margin = RIGHT_MARGIN;
-int y_left_margin  = LABEL_MARGIN;
-int y_right_margin = RIGHT_MARGIN;
-
-static int get_ix(double x, double xmin, double xmax, int ixmax) {
+static int get_ix(double x, double xmin, double xmax, GRAPH_DATA *graph) {
 	x = (x-xmin)/(xmax-xmin);
 	if (x < 0) x = 0;
 	if (x > 1) x = 1;
-	return (int) (x_left_margin + (ixmax-x_left_margin-x_right_margin)*x+0.5);
+	return (int) (graph->x_left_margin + (graph->cxClient-graph->x_left_margin-graph->x_right_margin)*x+0.5);
 }
-static int get_iy(double y, double ymin, double ymax, int iymax) {
+static int get_iy(double y, double ymin, double ymax, GRAPH_DATA *graph) {
 	y = (y-ymin)/(ymax-ymin);
 	if (y < 0) y = 0;
 	if (y > 1) y = 1;
-	return (int) (y_right_margin+(iymax-y_left_margin-y_right_margin)*(1.0-y)+0.5);
+	return (int) (graph->y_right_margin+(graph->cyClient-graph->y_left_margin-graph->y_right_margin)*(1.0-y)+0.5);
+}
+
+static double get_x(int ix, double xmin, double xmax, GRAPH_DATA *graph) {
+	double x;
+	if (ix < 0) ix = 0;  if (ix > graph->cxClient) ix = graph->cxClient;
+	x = (1.0*ix-graph->x_left_margin) / max(1,graph->cxClient-graph->x_left_margin-graph->x_right_margin);
+	return xmin+x*(xmax-xmin);
+
+}
+static double get_y(int iy, double ymin, double ymax, GRAPH_DATA *graph) {
+	double y;
+	if (iy < 0) iy = 0;  if (iy > graph->cyClient) iy = graph->cyClient;
+	iy = graph->cyClient - iy;												/* Invert sense */
+	y = (1.0*iy-graph->y_left_margin) / max(1,graph->cyClient-graph->y_left_margin-graph->y_right_margin);
+	return ymin+y*(ymax-ymin);
 }
 
 /* ===========================================================================
@@ -235,6 +246,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	HPEN	hpen, open;
 	HFONT hfont_labels, hfont_sup, hfont_titles;
 	RECT rect, myrect;
+	POINT point; 
 
 	double x,y, xtmp,ytmp;
 	double xmin,xmax, dx,dx2;
@@ -244,7 +256,6 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	int cxClient, cyClient;
 	int wID, wNotifyCode;
 	int i,ig, ix,iy,idy, ipen;
-	int ixmax, iymax;
 	char szTmp[20];
 
 /* Scaling */
@@ -268,6 +279,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 		case WM_CREATE:
 			graph = calloc(sizeof(*graph),1);
+			graph->hwnd = hwnd;										/* My handle */
 			graph->mode = GR_LINEAR;
 			graph->autox  = graph->autoy  = graph->autoz  = TRUE;
 			graph->forcex = graph->forcey = graph->forcez = FALSE;
@@ -290,27 +302,56 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			return 0;
 
 		case WM_DESTROY:
-			SendMessage(hwnd, WMP_CLEAR, 0, 0);
+			if (! graph->slave_process) SendMessage(hwnd, WMP_CLEAR, 0, 0);
 			if (graph != NULL) free(graph);
 			SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG) 0);
 			return 0;
 
+		case WM_LBUTTONDOWN:
 		case WM_RBUTTONDOWN:
-		{
-			HMENU hMenu, hMenuTrackPopup;
-			POINTL point;
+			GetCursorPos((LPPOINT) &point);						/* Get where the cursor is located */
+			ScreenToClient(hwnd, &point);							/* Convert to screen coordinates */
+			GetClientRect(hwnd, &rect);
+			if (graph->cursor_callback.hwnd != NULL) {
+				GRAPH_CURSOR_INFO info;
+				info.hwnd = hwnd;
+				info.msg = msg;
+				info.point = point;
+				info.cxClient = rect.right - rect.left;		/* Don't really need substraction since client size */
+				info.cyClient = rect.bottom - rect.top;
+				info.xpixel = point.x;
+				info.ypixel = info.cyClient - point.y;
+				info.ingraph = FALSE;
+				info.xfrac = (1.0*info.xpixel-graph->x_left_margin)/max(1,graph->cxClient-graph->x_left_margin-graph->x_right_margin);
+				info.yfrac = (1.0*info.ypixel-graph->y_left_margin)/max(1,graph->cyClient-graph->y_left_margin-graph->y_right_margin);
+				info.x = graph->xgmin + (graph->xgmax-graph->xgmin)*info.xfrac;
+				info.y = graph->ygmin + (graph->ygmax-graph->ygmin)*info.yfrac;
+				info.ingraph = (info.xfrac >= 0.0) && (info.xfrac <= 1.0) && (info.yfrac >= 0.0) && (info.yfrac <= 1.0);
+				SendMessage(graph->cursor_callback.hwnd, graph->cursor_callback.wID, (WPARAM) &info, (LPARAM) graph);
+			}
+			break;
 
-			GetCursorPos((LPPOINT) &point);
-			hMenu = LoadMenu(NULL, "IDM_GRAPH_POPUP_MENU");
-			hMenuTrackPopup = GetSubMenu(hMenu, 0);
-			TrackPopupMenu(hMenuTrackPopup, 
-								TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_LEFTBUTTON,
-								point.x,point.y, 0, hwnd, NULL);
-			DestroyMenu(hMenu);
-		}
-		rc = 0; break;
+			if (msg == WM_RBUTTONDOWN) {
+				{
+					HMENU hMenu, hMenuTrackPopup;
+					POINTL point;
+
+					GetCursorPos((LPPOINT) &point);
+					hMenu = LoadMenu(NULL, "IDM_GRAPH_POPUP_MENU");
+					hMenuTrackPopup = GetSubMenu(hMenu, 0);
+					TrackPopupMenu(hMenuTrackPopup, 
+										TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_LEFTBUTTON,
+										point.x,point.y, 0, hwnd, NULL);
+					DestroyMenu(hMenu);
+				}
+			}
+			rc = 0; break;
 
 		case WM_PAINT:
+			#define	LABEL_MARGIN	(20)
+			#define	TITLE_MARGIN	(16)
+			#define	RIGHT_MARGIN	(5)
+
 			/* Determine the size of what we need to paint */
 			GetClientRect(hwnd, &rect);					/* left=top=0 right/bottom real */
 			cxClient = rect.right;
@@ -325,7 +366,15 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 #else
 			hdc       = BeginPaint(hwnd, &paintstruct);		/* Get DC */
 #endif
-			ixmax = cxClient; iymax = cyClient;
+			/* Save the extent of the window in graph structure (needed by get_ix) */
+			graph->cxClient = cxClient; 
+			graph->cyClient = cyClient;
+
+			/* Initialize the margins (in pixels) -- used by get_ix / get_iy */
+			graph->x_left_margin  = LABEL_MARGIN;
+			graph->x_right_margin = RIGHT_MARGIN;
+			graph->y_left_margin  = LABEL_MARGIN;
+			graph->y_right_margin = RIGHT_MARGIN;
 
 			/* If a background color is specified, fill it now */
 			if (graph->background_color != -1) {
@@ -341,10 +390,10 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				cv->modified = FALSE;
 			}
 
-			/* Find first master curve (if any) for autoscaling and grids */
+			/* Find first master curve (if any) for autoscaling and grids (even if not displayed) */
 			cv = NULL;
 			for (i=0; i<graph->ncurves; i++) {
-				if (graph->curve[i]->master) { cv = graph->curve[i]; break; }
+				if (graph->curve[i]->master && graph->curve[i]->visible) { cv = graph->curve[i]; break; }
 			}
 
 			/* Scan for the min/max in X */
@@ -357,6 +406,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					} else {
 						xmin = DBL_MAX; xmax = -DBL_MAX;
 						for (i=0; i<graph->ncurves; i++) {
+							if (! graph->curve[i]->visible) continue;				/* Only base on displayed curves if no master */
 							if (graph->curve[i]->xmin < xmin) xmin = graph->curve[i]->xmin;
 							if (graph->curve[i]->xmax > xmax) xmax = graph->curve[i]->xmax;
 						}
@@ -372,6 +422,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					} else {
 						xmin = DBL_MAX; xmax = -DBL_MAX;
 						for (i=0; i<graph->ncurves; i++) {
+							if (! graph->curve[i]->visible) continue;				/* Only base on displayed curves if no master */
 							if (graph->curve[i]->xmin < xmin) xmin = graph->curve[i]->logxmin;
 							if (graph->curve[i]->xmax > xmax) xmax = graph->curve[i]->logxmax;
 						}
@@ -393,11 +444,13 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					} else {
 						ymin = DBL_MAX; ymax = -DBL_MAX;
 						for (i=0; i<graph->ncurves; i++) {
+							if (! graph->curve[i]->visible) continue;				/* Only base on displayed curves if no master */
 							if (graph->curve[i]->ymin < ymin) ymin = graph->curve[i]->ymin;
 							if (graph->curve[i]->ymax > ymax) ymax = graph->curve[i]->ymax;
 						}
 						if (ymin == DBL_MAX || ymax == -DBL_MAX) { ymin = 0; ymax = 1; }
 					}
+				} else {
 				}
 			} else {
 				ymin = graph->ymin;
@@ -408,6 +461,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					} else {
 						ymin = DBL_MAX; ymax = -DBL_MAX;
 						for (i=0; i<graph->ncurves; i++) {
+							if (! graph->curve[i]->visible) continue;				/* Only base on displayed curves if no master */
 							if (graph->curve[i]->ymin < ymin) ymin = graph->curve[i]->logymin;
 							if (graph->curve[i]->ymax > ymax) ymax = graph->curve[i]->logymax;
 						}
@@ -430,29 +484,33 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			} else {
 				ymin = ygmin; ymax = ygmax;
 			}
+			
+			/* Save values for other routines to use */
+			graph->xgmin = xmin; graph->xgmax = xmax;
+			graph->ygmin = ymin; graph->ygmax = ymax;
 
 			/* Figure out how to label the x and y axes */
 			memset(&x_labels, 0, sizeof(LABEL_FORMAT));		/* Clear all values */
 			memset(&y_labels, 0, sizeof(LABEL_FORMAT));		/* For both X and Y */
 			if (graph->show_X_labels) {
 				FormatLabels(&x_labels, xmin, xmax, dx);
-				y_left_margin = LABEL_MARGIN;
+				graph->y_left_margin = LABEL_MARGIN;
 			} else {
-				y_left_margin = RIGHT_MARGIN;
+				graph->y_left_margin = RIGHT_MARGIN;
 			}
 			if (graph->show_Y_labels) {
 				FormatLabels(&y_labels, ymin, ymax, dy);
-				x_left_margin = LABEL_MARGIN;
+				graph->x_left_margin = LABEL_MARGIN;
 			} else {
-				x_left_margin = RIGHT_MARGIN;
+				graph->x_left_margin = RIGHT_MARGIN;
 			}
 
 			/* Adjust the margins for titles if required */
-			if ((x_labels.sci && graph->show_X_labels) || (graph->show_X_title && (strlen(graph->x_title) != 0))) y_left_margin += TITLE_MARGIN;
-			if ((y_labels.sci && graph->show_Y_labels) || (graph->show_Y_title && (strlen(graph->y_title) != 0))) x_left_margin += TITLE_MARGIN;
+			if ((x_labels.sci && graph->show_X_labels) || (graph->show_X_title && (strlen(graph->x_title) != 0))) graph->y_left_margin += TITLE_MARGIN;
+			if ((y_labels.sci && graph->show_Y_labels) || (graph->show_Y_title && (strlen(graph->y_title) != 0))) graph->x_left_margin += TITLE_MARGIN;
 
 			if (graph->no_margins) {
-				x_left_margin = x_right_margin = y_left_margin = y_right_margin = 1;
+				graph->x_left_margin = graph->x_right_margin = graph->y_left_margin = graph->y_right_margin = 1;
 			}
 
 			/* Draw the constant X lines */
@@ -476,50 +534,50 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				SelectObject(hdc, hfont_labels);
 			}
 			/* Draw box around graph */
-			MoveToEx(hdc, get_ix(0.0, 0.0,1.0, ixmax), get_iy(0.0, 0.0,1.0, iymax), (LPPOINT) NULL);
-			LineTo  (hdc, get_ix(1.0, 0.0,1.0, ixmax), get_iy(0.0, 0.0,1.0, iymax));
-			LineTo  (hdc, get_ix(1.0, 0.0,1.0, ixmax), get_iy(1.0, 0.0,1.0, iymax));
-			LineTo  (hdc, get_ix(0.0, 0.0,1.0, ixmax), get_iy(1.0, 0.0,1.0, iymax));
-			LineTo  (hdc, get_ix(0.0, 0.0,1.0, ixmax), get_iy(0.0, 0.0,1.0, iymax));
+			MoveToEx(hdc, get_ix(0.0, 0.0,1.0, graph), get_iy(0.0, 0.0,1.0, graph), (LPPOINT) NULL);
+			LineTo  (hdc, get_ix(1.0, 0.0,1.0, graph), get_iy(0.0, 0.0,1.0, graph));
+			LineTo  (hdc, get_ix(1.0, 0.0,1.0, graph), get_iy(1.0, 0.0,1.0, graph));
+			LineTo  (hdc, get_ix(0.0, 0.0,1.0, graph), get_iy(1.0, 0.0,1.0, graph));
+			LineTo  (hdc, get_ix(0.0, 0.0,1.0, graph), get_iy(0.0, 0.0,1.0, graph));
 
 			for (x=dx*((int) (xmin/dx)); x<xmax+dx/20; x+=dx) {
-				ix = get_ix(x, xmin,xmax, ixmax);
+				ix = get_ix(x, xmin,xmax, graph);
 				if (x < xmin-dx/20) continue;
 				if (! graph->suppress_x_grid) {														/* Full lines */
-					MoveToEx(hdc, ix, get_iy(0.0, 0.0,1.0, iymax), (LPPOINT) NULL);
-					LineTo  (hdc, ix, get_iy(1.0, 0.0,1.0, iymax));
+					MoveToEx(hdc, ix, get_iy(0.0, 0.0,1.0, graph), (LPPOINT) NULL);
+					LineTo  (hdc, ix, get_iy(1.0, 0.0,1.0, graph));
 				} else if (! graph->suppress_x_major) {											/* Maybe just tick marks */
-					MoveToEx(hdc, ix, get_iy( 0, 0,30, iymax), (LPPOINT) NULL);
-					LineTo  (hdc, ix, get_iy( 2, 0,30, iymax));
-					MoveToEx(hdc, ix, get_iy(30, 0,30, iymax), (LPPOINT) NULL);
-					LineTo  (hdc, ix, get_iy(28, 0,30, iymax));
+					MoveToEx(hdc, ix, get_iy( 0, 0,30, graph), (LPPOINT) NULL);
+					LineTo  (hdc, ix, get_iy( 2, 0,30, graph));
+					MoveToEx(hdc, ix, get_iy(30, 0,30, graph), (LPPOINT) NULL);
+					LineTo  (hdc, ix, get_iy(28, 0,30, graph));
 				}
 				if (graph->show_X_labels) {
 					if (x == xmin) ix -= 3;
 					if (x == xmax) ix += 3;
 					EncodeLabel(x, &x_labels, szTmp, sizeof(szTmp));
 					SetTextAlign(hdc, (x==xmin) ? TA_LEFT : (x>=xmax-dx/4) ? TA_RIGHT : TA_CENTER);
-					iy = get_iy(0.0, 0.0,1.0, iymax)+2;
+					iy = get_iy(0.0, 0.0,1.0, graph)+2;
 					TextOut(hdc, ix, iy, szTmp, (int) strlen(szTmp));
 				}
 			}
 			if (! graph->suppress_x_minor) {						/* Maybe minor tick marks */
 				for (x=dx2*((int) (xmin/dx2)); x<xmax+dx2/20; x+=dx2) {
 					if (x < xmin-dx2/20) continue;
-					ix = get_ix(x, xmin,xmax, ixmax);
-					MoveToEx(hdc, ix, get_iy( 0, 0,30, iymax), (LPPOINT) NULL);
-					LineTo  (hdc, ix, get_iy( 1, 0,30, iymax));
-					MoveToEx(hdc, ix, get_iy(30, 0,30, iymax), (LPPOINT) NULL);
-					LineTo  (hdc, ix, get_iy(29, 0,30, iymax));
+					ix = get_ix(x, xmin,xmax, graph);
+					MoveToEx(hdc, ix, get_iy( 0, 0,30, graph), (LPPOINT) NULL);
+					LineTo  (hdc, ix, get_iy( 1, 0,30, graph));
+					MoveToEx(hdc, ix, get_iy(30, 0,30, graph), (LPPOINT) NULL);
+					LineTo  (hdc, ix, get_iy(29, 0,30, graph));
 				}
 			}
 			if (graph->show_X_labels && x_labels.sci) {		/* Add x10^-3 */
 				iexp = x_labels.iexp;
 				SetTextAlign(hdc, TA_RIGHT);
-				ix = get_ix(1.0, 0.0,1.0, ixmax)-5;				/* 1 for edge / 4 for one character */
+				ix = get_ix(1.0, 0.0,1.0, graph)-5;				/* 1 for edge / 4 for one character */
 				if (iexp < 0) ix -= 3;
 				if (fabs(iexp) >= 10) ix -= 4;
-				iy = get_iy(0.0, 0.0,1.0, iymax)+LABEL_MARGIN-2;
+				iy = get_iy(0.0, 0.0,1.0, graph)+LABEL_MARGIN-2;
 				TextOut(hdc, ix, iy, "x 10", 4);
 
 				sprintf_s(szTmp, sizeof(szTmp), "%d", iexp);
@@ -528,8 +586,8 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				TextOut(hdc, ix, iy-3, szTmp, (int) strlen(szTmp));	/* Shift up as superscript */
 			}
 			if (graph->show_X_title && (strlen(graph->x_title) != 0)) {
-				ix = get_ix(0.5, 0.0,1.0, ixmax);
-				iy = get_iy(0.0, 0.0,1.0, iymax)+ (graph->show_X_labels ? LABEL_MARGIN-1 : 3) ;
+				ix = get_ix(0.5, 0.0,1.0, graph);
+				iy = get_iy(0.0, 0.0,1.0, graph)+ (graph->show_X_labels ? LABEL_MARGIN-1 : 3) ;
 				SelectObject(hdc, hfont_titles);
 				SetTextAlign(hdc, TA_CENTER);
 				TextOut(hdc, ix, iy, graph->x_title, (int) strlen(graph->x_title));
@@ -558,39 +616,39 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			}
 			for (y=dy*((int) (ymin/dy)); y<ymax+dy/20; y+=dy) {
 				if (y < ymin-dy/20) continue;
-				iy = get_iy(y, ymin,ymax, iymax);
+				iy = get_iy(y, ymin,ymax, graph);
 				if (! graph->suppress_y_grid) {														/* Full lines */
-					MoveToEx(hdc, get_ix(0.0, 0.0,1.0, ixmax), iy, (LPPOINT) NULL);
-					LineTo  (hdc, get_ix(1.0, 0.0,1.0, ixmax), iy);
+					MoveToEx(hdc, get_ix(0.0, 0.0,1.0, graph), iy, (LPPOINT) NULL);
+					LineTo  (hdc, get_ix(1.0, 0.0,1.0, graph), iy);
 				} else if (! graph->suppress_y_major) {												/* Maybe just tick marks */
-					MoveToEx(hdc, get_ix( 0, 0,30, ixmax), iy, (LPPOINT) NULL);
-					LineTo  (hdc, get_ix( 2, 0,30, ixmax), iy);
-					MoveToEx(hdc, get_ix(30, 0,30, ixmax), iy, (LPPOINT) NULL);
-					LineTo  (hdc, get_ix(28, 0,30, ixmax), iy);
+					MoveToEx(hdc, get_ix( 0, 0,30, graph), iy, (LPPOINT) NULL);
+					LineTo  (hdc, get_ix( 2, 0,30, graph), iy);
+					MoveToEx(hdc, get_ix(30, 0,30, graph), iy, (LPPOINT) NULL);
+					LineTo  (hdc, get_ix(28, 0,30, graph), iy);
 				}
 				if (graph->show_Y_labels) {
 					if (y == ymin) iy += 3;
 					if (y == ymax) iy -= 3;
 					EncodeLabel(y, &y_labels, szTmp, sizeof(szTmp));
 					SetTextAlign(hdc, (y==ymin) ? TA_LEFT : (y>=ymax-dx/4) ? TA_RIGHT : TA_CENTER);
-					TextOut(hdc, get_ix(0.0, 0.0,1.0, ixmax) - 15, iy, szTmp, (int) strlen(szTmp));
+					TextOut(hdc, get_ix(0.0, 0.0,1.0, graph) - 15, iy, szTmp, (int) strlen(szTmp));
 				}
 			}
 			if (! graph->suppress_y_minor) {						/* Maybe minor tick marks */
 				for (y=dy2*((int) (ymin/dy2)); y<ymax+dy2/20; y+=dy2) {
 					if (y < ymin-dy2/20) continue;
-					iy = get_iy(y, ymin,ymax, iymax);
-					MoveToEx(hdc, get_ix( 0, 0,30, ixmax), iy, (LPPOINT) NULL);
-					LineTo  (hdc, get_ix( 1, 0,30, ixmax), iy);
-					MoveToEx(hdc, get_ix(30, 0,30, ixmax), iy, (LPPOINT) NULL);
-					LineTo  (hdc, get_ix(29, 0,30, ixmax), iy);
+					iy = get_iy(y, ymin,ymax, graph);
+					MoveToEx(hdc, get_ix( 0, 0,30, graph), iy, (LPPOINT) NULL);
+					LineTo  (hdc, get_ix( 1, 0,30, graph), iy);
+					MoveToEx(hdc, get_ix(30, 0,30, graph), iy, (LPPOINT) NULL);
+					LineTo  (hdc, get_ix(29, 0,30, graph), iy);
 				}
 			}
 			if (graph->show_Y_labels && y_labels.sci) {		/* Add x10^-3 */
 				iexp = y_labels.iexp;
 				SetTextAlign(hdc, TA_RIGHT);
-				ix = get_ix(0.0, 0.0,1.0, ixmax) - 27;			/* Was 25 previously */
-				iy = get_iy(1.0, 0.0,1.0, iymax) + 4;			/* 1 for edge / 3 for one char */
+				ix = get_ix(0.0, 0.0,1.0, graph) - 27;			/* Was 25 previously */
+				iy = get_iy(1.0, 0.0,1.0, graph) + 4;			/* 1 for edge / 3 for one char */
 				if (iexp < 0) iy += 5;
 				if (fabs(iexp) >= 10) iy += 4;
 				TextOut(hdc, ix, iy, "x 10", 4);
@@ -601,8 +659,8 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				TextOut(hdc, ix-4, iy, szTmp, (int) strlen(szTmp));
 			}
 			if (graph->show_Y_title && (strlen(graph->y_title) != 0)) {
-				ix = get_ix(0.0, 0.0,1.0, ixmax)-(graph->show_Y_labels ? LABEL_MARGIN : 4) - TITLE_MARGIN + 2;
-				iy = get_iy(0.5, 0.0,1.0, iymax);
+				ix = get_ix(0.0, 0.0,1.0, graph)-(graph->show_Y_labels ? LABEL_MARGIN : 4) - TITLE_MARGIN + 2;
+				iy = get_iy(0.5, 0.0,1.0, graph);
 				SelectObject(hdc, hfont_titles);
 				SetTextAlign(hdc, TA_CENTER);
 				TextOut(hdc, ix, iy, graph->y_title, (int) strlen(graph->y_title));
@@ -638,8 +696,8 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				for (i=0; i<npt; i++) {
 					x = rmin + (rmax-rmin) * i / (npt-1.0) ;
 					y = (*fnc->fnc)(x, fnc->args);
-					ix = get_ix(x, xmin,xmax, ixmax);
-					iy = get_iy(y, ymin,ymax, iymax);
+					ix = get_ix(x, xmin,xmax, graph);
+					iy = get_iy(y, ymin,ymax, graph);
 					if (i == 0) {
 						MoveToEx(hdc, ix, iy, (LPPOINT) NULL);
 					} else {
@@ -647,14 +705,14 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					}
 				}
 				if (fnc->draw_x_axis && ymin*ymax <= 0.0) {
-					iy = get_iy(0, ymin, ymax, iymax);
-					MoveToEx(hdc, get_ix(0.0, 0.0,1.0, ixmax), iy, (LPPOINT) NULL);
-					LineTo(hdc,   get_ix(1.0, 0.0,1.0, ixmax), iy);
+					iy = get_iy(0, ymin, ymax, graph);
+					MoveToEx(hdc, get_ix(0.0, 0.0,1.0, graph), iy, (LPPOINT) NULL);
+					LineTo(hdc,   get_ix(1.0, 0.0,1.0, graph), iy);
 				}
 				if (fnc->draw_y_axis && xmin*xmax <= 0.0) {
-					ix = get_ix(0, xmin, xmax, ixmax);
-					MoveToEx(hdc, ix, get_iy(0.0, 0.0,1.0, iymax), (LPPOINT) NULL);
-					LineTo(hdc,   ix, get_iy(1.0, 0.0,1.0, iymax));
+					ix = get_ix(0, xmin, xmax, graph);
+					MoveToEx(hdc, ix, get_iy(0.0, 0.0,1.0, graph), (LPPOINT) NULL);
+					LineTo(hdc,   ix, get_iy(1.0, 0.0,1.0, graph));
 				}
 				SelectObject(hdc, open);
 				DeleteObject(hpen);
@@ -705,8 +763,8 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 							penup = TRUE;
 							continue;
 						}
-						ix = get_ix(xtmp, xmin,xmax, ixmax);
-						iy = get_iy(ytmp, ymin,ymax, iymax);
+						ix = get_ix(xtmp, xmin,xmax, graph);
+						iy = get_iy(ytmp, ymin,ymax, graph);
 						if (penup) {
 							MoveToEx(hdc, ix, iy, (LPPOINT) NULL);
 							penup = FALSE;
@@ -724,8 +782,8 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 						xtmp = (graph->mode != GR_LOGLOG) ? xtmp : log(fabs(xtmp));
 						ytmp = (graph->mode == GR_LINEAR) ? ytmp : log(fabs(ytmp));
 						if (OutOfRange(xtmp, ytmp, xmin, xmax, ymin, ymax)) continue;
-						ix = get_ix(xtmp, xmin,xmax, ixmax);
-						iy = get_iy(ytmp, ymin,ymax, iymax);
+						ix = get_ix(xtmp, xmin,xmax, graph);
+						iy = get_iy(ytmp, ymin,ymax, graph);
 						if (cv->isize > 0) {							/* Specified size */
 							myrect.left = ix-cv->isize+1; myrect.right  = ix+cv->isize;
 							myrect.top  = iy-cv->isize+1; myrect.bottom = iy+cv->isize;
@@ -756,8 +814,8 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 							FillRect(hdc, &myrect, hbrush);
 						}
 						if (cv->s != NULL && graph->mode == GR_LINEAR) {
-							idy = (int) (cv->s[i]/(ymax-ymin)*iymax+0.5);
-							if (idy > 2) {
+							idy = (int) (cv->s[i]/(ymax-ymin)*graph->cyClient+0.5);
+							if (idy > 0) {
 								MoveToEx(hdc, ix, iy+idy, (LPPOINT) NULL);
 								LineTo(hdc, ix, iy-idy);
 							}
@@ -773,14 +831,14 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				}
 
 				if (cv->draw_x_axis && ymin*ymax <= 0.0) {
-					iy = get_iy(0, ymin, ymax, iymax);
-					MoveToEx(hdc, get_ix(0.0, 0.0,1.0, ixmax), iy, (LPPOINT) NULL);
-					LineTo(hdc,   get_ix(1.0, 0.0,1.0, ixmax), iy);
+					iy = get_iy(0, ymin, ymax, graph);
+					MoveToEx(hdc, get_ix(0.0, 0.0,1.0, graph), iy, (LPPOINT) NULL);
+					LineTo(hdc,   get_ix(1.0, 0.0,1.0, graph), iy);
 				}
 				if (cv->draw_y_axis && xmin*xmax <= 0.0) {
-					ix = get_ix(0, xmin, xmax, ixmax);
-					MoveToEx(hdc, ix, get_iy(0.0, 0.0,1.0, iymax), (LPPOINT) NULL);
-					LineTo(hdc,   ix, get_iy(1.0, 0.0,1.0, iymax));
+					ix = get_ix(0, xmin, xmax, graph);
+					MoveToEx(hdc, ix, get_iy(0.0, 0.0,1.0, graph), (LPPOINT) NULL);
+					LineTo(hdc,   ix, get_iy(1.0, 0.0,1.0, graph));
 				}
 				SelectObject(hdc, open);
 				DeleteObject(hpen);
@@ -842,12 +900,12 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					if (OutOfRange(x0, y0, xmin, xmax, ymin, ymax)) continue;
 					if (OutOfRange(x1, y1, xmin, xmax, ymin, ymax)) continue;
 					if (OutOfRange(x2, y2, xmin, xmax, ymin, ymax)) continue;
-					ix0 = get_ix(x0, xmin,xmax, ixmax);
-					iy0 = get_iy(y0, ymin,ymax, iymax);
-					ix1 = get_ix(x1, xmin,xmax, ixmax);
-					iy1 = get_iy(y1, ymin,ymax, iymax);
-					ix2 = get_ix(x2, xmin,xmax, ixmax);
-					iy2 = get_iy(y2, ymin,ymax, iymax);
+					ix0 = get_ix(x0, xmin,xmax, graph);
+					iy0 = get_iy(y0, ymin,ymax, graph);
+					ix1 = get_ix(x1, xmin,xmax, graph);
+					iy1 = get_iy(y1, ymin,ymax, graph);
+					ix2 = get_ix(x2, xmin,xmax, graph);
+					iy2 = get_iy(y2, ymin,ymax, graph);
 					MoveToEx(hdc, ix0, iy0, (LPPOINT) NULL);
 					LineTo(hdc, ix1, iy1);
 					LineTo(hdc, ix2, iy2);
@@ -855,18 +913,23 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				}
 
 				if (mesh->draw_x_axis && ymin*ymax <= 0.0) {
-					iy = get_iy(0, ymin, ymax, iymax);
-					MoveToEx(hdc, get_ix(0.0, 0.0,1.0, ixmax), iy, (LPPOINT) NULL);
-					LineTo(hdc,   get_ix(1.0, 0.0,1.0, ixmax), iy);
+					iy = get_iy(0, ymin, ymax, graph);
+					MoveToEx(hdc, get_ix(0.0, 0.0,1.0, graph), iy, (LPPOINT) NULL);
+					LineTo(hdc,   get_ix(1.0, 0.0,1.0, graph), iy);
 				}
 				if (mesh->draw_y_axis && xmin*xmax <= 0.0) {
-					ix = get_ix(0, xmin, xmax, ixmax);
-					MoveToEx(hdc, ix, get_iy(0.0, 0.0,1.0, iymax), (LPPOINT) NULL);
-					LineTo(hdc,   ix, get_iy(1.0, 0.0,1.0, iymax));
+					ix = get_ix(0, xmin, xmax, graph);
+					MoveToEx(hdc, ix, get_iy(0.0, 0.0,1.0, graph), (LPPOINT) NULL);
+					LineTo(hdc,   ix, get_iy(1.0, 0.0,1.0, graph));
 				}
 				SelectObject(hdc, open);
 				DeleteObject(hpen);
 				DeleteObject(hbrush);
+			}
+
+			/* If requested, inform routine with hdc to allow more painting */
+			if (graph->paint_callback.hwnd != NULL) {
+				SendMessage(graph->paint_callback.hwnd, graph->paint_callback.wID, (WPARAM) hdc, (LPARAM) graph);
 			}
 
 #ifdef USE_MEMORY_DC
@@ -878,6 +941,10 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			EndPaint(hwnd, &paintstruct);					/* Release DC */
 			rc = 0; break;
 
+		case WMP_SET_SLAVE:									/* Set this as a slave graph ... don't release memory on close */
+			graph->slave_process = (BOOL) wParam;
+			rc = 0; break;
+			
 		case WMP_LOGMODE:
 			graph->mode = (GRAPH_MODE) wParam;
 			if (graph->mode != GR_LINEAR && graph->mode != GR_LOGLIN && graph->mode != GR_LOGLOG) graph->mode = GR_LINEAR;
@@ -1139,6 +1206,50 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		case WM_SIZE:
 			rc = 0; break;
 
+		/* Set a callback procedure to notify if we get a CURSOR message */
+		case WMP_CURSOR_CALLBACK:
+			graph->cursor_callback.hwnd = (HWND) wParam;
+			graph->cursor_callback.wID  = (int) lParam;
+			rc = 0; break;
+
+		case WMP_PAINT_CALLBACK:
+			graph->paint_callback.hwnd = (HWND) wParam;
+			graph->paint_callback.wID  = (int) lParam;
+			rc = 0; break;
+
+		case WMP_GRAPH_CONVERT_COORDS:			/* Returns 0 if valid, 1 if invalid */
+		{
+			GRAPH_CONVERT_COORDS *coords;
+			coords = (GRAPH_CONVERT_COORDS *) wParam;
+			switch (coords->mode) {
+				case GRAPH_FRACTION_TO_SCREEN:	/* Will always return within the graph area */
+					coords->ix = get_ix(coords->x, 0.0, 1.0, graph);
+					coords->iy = get_iy(coords->y, 0.0, 1.0, graph);
+					rc = 0; break;
+				case GRAPH_AXES_TO_SCREEN:			/* Will always return within the graph area */
+					coords->ix = get_ix(coords->x, graph->xgmin, graph->xgmax, graph);
+					coords->iy = get_iy(coords->y, graph->ygmin, graph->ygmax, graph);
+					rc = 0; break;
+				case GRAPH_SCREEN_TO_FRACTION:	/* ix,iy forced to lie within window area */
+					coords->x = (1.0*coords->ix-graph->x_left_margin)/max(1,graph->cxClient-graph->x_left_margin-graph->x_right_margin);
+					coords->y = (1.0*(graph->cyClient-coords->iy)-graph->y_left_margin)/max(1,graph->cyClient-graph->y_left_margin-graph->y_right_margin);
+					rc = 0; break;
+				case GRAPH_SCREEN_TO_AXES:			/* ix,iy forced to lie within window area */
+					coords->x = (1.0*coords->ix-graph->x_left_margin)/max(1,graph->cxClient-graph->x_left_margin-graph->x_right_margin);
+					coords->y = (1.0*(graph->cyClient-coords->iy)-graph->y_left_margin)/max(1,graph->cyClient-graph->y_left_margin-graph->y_right_margin);
+					coords->x = graph->xgmin + (graph->xgmax-graph->xgmin)*coords->x;
+					coords->y = graph->ygmin + (graph->ygmax-graph->ygmin)*coords->y;
+					rc = 0; break;
+				default:									/* Invalid ... just ignore all parameters */
+					rc = 1; break;
+			}
+			coords->within_graph = (coords->ix >= graph->x_left_margin) &&
+										  (coords->ix <= graph->cxClient - graph->x_right_margin) &&
+										  (coords->iy >= graph->y_right_margin) &&
+										  (coords->iy <= graph->cyClient - graph->y_left_margin);
+			break;
+		}
+			
 		case WM_COMMAND:
 			wID = LOWORD(wParam);								/* Control sending message	*/
 			wNotifyCode = HIWORD(wParam);						/* Type of notification		*/
@@ -1147,7 +1258,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			/* Switch on events always allowed */
 			switch (wID) {
 				case IDB_CLEAR:
-					SendMessage(hwnd, WMP_CLEAR, 0, 0);
+					if (BN_CLICKED == wNotifyCode) SendMessage(hwnd, WMP_CLEAR, 0, 0);
 					rc = 0; break;
 				default:
 					return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -1482,7 +1593,7 @@ static void UpdateCurveMinMax(GRAPH_CURVE *cv) {
 		} else if (cv->y == NULL) {
 			cv->ymin = 0; cv->ymax = 1.0;
 		} else {
-			cv->ymin = DBL_MAX; cv->ymax = DBL_MIN;
+			cv->ymin = DBL_MAX; cv->ymax = -DBL_MAX;
 			for (i=0; i<cv->npt; i++) {
 				if (cv->y[i]+fabs(cv->s[i]) > cv->ymax) cv->ymax = cv->y[i]+fabs(cv->s[i]);
 				if (cv->y[i]-fabs(cv->s[i]) < cv->ymin) cv->ymin = cv->y[i]-fabs(cv->s[i]);

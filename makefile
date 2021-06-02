@@ -13,7 +13,7 @@ SYSLIBS = wsock32.lib user32.lib gdi32.lib comdlg32.lib comctl32.lib advapi32.li
 # server.exe  -- removed since must now be able to access the dialog box
 ALL: client.exe DCxLive.exe
 
-INSTALL: z:\lab\exes\DCxLive.exe z:\lab\exes\client.exe
+INSTALL: z:\lab\exes\DCxLive.exe
 
 CLEAN: 
 	rm *.exe *.obj *.res
@@ -50,9 +50,6 @@ DCx.res : DCx.rc resource.h
 
 # Distribution for the lab use
 z:\lab\exes\DCxLive.exe : DCxLive.exe
-	copy $** $@
-
-z:\lab\exes\client.exe : client.exe
 	copy $** $@
 
 # ---------------------------------------------------------------------------

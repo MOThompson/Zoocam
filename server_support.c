@@ -277,7 +277,7 @@ CLIENT_DATA_BLOCK *ConnectToServer(char *name, char *IP_address, int port, int *
 
 	/* See if we already have the ip and port */
 	for (i=0; i<nlist; i++) {
-		if (list[i]->ip_addr == ip_addr && list[i]->port == port && list[i]->active) return list[i];
+		if (list[i] != NULL && list[i]->ip_addr == ip_addr && list[i]->port == port && list[i]->active) return list[i];
 	}
 
 	/* Create a socket to the server */
@@ -359,7 +359,7 @@ int CloseServerConnection(CLIENT_DATA_BLOCK *block) {
 	block->active = FALSE;
 	free(block);
 
-	/* Finally, remove this from list of known connections */
+	/* Finally, remove this entry from the list of known connections */
 	for (i=0; i<nlist; i++) {
 		if (list[i] == block) list[i] = NULL;
 	}

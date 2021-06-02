@@ -41,11 +41,23 @@
 	#define	WMP_SET_TITLE_VISIBILITY	(WM_APP+31)
 	#define	  GRAPH_X_TITLE				(0x01)
 	#define	  GRAPH_Y_TITLE				(0x02)
-		
+	#define	WMP_CURSOR_CALLBACK			(WM_APP+32)			/* Registers routine to get messages on cursor presses */
+	#define	WMP_PAINT_CALLBACK			(WM_APP+33)			/* Registers routine to get messages after drawing WM_PAING messages */
+	#define	WMP_GRAPH_CONVERT_COORDS	(WM_APP+34)			/* Returns ix,iy <==> x,y value ... see GRAPH_CONVERT_COORDS structure */
+	#define	WMP_SET_SLAVE					(WM_APP+35)			/* Mark this as a slave ... careful on close with memory release */
+
 	#define	GRAPH_MAX_FNCS					(10)
 	#define	GRAPH_MAX_CURVES				(10)
 	#define	GRAPH_MAX_MESHES				(10)
 		
+	/* Used by WMP_GET_SCREEN_COORDS to translate give x,y into ix,iy coordinates */
+	typedef struct _GRAPH_CONVERT_COORDS {
+		enum {GRAPH_FRACTION_TO_SCREEN=0, GRAPH_AXES_TO_SCREEN=1, GRAPH_SCREEN_TO_FRACTION=2, GRAPH_SCREEN_TO_AXES=3} mode;
+		double x,y;
+		int ix,iy;
+		BOOL within_graph;
+	} GRAPH_CONVERT_COORDS;
+
 	typedef struct _GRAPH_TRIANGLE {			/* Define a triangle as a collection of 3 points */
 		double x0,y0, x1,y1, x2,y2;
 	} GRAPH_TRIANGLE;
@@ -141,6 +153,8 @@
 	typedef enum _GRAPH_MODE {GR_LINEAR=0, GR_LOGLIN=1, GR_LOGLOG=2} GRAPH_MODE;
 	
 	typedef struct _GRAPH_DATA {
+		HWND hwnd;													/* Handle for messages */
+		BOOL slave_process;										/* This is a slave structure ... no autofree() */
 		GRAPH_MODE mode;
 		BOOL autox, autoy, autoz;								/* Autoscale the axes based on data */
 		BOOL forcex, forcey, forcez;							/* Force scales and don't choose nice values for axes */
@@ -155,6 +169,12 @@
 		int  background_color;									/* Background color */
 		char x_title[64], y_title[64];						/* Are there titles on the X and Y axes */
 		
+		/* Data from the last WM_PAINT */
+		double xgmin,xgmax, ygmin,ygmax;						/* min/max for the labelled graph */
+		int x_left_margin, x_right_margin;					/* Pixels to left/right of graph for labels */
+		int y_left_margin, y_right_margin;					/* Pixels below/above of graph for labels */
+		int cxClient, cyClient;									/* Size of the client area for graphs */
+
 		GRAPH_FNC *function[GRAPH_MAX_FNCS];
 		int nfncs;
 		
@@ -163,6 +183,26 @@
 		
 		GRAPH_MESH *meshes[GRAPH_MAX_MESHES];
 		int nmeshes;
+
+		/* Structures for cursor and paint callback routines */
+		struct {				
+			HWND hwnd;		
+			int wID;
+		} cursor_callback,										/* on any cursor presses */
+		  paint_callback;											/* called after drawing complete with HDC */
+
 	} GRAPH_DATA;
+
+	/* Information returned as the wParam in the cursor callback function */
+	typedef struct _GRAPH_CURSOR_INFO {
+		HWND hwnd;						/* Handle of calling window */
+		int msg;							/* Message (WM_LBUTTONDOWN, ...) */
+		POINT point;					/* Actual point of cursor (screen coord's) */
+		int cxClient, cyClient;		/* Size of the client window */
+		int xpixel, ypixel;			/* x,y pixel relative to lower left of window */
+		double xfrac,yfrac;			/* Fractional position within the graph area */
+		double x,y;						/* Actual x,y based on first graph scales */
+		BOOL ingraph;					/* Is the position within the actual graph? */
+	} GRAPH_CURSOR_INFO;
 
 #endif		/* #ifndef _GRAPH_LOADED */

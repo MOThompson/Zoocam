@@ -72,17 +72,20 @@ static int OpenKeithley(HWND hdlg, int gpib_chan);
 /* ------------------------------- */
 static KI224_INFO info = {
 	FALSE,											/* active */
-	NULL,												/* Handle to dialog window */
+	NULL, NULL,										/* Handle to last and current dialog window */
 	GPIB_BOARD_ID, DEFAULT_GPIB_CHAN,		/* board and gpib address */
 	0,													/* handle to the GPIB device */
 	1.0, 0.0,										/* Set values for compliance and voltage */
 	0.0, 0.0											/* Current readings */
 };
 KI224_INFO *ki224_info = &info;
+HWND hwnd_Keith224 = NULL;						/* Handle to last started dialog box */
 
 /* ------------------------------- */
 /* Locally defined global vars     */
 /* ------------------------------- */
+static HINSTANCE hInstance=NULL;
+
 static HBITMAP m_GreenLED  = NULL;
 static HBITMAP m_RedLED    = NULL;
 static HBITMAP m_YellowLED = NULL;
@@ -210,12 +213,14 @@ INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPar
 			SendDlgItemMessage(hdlg, ID_LED, STM_SETIMAGE, (WPARAM) IMAGE_BITMAP, (LPARAM) (ki224_info->active ? (ki224_info->enabled ? m_GreenLED : m_RedLED) : m_YellowLED) );
 
 			/* Store the current handle for direct responses */
-			ki224_info->hdlg = hdlg;
+			ki224_info->last = hwnd_Keith224;				/* Save last one active */
+			ki224_info->hdlg = hwnd_Keith224 = hdlg;		/* And mark this one as last initiated */
 			rcode = TRUE; break;
 
 		case WM_CLOSE:
 			EndDialog(hdlg,0);
-			ki224_info->hdlg = NULL;
+			hwnd_Keith224 = ki224_info->last;		/* And mark last opened as closed */
+			ki224_info->hdlg = NULL;					/* We are not active now */
 			rcode = TRUE; break;
 
 		case WM_TIMER:
@@ -241,10 +246,14 @@ INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPar
 			switch (wID) {
 				case IDOK:												/* Default response for pressing <ENTER> */
 					hwndTest = GetFocus();							/* Just see if we use to change focus */
-					for (hptr=DfltEnterList; *hptr!=IDC_STATIC; hptr++) {
-						if (GetDlgItem(hdlg, *hptr) == hwndTest) {
-							PostMessage(hdlg, WM_NEXTDLGCTL, 0, 0L);
-							break;
+					if (GetDlgItem(hdlg, IDOK) == hwndTest) {
+						SendMessage(hdlg, WM_CLOSE, 0, 0);
+					} else {
+						for (hptr=DfltEnterList; *hptr!=IDC_STATIC; hptr++) {
+							if (GetDlgItem(hdlg, *hptr) == hwndTest) {
+								PostMessage(hdlg, WM_NEXTDLGCTL, 0, 0L);
+								break;
+							}
 						}
 					}
 					rcode = TRUE; break;
@@ -254,13 +263,13 @@ INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPar
 					rcode = TRUE; break;
 
 				case IDC_GPIB:
-					if (wNotifyCode == CBN_SELCHANGE) {
+					if (CBN_SELCHANGE == wNotifyCode) {
 						ki224_info->address = ComboBoxGetIntValue(hdlg, IDC_GPIB);
 					}
 					rcode = TRUE; break;
 
 				case IDV_CURRENT:
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						GetDlgItemText(hdlg, wID, szBuf, sizeof(szBuf));
 						if (*szBuf == '\0') {
 							rval = 0.0;
@@ -275,19 +284,21 @@ INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPar
 					rcode = TRUE; break;
 
 				case IDB_SET_I:
-					if (! ki224_info->active) {
-						Beep(300,200);
-					} else {
-						rval = GetDlgItemDouble(hdlg, IDV_CURRENT);
-						sprintf_s(szBuf, sizeof(szBuf), "R0I%gX", rval*1E-3);
-						ki224_info->I_set = rval*1E-3;
-						ibwrtex(szBuf, 20);
-						UpdateStatus(hdlg);
+					if (BN_CLICKED == wNotifyCode) {
+						if (! ki224_info->active) {
+							Beep(300,200);
+						} else {
+							rval = GetDlgItemDouble(hdlg, IDV_CURRENT);
+							sprintf_s(szBuf, sizeof(szBuf), "R0I%gX", rval*1E-3);
+							ki224_info->I_set = rval*1E-3;
+							ibwrtex(szBuf, 20);
+							UpdateStatus(hdlg);
+						}
 					}
 					rcode = TRUE; break;
 
 				case IDV_VOLTAGE:
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						GetDlgItemText(hdlg, wID, szBuf, sizeof(szBuf));
 						if (*szBuf == '\0') {
 							rval = 0.0;
@@ -303,14 +314,16 @@ INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPar
 					rcode = TRUE; break;
 
 				case IDB_SET_V:
-					if (! ki224_info->active) {
-						Beep(300,200);
-					} else {
-						rval = GetDlgItemDouble(hdlg, IDV_VOLTAGE);
-						sprintf_s(szBuf, sizeof(szBuf), "V%.3fX", rval);
-						ibwrtex(szBuf, 20);
-						ki224_info->V_set = rval;
-						UpdateStatus(hdlg);
+					if (BN_CLICKED == wNotifyCode) {
+						if (! ki224_info->active) {
+							Beep(300,200);
+						} else {
+							rval = GetDlgItemDouble(hdlg, IDV_VOLTAGE);
+							sprintf_s(szBuf, sizeof(szBuf), "V%.3fX", rval);
+							ibwrtex(szBuf, 20);
+							ki224_info->V_set = rval;
+							UpdateStatus(hdlg);
+						}
 					}
 					rcode = TRUE; break;
 
@@ -327,17 +340,21 @@ INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPar
 					rcode = TRUE; break;
 					
 				case IDB_STATUS_UPDATE:
-					UpdateStatus(hdlg);
+					if (BN_CLICKED == wNotifyCode) UpdateStatus(hdlg);
 					rcode = TRUE; break;
 					
 				case IDC_CONNECT:
-					if (GetDlgItemCheck(hdlg, IDC_CONNECT) && OpenKeithley(hdlg, ki224_info->address) == 0) {
-						ki224_info->active = TRUE;
-						for (i=0; i<sizeof(ControlList)/sizeof(*ControlList); i++) EnableDlgItem(hdlg, ControlList[i], TRUE);
-						EnableDlgItem(hdlg, IDC_GPIB, FALSE);
-						SetDlgItemCheck(hdlg, IDC_STATUS_ON, FALSE);
-						UpdateStatus(hdlg);
-					} else {
+					if (GetDlgItemCheck(hdlg, IDC_CONNECT)) {
+						if (OpenKeithley(hdlg, ki224_info->address) != 0) {
+							SetDlgItemCheck(hdlg, IDC_CONNECT, FALSE);
+						} else {
+							ki224_info->active = TRUE;
+							for (i=0; i<sizeof(ControlList)/sizeof(*ControlList); i++) EnableDlgItem(hdlg, ControlList[i], TRUE);
+							EnableDlgItem(hdlg, IDC_GPIB, FALSE);
+							SetDlgItemCheck(hdlg, IDC_STATUS_ON, FALSE);
+							UpdateStatus(hdlg);
+						}
+					} else if (ki224_info->active) {
 						ki224_info->active  = FALSE;								/* No longer active */
 						ki224_info->enabled = FALSE;								/* No longer know the state */
 						ki224_info->V = ki224_info->I = 0;
@@ -352,13 +369,15 @@ INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPar
 
 				case IDB_CURRENT_ON:
 				case IDB_CURRENT_OFF:
-					if (! ki224_info->active) {										/* Only if active */
-						Beep(300,200);
-					} else {
-						ki224_info->enabled = (wID == IDB_CURRENT_ON) ;
-						ibwrtex(ki224_info->enabled ? "F1X" : "F0X", 20);
-						ibloc(ki224_info->handle);
-						SendDlgItemMessage(hdlg, ID_LED, STM_SETIMAGE, (WPARAM) IMAGE_BITMAP, (LPARAM) (ki224_info->enabled ? m_GreenLED : m_RedLED) );
+					if (BN_CLICKED == wNotifyCode) {
+						if (! ki224_info->active) {										/* Only if active */
+							Beep(300,200);
+						} else {
+							ki224_info->enabled = (wID == IDB_CURRENT_ON) ;
+							ibwrtex(ki224_info->enabled ? "F1X" : "F0X", 20);
+							ibloc(ki224_info->handle);
+							SendDlgItemMessage(hdlg, ID_LED, STM_SETIMAGE, (WPARAM) IMAGE_BITMAP, (LPARAM) (ki224_info->enabled ? m_GreenLED : m_RedLED) );
+						}
 					}
 					rcode = TRUE; break;
 

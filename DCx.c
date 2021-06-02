@@ -124,7 +124,7 @@ static int SaveBurstImages(DCX_WND_INFO *dcx);
 static void show_camera_info_thread(void *arglist);
 static void show_sharpness_dialog_thread(void *arglist);
 BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
-BOOL CALLBACK LED_DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
+BOOL CALLBACK NUMATODlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 
 static double my_timer(BOOL reset);
 
@@ -1227,6 +1227,14 @@ static void start_image_window(void *arglist) {
 	return;
 }
 
+
+static void start_Keith224_LED_window(void *arglist) {
+	return;
+}
+static void start_NUMATO_LED_window(void *arglist) {
+	return;
+}
+
 /* ===========================================================================
 -- Routine to initialize the DCx driver.  Safe to call multiple times.
 -- 
@@ -1979,11 +1987,13 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			if (dcx->numato.on == 0) dcx->numato.on = 1;
 			dcx->numato.total = dcx->numato.on + dcx->numato.off;
 			dcx->numato.phase = 0;
-			ShowWindow(GetDlgItem(hdlg, IDB_LED_CONTROL), TRUE);
+			ShowDlgItem(hdlg, IDG_LED, TRUE);
+			ShowDlgItem(hdlg, IDB_LED_CONFIGURE, TRUE);
 #endif
 
 #ifdef USE_KEITHLEY
-			ShowWindow(GetDlgItem(hdlg, IDB_LED_CONTROL), TRUE);
+			ShowDlgItem(hdlg, IDG_LED, TRUE);
+			ShowDlgItem(hdlg, IDB_LED_CONFIGURE, TRUE);
 #endif
 
 #ifndef USE_FOCUS
@@ -2294,20 +2304,22 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				/* Display index is 0 based but display number is 1 based */
 				case IDB_NEXT_FRAME:
 				case IDB_PREV_FRAME:
-					if (dcx->LiveVideo) {
-						Beep(300,200);
-					} else if (dcx->rings.nValid <= 0) {
-						Beep(300,200);
-					} else {
-						i = dcx->rings.iShow + ((wID == IDB_NEXT_FRAME) ? +1 : -1);
-						if (i < 0) i = dcx->rings.nValid-1;
-						if (i >= dcx->rings.nValid) i = 0;
-						ShowImage(dcx, i, NULL);
+					if (BN_CLICKED == wNotifyCode) {
+						if (dcx->LiveVideo) {
+							Beep(300,200);
+						} else if (dcx->rings.nValid <= 0) {
+							Beep(300,200);
+						} else {
+							i = dcx->rings.iShow + ((wID == IDB_NEXT_FRAME) ? +1 : -1);
+							if (i < 0) i = dcx->rings.nValid-1;
+							if (i >= dcx->rings.nValid) i = 0;
+							ShowImage(dcx, i, NULL);
+						}
 					}
 					rcode = TRUE; break;
 
 				case IDV_CURRENT_FRAME:													/* Can be modified */
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						if (dcx->LiveVideo) {
 							Beep(300,200);
 						} else {
@@ -2323,22 +2335,24 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				/* Enable or abort based on current status ... */
 				/* WMP_BURST_ABORT or WMP_BURST_ARM message will be sent by DCx_Burst_Actions() */
 				case IDB_ARM:
-					DCx_Burst_Actions(dcx->BurstModeActive ? BURST_ABORT : BURST_ARM, 0, NULL);
+					if (BN_CLICKED == wNotifyCode) DCx_Burst_Actions(dcx->BurstModeActive ? BURST_ABORT : BURST_ARM, 0, NULL);
 					rcode = TRUE; break;
 				
 #ifdef USE_FOCUS
 				case IDB_SHARPNESS_DIALOG:
-					_beginthread(show_sharpness_dialog_thread, 0, NULL);
+					if (BN_CLICKED == wNotifyCode) _beginthread(show_sharpness_dialog_thread, 0, NULL);
 					rcode = TRUE; break;
 #endif
 
 				case IDB_AUTO_EXPOSURE:
-					_beginthread(AutoExposureThread, 0, dcx);
+					if (BN_CLICKED == wNotifyCode) _beginthread(AutoExposureThread, 0, dcx);
 					rcode = TRUE; break;
 					
 				case IDB_RESET_CURSOR:
-					dcx->x_image_target = dcx->y_image_target = 0.5;
-					SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
+					if (BN_CLICKED == wNotifyCode) {
+						dcx->x_image_target = dcx->y_image_target = 0.5;
+						SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
+					}
 					rcode = TRUE; break;
 
 				case IDC_SHOW_INTENSITY:
@@ -2359,26 +2373,28 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 
 				case IDB_CAMERA_DISCONNECT:
-					if (dcx->hCam > 0) {
-						ReleaseRingBuffers(dcx);
-						is_DisableEvent(dcx->hCam, IS_SET_EVENT_FRAME);
-						is_ExitEvent(dcx->hCam, IS_SET_EVENT_FRAME);
-						is_ExitCamera(dcx->hCam);
-						dcx->hCam = 0;
+					if (BN_CLICKED == wNotifyCode) {
+						if (dcx->hCam > 0) {
+							ReleaseRingBuffers(dcx);
+							is_DisableEvent(dcx->hCam, IS_SET_EVENT_FRAME);
+							is_ExitEvent(dcx->hCam, IS_SET_EVENT_FRAME);
+							is_ExitCamera(dcx->hCam);
+							dcx->hCam = 0;
+						}
+						for (i=0; CameraOffControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, CameraOffControls[i], FALSE);
+						ComboBoxClearSelection(hdlg, IDC_CAMERA_LIST);		/* Should be "unselect" */
+						ComboBoxClearSelection(hdlg, IDC_CAMERA_MODES);		/* Should be "unselect" */
+						EnableDlgItem(hdlg, IDB_CAMERA_DETAILS, FALSE);
+						EnableDlgItem(hdlg, IDB_CAMERA_DISCONNECT, FALSE);
 					}
-					for (i=0; CameraOffControls[i] != ID_NULL; i++) EnableDlgItem(hdlg, CameraOffControls[i], FALSE);
-					ComboBoxClearSelection(hdlg, IDC_CAMERA_LIST);		/* Should be "unselect" */
-					ComboBoxClearSelection(hdlg, IDC_CAMERA_MODES);		/* Should be "unselect" */
-					EnableDlgItem(hdlg, IDB_CAMERA_DETAILS, FALSE);
-					EnableDlgItem(hdlg, IDB_CAMERA_DISCONNECT, FALSE);
 					rcode = TRUE; break;
 					
 				case IDB_CAMERA_DETAILS:
-					_beginthread(show_camera_info_thread, 0, NULL);
+					if (BN_CLICKED == wNotifyCode) _beginthread(show_camera_info_thread, 0, NULL);
 					rcode = TRUE; break;
 
 				case IDC_CAMERA_LIST:
-					if (wNotifyCode == CBN_SELENDOK) {
+					if (CBN_SELENDOK == wNotifyCode) {
 						if (DCx_Select_Camera(hdlg, dcx, ComboBoxGetIntValue(hdlg, wID), &nformat) == 0) {
 							if (DCx_Select_Resolution(hdlg, dcx, nformat) == 0) {
 								is_StopLiveVideo(dcx->hCam, IS_WAIT);
@@ -2394,7 +2410,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 
 				case IDC_CAMERA_MODES:
-					if (wNotifyCode == CBN_SELENDOK && dcx->hCam > 0) {
+					if (CBN_SELENDOK == wNotifyCode && dcx->hCam > 0) {
 						if (dcx->LiveVideo) is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
 						dcx->LiveVideo = FALSE;
 						SetDlgItemCheck(hdlg, IDB_LIVE, FALSE);
@@ -2416,40 +2432,42 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 					
 				case IDB_UNDOCK:
-					if (! IsWindow(float_image_hwnd)) _beginthread(start_image_window, 0, NULL);
+					if (BN_CLICKED == wNotifyCode) {
+						if (! IsWindow(float_image_hwnd)) _beginthread(start_image_window, 0, NULL);
+					}
 					rcode = TRUE; break;
 
 				case IDB_LOAD_PARAMETERS:
-					is_ParameterSet(dcx->hCam, IS_PARAMETERSET_CMD_LOAD_FILE, NULL, 0);
-					SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);
-					SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
-					SendMessage(hdlg, WMP_SHOW_GAMMA, 0, 0);
-					SendMessage(hdlg, WMP_SHOW_COLOR_CORRECT, 0, 0);
-					SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
+					if (BN_CLICKED == wNotifyCode) {
+						is_ParameterSet(dcx->hCam, IS_PARAMETERSET_CMD_LOAD_FILE, NULL, 0);
+						SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);
+						SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
+						SendMessage(hdlg, WMP_SHOW_GAMMA, 0, 0);
+						SendMessage(hdlg, WMP_SHOW_COLOR_CORRECT, 0, 0);
+						SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
+					}
 					rcode = TRUE; break;
 
 				case IDB_SAVE_PARAMETERS:
-					is_ParameterSet(dcx->hCam, IS_PARAMETERSET_CMD_SAVE_FILE, NULL, 0);
+					if (BN_CLICKED == wNotifyCode) is_ParameterSet(dcx->hCam, IS_PARAMETERSET_CMD_SAVE_FILE, NULL, 0);
 					rcode = TRUE; break;
 
 				case IDV_FRAME_RATE:
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						SendMessage(hdlg, WMP_SET_FRAMERATE, (int) (100*GetDlgItemDouble(hdlg, wID)+0.5), 0);
 					}
 					rcode = TRUE; break;
 					
 				case IDV_EXPOSURE_TIME:
-					if (wNotifyCode == EN_KILLFOCUS) DCx_Set_Exposure(dcx, GetDlgItemDouble(hdlg, wID), TRUE, hdlg);
+					if (EN_KILLFOCUS == wNotifyCode) DCx_Set_Exposure(dcx, GetDlgItemDouble(hdlg, wID), TRUE, hdlg);
 					rcode = TRUE; break;
 
 				case IDV_GAMMA:
-					if (wNotifyCode == EN_KILLFOCUS) {
-						SendMessage(hdlg, WMP_SET_GAMMA, (int) (100*GetDlgItemDouble(hdlg, wID)+0.5), 0);
-					}
+					if (EN_KILLFOCUS == wNotifyCode) SendMessage(hdlg, WMP_SET_GAMMA, (int) (100*GetDlgItemDouble(hdlg, wID)+0.5), 0);
 					rcode = TRUE; break;
 
 				case IDB_GAMMA_NEUTRAL:
-					SendMessage(hdlg, WMP_SET_GAMMA, 100, 0);
+					if (BN_CLICKED == wNotifyCode) SendMessage(hdlg, WMP_SET_GAMMA, 100, 0);
 					rcode = TRUE; break;
 
 				case IDR_EXPOSURE_100US:
@@ -2486,7 +2504,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 					
 				case IDV_COLOR_CORRECT_FACTOR:
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						static double last_value = -10.0;
 						rval = GetDlgItemDouble(hdlg, IDV_COLOR_CORRECT_FACTOR);
 						if (rval < 0.0) rval = 0.0;
@@ -2508,7 +2526,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case IDV_RED_GAIN:
 				case IDV_GREEN_GAIN:
 				case IDV_BLUE_GAIN:
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						rc = GetDlgItemIntEx(hdlg, wID);
 						if (rc < 0) rc = 0;
 						if (rc > 100) rc = 100;
@@ -2521,14 +2539,14 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 
 				case IDT_CURSOR_X_PIXEL:
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						rval = ((double) GetDlgItemIntEx(hdlg, wID)) / dcx->width + 0.5;
 						dcx->x_image_target = (rval < 0.0) ? 0.0 : (rval > 1.0) ? 1.0 : rval ;
 						SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
 					}
 					rcode = TRUE; break;
 				case IDT_CURSOR_Y_PIXEL:
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						rval = 0.5 - ((double) GetDlgItemIntEx(hdlg, wID)) / dcx->height;
 						dcx->y_image_target = (rval < 0.0) ? 0.0 : (rval > 1.0) ? 1.0 : rval ;
 						SendMessage(hdlg, WMP_SHOW_CURSOR_POSN, 0, 0);
@@ -2537,7 +2555,7 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 				case IDV_RING_SIZE:
 #ifdef USE_RINGS
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						AllocRingBuffers(dcx, GetDlgItemIntEx(hdlg, IDV_RING_SIZE));
 						SetDlgItemInt(hdlg, IDV_RING_SIZE, dcx->rings.nSize, FALSE);
 					}
@@ -2545,57 +2563,77 @@ BOOL CALLBACK DCxDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 
 				case IDB_LIVE:
-					if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
-						rc = is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
-						fprintf(stderr, "Going live [rc=%d]\n", rc); fflush(stderr);
-						dcx->LiveVideo = TRUE;
-						dcx->rings.iLast = dcx->rings.iShow = dcx->rings.nValid = 0;
-						EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
-					} else {
-						rc = is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
-						fprintf(stderr, "Freezing live [rc=%d]\n", rc); fflush(stderr);
-						dcx->LiveVideo = FALSE;
-						EnableDlgItem(hdlg, IDB_CAPTURE, TRUE);
+					if (BN_CLICKED == wNotifyCode) {
+						if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
+							rc = is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+							fprintf(stderr, "Going live [rc=%d]\n", rc); fflush(stderr);
+							dcx->LiveVideo = TRUE;
+							dcx->rings.iLast = dcx->rings.iShow = dcx->rings.nValid = 0;
+							EnableDlgItem(hdlg, IDB_CAPTURE, FALSE);
+						} else {
+							rc = is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
+							fprintf(stderr, "Freezing live [rc=%d]\n", rc); fflush(stderr);
+							dcx->LiveVideo = FALSE;
+							EnableDlgItem(hdlg, IDB_CAPTURE, TRUE);
+						}
 					}
 					rcode = TRUE; break;
 
 				case IDB_CAPTURE:
-					is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
-					dcx->LiveVideo = FALSE;
+					if (BN_CLICKED == wNotifyCode) {
+						is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);
+						dcx->LiveVideo = FALSE;
+					}
 					rcode = TRUE; break;
 
 				case IDB_SAVE:
-					if (dcx->LiveVideo) rc = is_FreezeVideo(dcx->hCam, IS_WAIT);
-					dcx->LiveVideo = FALSE;
+					if (BN_CLICKED == wNotifyCode) {
+						if (dcx->LiveVideo) rc = is_FreezeVideo(dcx->hCam, IS_WAIT);
+						dcx->LiveVideo = FALSE;
 
-					ImageParams.pwchFileName = NULL;		/* fname; */
-					ImageParams.pnImageID    = NULL;	
-					ImageParams.ppcImageMem  = NULL;
-					ImageParams.nQuality     = 0;
-					ImageParams.nFileType = IS_IMG_BMP;
-					rc = is_ImageFile(dcx->hCam, IS_IMAGE_FILE_CMD_SAVE, &ImageParams, sizeof(ImageParams));
+						ImageParams.pwchFileName = NULL;		/* fname; */
+						ImageParams.pnImageID    = NULL;	
+						ImageParams.ppcImageMem  = NULL;
+						ImageParams.nQuality     = 0;
+						ImageParams.nFileType = IS_IMG_BMP;
+						rc = is_ImageFile(dcx->hCam, IS_IMAGE_FILE_CMD_SAVE, &ImageParams, sizeof(ImageParams));
 
-					if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
-						is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
-						dcx->rings.iLast = dcx->rings.iShow = dcx->rings.nValid = 0;
-						dcx->LiveVideo = TRUE;
+						if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
+							is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+							dcx->rings.iLast = dcx->rings.iShow = dcx->rings.nValid = 0;
+							dcx->LiveVideo = TRUE;
+						}
 					}
 					rcode = TRUE; break;
 
 				case IDB_BURST:
-					SaveBurstImages(dcx);
+					if (BN_CLICKED == wNotifyCode) SaveBurstImages(dcx);
 					rcode = TRUE; break;
 
 				/* Process the LED control values */
-				case IDB_LED_CONTROL:
-#ifdef USE_NUMATO
-					DialogBox(hInstance, "IDD_LED_CONTROL", hdlg, (DLGPROC) LED_DlgProc);
-#else if USE_KEITHLEY
-					DialogBox(hInstance, "IDD_KEITHLEY_224", hdlg, (DLGPROC) Keith224DlgProc);
+				case IDB_LED_CONFIGURE:
+					if (BN_CLICKED == wNotifyCode) {
+#ifdef USE_KEITHLEY
+						DialogBox(hInstance, "IDD_KEITHLEY_224", hdlg, (DLGPROC) Keith224DlgProc);
+#elif USE_NUMATO
+						DialogBox(hInstance, "IDD_LED_CONTROL", (HWND) arglist, (DLGPROC) NUMATODlgProc);
 #endif
-
+					}
+					ShowDlgItem(hdlg, IDB_LED_ON,  TRUE);
+					ShowDlgItem(hdlg, IDB_LED_OFF, TRUE);
 					rcode = TRUE; break;
-					
+
+				case IDB_LED_ON:
+				case IDB_LED_OFF:
+					if (BN_CLICKED == wNotifyCode) {
+#ifdef USE_KEITHLEY
+						Keith224_Output(wID == IDB_LED_ON ? 1 : 0);
+#elif USE_NUMATO
+						Beep(300,200);
+#endif
+					}
+					rcode = TRUE; break;
+
 				/* Intentionally unused IDs */
 				case IDT_RED_SATURATE:
 				case IDT_GREEN_SATURATE:
@@ -2767,10 +2805,11 @@ static int SaveBurstImages(DCX_WND_INFO *dcx) {
 
 
 #ifdef USE_NUMATO
+
 /* ===========================================================================
 =========================================================================== */
-BOOL CALLBACK LED_DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
-	static char *rname = "LED_DlgProc";
+BOOL CALLBACK NUMATODlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+	static char *rname = "NUMATODlgProc";
 
 	DCX_WND_INFO *dcx;
 	int wID, wNotifyCode, rcode;
@@ -2805,7 +2844,7 @@ BOOL CALLBACK LED_DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 
 				case IDV_COM_PORT:
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						if (GetDlgItemIntEx(hdlg, wID) != dcx->numato.port) {
 							if (dcx->numato.dio != NULL) {
 								NumatoQueryBit(dcx->numato.dio, 0, NULL);
@@ -2836,7 +2875,7 @@ BOOL CALLBACK LED_DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					
 				case IDV_LED_ON:
 				case IDV_LED_OFF:
-					if (wNotifyCode == EN_KILLFOCUS) {
+					if (EN_KILLFOCUS == wNotifyCode) {
 						dcx->numato.on  = GetDlgItemIntEx(hdlg, IDV_LED_ON);
 						dcx->numato.off = GetDlgItemIntEx(hdlg, IDV_LED_OFF);
 						if (dcx->numato.on <= 0) {
@@ -3023,21 +3062,25 @@ BOOL CALLBACK SharpnessDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam
 					rcode = TRUE; break;
 
 				case IDB_CLEAR_FOCUS_GRAPH:
-					if (SharpnessDlg.cv != NULL) {
-						SharpnessDlg.cv->npt = 0;
-						SharpnessDlg.focus->npt = 0;
-						SharpnessDlg.cv->modified = TRUE;
+					if (BN_CLICKED == wNotifyCode) {
+						if (SharpnessDlg.cv != NULL) {
+							SharpnessDlg.cv->npt = 0;
+							SharpnessDlg.focus->npt = 0;
+							SharpnessDlg.cv->modified = TRUE;
+						}
+						EnableDlgItem(hdlg, IDB_SET_EST_FOCUS, FALSE);
+						SetDlgItemText(hdlg, IDT_EST_FOCUS, "");
 					}
-					EnableDlgItem(hdlg, IDB_SET_EST_FOCUS, FALSE);
-					SetDlgItemText(hdlg, IDT_EST_FOCUS, "");
 					rcode = TRUE; break;
 
 				case IDB_SET_EST_FOCUS:
-					zposn = GetDlgItemDouble(hdlg, IDT_EST_FOCUS);
-					if (zposn != 0) {
-						Focus_Remote_Set_Focus_Posn(zposn, TRUE);
-					} else {
-						Beep(300,200);
+					if (BN_CLICKED == wNotifyCode) {
+						zposn = GetDlgItemDouble(hdlg, IDT_EST_FOCUS);
+						if (zposn != 0) {
+							Focus_Remote_Set_Focus_Posn(zposn, TRUE);
+						} else {
+							Beep(300,200);
+						}
 					}
 					rcode = TRUE; break;
 
@@ -3125,14 +3168,16 @@ BOOL CALLBACK CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPara
 					rcode = TRUE; break;
 
 				case IDB_PIXEL_CLOCK_SET:
-					newPixelClock = GetDlgItemIntEx(hdlg, IDV_PIXEL_CLOCK_SET);
-					is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_GET_RANGE, (void *) &nRange, sizeof(nRange));
-					if (newPixelClock < nRange[0]) newPixelClock = nRange[0];
-					if (newPixelClock > nRange[1]) newPixelClock = nRange[1];
-					SetDlgItemInt(hdlg, IDV_PIXEL_CLOCK_SET, newPixelClock, FALSE);
-					is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_SET, (void *) &newPixelClock, sizeof(newPixelClock));
-					is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_GET, (void *) &nPixelClock, sizeof(nPixelClock));
-					SetDlgItemInt(hdlg, IDT_PIXEL_CLOCK_CURRENT, nPixelClock, FALSE);
+					if (BN_CLICKED == wNotifyCode) {
+						newPixelClock = GetDlgItemIntEx(hdlg, IDV_PIXEL_CLOCK_SET);
+						is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_GET_RANGE, (void *) &nRange, sizeof(nRange));
+						if (newPixelClock < nRange[0]) newPixelClock = nRange[0];
+						if (newPixelClock > nRange[1]) newPixelClock = nRange[1];
+						SetDlgItemInt(hdlg, IDV_PIXEL_CLOCK_SET, newPixelClock, FALSE);
+						is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_SET, (void *) &newPixelClock, sizeof(newPixelClock));
+						is_PixelClock(dcx->hCam, IS_PIXELCLOCK_CMD_GET, (void *) &nPixelClock, sizeof(nPixelClock));
+						SetDlgItemInt(hdlg, IDT_PIXEL_CLOCK_CURRENT, nPixelClock, FALSE);
+					}
 					rcode = TRUE; break;
 
 				/* Intentionally unused IDs */
@@ -3180,10 +3225,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 
 	/* And show the dialog box */
 	hInstance = hThisInstance;
-	printf("Calling dialog box procedure\n"); fflush(stdout);
 	DialogBox(hInstance, "DCX_DIALOG", HWND_DESKTOP, (DLGPROC) DCxDlgProc);
-
-	printf("WinMain: returned from dialog box procedure\n"); fflush(stdout);
 
 	/* And shut down the DCX server */
 	Shutdown_DCx_Server();
