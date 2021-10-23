@@ -58,7 +58,6 @@ static void cleanup(void);
 	
 int main(int argc, char *argv[]) {
 
-	DCX_IMAGE_INFO info;
 	DCX_STATUS status;
 	DCX_EXPOSURE_PARMS exposure;
 	DCX_RING_INFO rings;
