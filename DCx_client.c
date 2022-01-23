@@ -20,7 +20,7 @@
 /* Local include files            */
 /* ------------------------------ */
 #include "server_support.h"		/* Server support */
-#include "DCx.h"						/* Access to the DCX info */
+#include "wnd.h"						/* Access to the DCX info */
 #include "DCx_client.h"				/* For prototypes				*/
 
 /* ------------------------------- */
@@ -60,7 +60,7 @@ int main(int argc, char *argv[]) {
 
 	DCX_STATUS status;
 	DCX_EXPOSURE_PARMS exposure;
-	DCX_RING_INFO rings;
+	RING_INFO rings;
 	DCX_REMOTE_RING_IMAGE *ring_image;
 
 	unsigned char *data = NULL;
@@ -553,7 +553,7 @@ int DCxRemote_Set_Gains(int gamma, int master, int red, int green, int blue, DCX
 /* ===========================================================================
 --	Query image ring buffer information (number, valid, current, etc.)
 --
---	Usage:  int DCxRemote_Get_Ring_Info(DCX_RING_INFO *rings);
+--	Usage:  int DCxRemote_Get_Ring_Info(RING_INFO *rings);
 --         int DCxRemote_Get_Ring_Size(void);
 --         int DCxRemote_Get_Ring_Frame_Cnt(void);
 --
@@ -566,23 +566,23 @@ int DCxRemote_Set_Gains(int gamma, int master, int red, int green, int blue, DCX
 --         For others,
 --             Returns requested value ... or -n on error
 =========================================================================== */
-int DCxRemote_Get_Ring_Info(DCX_RING_INFO *rings) {
+int DCxRemote_Get_Ring_Info(RING_INFO *rings) {
 	CS_MSG request, reply;
-	DCX_RING_INFO *my_info = NULL;
+	RING_INFO *my_info = NULL;
 	int rc;
 
 	/* Fill in default response (no data) */
-	if (rings != NULL) memset(rings, 0, sizeof(DCX_RING_INFO));
+	if (rings != NULL) memset(rings, 0, sizeof(RING_INFO));
 
 	/* Query the exposure parameters */
 	memset(&request, 0, sizeof(request));
-	request.msg   = DCX_RING_GET_INFO;
+	request.msg   = RING_GET_INFO;
 	rc = StandardServerExchange(DCx_Remote, request, NULL, &reply, &my_info);
-	if (Error_Check(rc, &reply, DCX_RING_GET_INFO) != 0) return -1;
+	if (Error_Check(rc, &reply, RING_GET_INFO) != 0) return -1;
 
 	/* Copy the info over to user space */
 	if (my_info != NULL) {
-		if (rings != NULL) memcpy(rings, my_info, sizeof(DCX_RING_INFO));
+		if (rings != NULL) memcpy(rings, my_info, sizeof(RING_INFO));
 		free(my_info);
 	}
 

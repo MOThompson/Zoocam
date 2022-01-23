@@ -233,7 +233,7 @@ int DCxRemote_Set_Gains(int gamma, int master, int red, int green, int blue, DCX
 --         For others,
 --             Returns requested value ... or -n on error
 =========================================================================== */
-int DCxRemote_Get_Ring_Info(DCX_RING_INFO *rings);
+int DCxRemote_Get_Ring_Info(RING_INFO *rings);
 int DCxRemote_Get_Ring_Size(void);
 int DCxRemote_Get_Ring_Frame_Cnt(void);
 

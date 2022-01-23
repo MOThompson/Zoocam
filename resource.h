@@ -40,6 +40,7 @@
 #define IDC_DISPLAY                     2003
 #define IDB_LIVE                        2004
 #define IDB_UNDOCK                      2005
+#define IDB_FLOAT                       2005
 #define IDB_CAPTURE                     2006
 #define IDB_BURST                       2007
 #define IDB_SAVE_PARAMETERS             2008
@@ -63,13 +64,16 @@
 #define IDT_PIXEL_CLOCK_DEFAULT         2023
 #define IDT_FRAMERATE                   2024
 #define IDT_PIXEL_CLOCK_CURRENT         2024
+#define IDT_ACTUALFRAMERATE             2024
 #define IDS_EXPOSURE_TIME               2025
 #define IDT_PIXEL_CLOCK_MAX             2025
 #define IDV_EXPOSURE_TIME               2026
 #define IDT_PIXEL_CLOCK_INC             2026
 #define IDS_GAMMA                       2027
+#define IDT_CAMERA_NAME                 2027
 #define IDV_GAMMA                       2028
 #define IDB_GAMMA_NEUTRAL               2029
+#define IDT_CAMERA_BIT_DEPTH            2029
 #define IDR_COLOR_DISABLE               2030
 #define IDR_COLOR_ENABLE                2031
 #define IDR_COLOR_BG40                  2032
@@ -136,6 +140,15 @@
 #define IDB_LED_OFF                     2091
 #define IDB_LED_ON                      2092
 #define IDG_LED                         2093
+#define IDT_CAMERA_EXPOSE_MIN           2094
+#define IDT_CAMERA_EXPOSE_MAX           2095
+#define IDT_CAMERA_FPS_MIN              2096
+#define IDT_CAMERA_FPS_MAX              2097
+#define IDT_CAMERA_GAIN_MIN             2098
+#define IDT_CAMERA_GAIN_MAX             2099
+#define IDT_CAMERA_FIRMWARE             2100
+#define IDG_COLOR_CORRECTION            2101
+#define IDS_TEXT_0                      2102
 #define IDC_GPIB                        2401
 #define IDC_STATIC                      -1
 
@@ -146,7 +159,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        143
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2094
+#define _APS_NEXT_CONTROL_VALUE         2103
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif
