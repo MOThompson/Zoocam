@@ -8,7 +8,7 @@ typedef enum _DCX_IMAGE_FORMAT { IMAGE_BMP=0, IMAGE_JPG=1, IMAGE_PNG=2 } DCX_IMA
 typedef enum _DCX_IMAGE_TYPE   { IMAGE_MONOCHROME=0, IMAGE_COLOR=1 } DCX_IMAGE_TYPE;
 
 /* Camera/window information structure */
-typedef struct _WND_INFO WND_INFO;
+typedef struct _DCX_WND_INFO DCX_WND_INFO;
 
 /* Structure associated with an image information message in client/server */
 #pragma pack(4)
@@ -162,7 +162,7 @@ int DCx_WriteParameters(char *pre_text, FILE *funit);
 /* ===========================================================================
 -- Routine to set the exposure on the camera (if enabled)
 --
--- Usage: int DCx_Set_Exposure(WND_INFO *wnd, double exposure, BOOL maximize_framerate, HWND hdlg);
+-- Usage: int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate, HWND hdlg);
 --
 -- Inputs: dcx - pointer to info about the camera or NULL to use default
 --         exposure - desired exposure in ms
@@ -177,12 +177,12 @@ int DCx_WriteParameters(char *pre_text, FILE *funit);
 -- Notes: If dcx is unknown (and hdlg), can set dcx to NULL to use static
 --        value.  This is used by the client/server code to simplify life.
 =========================================================================== */
-int DCx_Set_Exposure(WND_INFO *wnd, double exposure, BOOL maximize_framerate, HWND hdlg);
+int DCx_Set_Exposure(DCX_WND_INFO *dcx, double exposure, BOOL maximize_framerate, HWND hdlg);
 
 /* ===========================================================================
 -- Routine to set the gains on the camera (if enabled)
 --
--- Usage: int DCx_Set_Gains(WND_INFO *wnd, int master, int red, int green, int blue, HWND hdlg);
+-- Usage: int DCx_Set_Gains(DCX_WND_INFO *dcx, int master, int red, int green, int blue, HWND hdlg);
 --
 -- Inputs: dcx - pointer to info about the camera or NULL to use default
 --         master - value in range [0,100] for hardware gain of the channel
@@ -198,7 +198,7 @@ int DCx_Set_Exposure(WND_INFO *wnd, double exposure, BOOL maximize_framerate, HW
 -- Notes: If dcx is unknown (and hdlg), can set dcx to NULL to use static
 --        value.  This is used by the client/server code to simplify life.
 =========================================================================== */
-int DCx_Set_Gains(WND_INFO *wnd, int master, int red, int green, int blue, HWND hdlg);
+int DCx_Set_Gains(DCX_WND_INFO *dcx, int master, int red, int green, int blue, HWND hdlg);
 
 
 /* ===========================================================================
@@ -229,7 +229,7 @@ int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
 /* ===========================================================================
 -- Interface to the RING functions
 --
--- Usage: int DCX_Ring_Actions(RING_ACTION request, int option, RING_INFO *response);
+-- Usage: int DCX_Ring_Actions(DCX_RING_ACTION request, int option, DCX_RING_INFO *response);
 --
 -- Inputs: request - what to do
 --           (0) RING_GET_INFO        ==> return structure ... also # of frames
@@ -237,9 +237,9 @@ int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
 --           (1) RING_SET_SIZE        ==> set number of frames in the ring
 --           (2) RING_GET_ACTIVE_CNT  ==> returns number of frames currently with data
 --         option - For RING_SET_SIZE, desired number
---         response - pointer to for return of RING_INFO data
+--         response - pointer to for return of DCX_RING_INFO data
 --
--- Output: *response - if !NULL, gets current RING_INFO data
+-- Output: *response - if !NULL, gets current DCX_RING_INFO data
 --
 -- Return: On error, -1 ==> or -2 ==> invalid request (not in enum)
 --             RING_GET_INFO:       configured number of rings
@@ -247,9 +247,9 @@ int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
 --		         RING_SET_SIZE:			new configured number of rings
 --		         RING_GET_ACTIVE_CNT:	number of buffers with image data
 =========================================================================== */
-typedef enum _RING_ACTION {RING_GET_INFO=0, RING_GET_SIZE=1, RING_SET_SIZE=2, RING_GET_ACTIVE_CNT=3} RING_ACTION;
+typedef enum _DCX_RING_ACTION {RING_GET_INFO=0, RING_GET_SIZE=1, RING_SET_SIZE=2, RING_GET_ACTIVE_CNT=3} DCX_RING_ACTION;
 
-int DCx_Ring_Actions(RING_ACTION request, int option, DCX_RING_INFO *response);
+int DCx_Ring_Actions(DCX_RING_ACTION request, int option, DCX_RING_INFO *response);
 
 /* ===========================================================================
 -- Interface to the BURST functions
@@ -315,44 +315,9 @@ int DCx_Enable_Live_Video(int state);
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
 
-#ifdef INCLUDE_WND_DETAIL_INFO
+#ifdef INCLUDE_DCX_DETAIL_INFO
 
-/* DCX type camera information */
-typedef struct _DCX_CAMERA {
-	HCAM hCam;
-	int CameraID;
-	CAMINFO CameraInfo;						/* Details on the camera */
-	SENSORINFO SensorInfo;					/* Details on the sensor */
-	BOOL IsSensorColor;						/* Is the camera a color camera */
-	int NumImageFormats;						/* Number of image formats available */
-	IMAGE_FORMAT_LIST *ImageFormatList;	/* List of formats for the active camera */
-	int ImageFormatID;						/* Currently selected Image Format */
-	BOOL EnableErrorReports;				/* Do we want error reports as message boxes? */
-
-		/* Associated with the selected resolution */
-	IMAGE_FORMAT_INFO *ImageFormatInfo;
-
-#ifdef USE_RINGS
-	DCX_RING_INFO rings;						/* Info regarding the rings */
-	int   *Image_PID;							/* Pointers to PIDs of each image in the ring */
-	char  **Image_Mem;						/* Pointers to the image memory */
-#else
-	int Image_PID;
-	char *Image_Mem;
-#endif
-	BOOL Image_Mem_Allocated;				/* Have we allocated (vis IS_AllocImageMem) the bufers */
-
-} DCX_CAMERA;
-
-/* Upperlevel camera information encoded in the combobox dropdown and ActiveCamera pointer */
-typedef struct _CAMERA_INFO {
-	enum {UNKNOWN=0, DCX=1, TL=2} driver;		/* empty initialization points to none */
-	char id[64];										/* Up to 32 char id for combobox */
-	char description[256];							/* Optional description for help	*/
-	void *details;										/* Camera driver specific detail */
-} CAMERA_INFO;
-
-typedef struct _WND_INFO {
+typedef struct _DCX_WND_INFO {
 	HWND main_hdlg;							/* Handle to primary dialog box */
 
 	HANDLE FrameEvent;						/* Event for new frame valid in memory buffer */
@@ -376,31 +341,43 @@ typedef struct _WND_INFO {
 			BURST_STATUS_FAIL=5				/* Capture failed for other reason (no semaphores, etc.) */
 	} BurstModeStatus;						/* Internal status */
 
-	/* Camera initialized */
-	BOOL bCamera;								/* Is there a camera connected */
-	CAMERA_INFO Camera;						/* Pointer to primary info on the camera (DCX or TL) */
+	/* Associated with opening a camera */
+	HCAM hCam;
+	int CameraID;
+	CAMINFO CameraInfo;						/* Details on the camera */
+	SENSORINFO SensorInfo;					/* Details on the sensor */
+	BOOL SensorIsColor;						/* Is the camera a color camera */
+	int NumImageFormats;						/* Number of image formats available */
+	IMAGE_FORMAT_LIST *ImageFormatList;	/* List of formats for the active camera */
+	int ImageFormatID;						/* Currently selected Image Format */
+	BOOL EnableErrorReports;				/* Do we want error reports as message boxes? */
 
-	/* Common camera information */
+	/* Associated with the selected resolution */
 	int Image_Count;							/* Number of images processed - use to identify new data */
-	int height, width;						/* Image height and width in pixels */
-	BOOL bColor;								/* Sensor is color */
+	IMAGE_FORMAT_INFO *ImageFormatInfo;
+	int height, width;
 
-	/* Cross-hair focus of windows */	
-	struct {		
-		double x,y;								/* Fraction of [0,1) the way across image for the cursor (in screen coordinates) */
-		BOOL fullwidth;						/* Cursor should extend over full range of image */
-	} cursor_posn;
+#ifdef USE_RINGS
+	DCX_RING_INFO rings;						/* Info regarding the rings */
+	int   *Image_PID;							/* Pointers to PIDs of each image in the ring */
+	char  **Image_Mem;						/* Pointers to the image memory */
+#else
+	int Image_PID;
+	char *Image_Mem;
+#endif
+	BOOL Image_Mem_Allocated;				/* Have we allocated (vis IS_AllocImageMem) the bufers */
 
-	/* Associated with opening a DCX camera */
-	DCX_CAMERA *dcx;
+	double Image_Aspect;
 
 	HWND thumbnail;
+	double x_image_target, y_image_target;		/* Fraction of [0,1) the way across image for the cursor (in screen coordinates) */
+	BOOL full_width_cursor;							/* Draw cursor full width of the image */
 
 	BOOL track_centroid;								/* Continuously update cursor at centroid */
 	int red_saturate, green_saturate, blue_saturate;
 	GRAPH_CURVE *red_hist, *green_hist, *blue_hist;
-	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b;
-	GRAPH_CURVE *horz_w, *horz_r, *horz_g, *horz_b;
+	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b, *vert_sum;
+	GRAPH_CURVE *horz_w, *horz_r, *horz_g, *horz_b, *horz_sum;
 
 #ifdef USE_NUMATO
 	/* Elements for Numator DIO */
@@ -415,6 +392,6 @@ typedef struct _WND_INFO {
 	} numato;
 #endif
 
-} WND_INFO;
+} DCX_WND_INFO;
 
 #endif			/* INCLUDE_DCX_DETAIL_INFO */

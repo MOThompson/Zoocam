@@ -22,6 +22,9 @@ INSTALL: z:\lab\exes\DCxLive.exe
 
 CLEAN: 
 	rm *.exe *.obj *.res
+	rm timer.c timer.h win32ex.c win32ex.h graph.c graph.h server_support.c server_support.h 
+	rm focus_client.c focus_client.h
+	rm tl_camera_sdk_load.c tl_mono_to_color_processing_load.c tl_mono_to_color_processing_load.h
 
 client.exe : DCx_client.c DCx_client.h wnd.h server_support.obj server_support.h
 	cl -Feclient.exe -DLOCAL_CLIENT_TEST $(CFLAGS) DCx_client.c server_support.obj $(SYSLIBS)
@@ -102,6 +105,12 @@ focus_client.c : \code\lab\sara\focus_client.c
 focus_client.h : \code\lab\sara\focus_client.h
 	copy $** $@
 
+tl_camera_sdk_load.c : ..\TL_SDK\load_dll_helpers\tl_camera_sdk_load.c
+	copy $** $@
+
+tl_mono_to_color_processing_load.c : ..\TL_SDK\load_dll_helpers\tl_mono_to_color_processing_load.c
+	copy $** $@
+
 tl_mono_to_color_processing_load.h : ..\TL_SDK\load_dll_helpers\tl_mono_to_color_processing_load.h
 	copy $** $@
 
@@ -113,6 +122,6 @@ ki224.obj : ki224.h win32ex.h
 
 tl.obj : tl.h
 
-dcx.obj : wnd.h dcx_server.h uc480.h resource.h win32ex.h graph.h focus_client.h ki224.h tl.h
+dcx.obj : wnd.h dcx_server.h uc480.h resource.h win32ex.h graph.h timer.h focus_client.h ki224.h tl.h
 
 server_test.obj : wnd.h

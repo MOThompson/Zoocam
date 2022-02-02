@@ -7,6 +7,7 @@
 
 /* Extensions to standard libraries */
 errno_t strcpy_m(char *dest, size_t dest_size, const char *src);
+errno_t strcat_m(char *dest, size_t dest_size, const char *src);
 
 /* Center a dialog window within its parent */
 #define	DlgCenterWindow(hdlg)	(DlgCenterWindowEx((hdlg), NULL))
@@ -79,10 +80,12 @@ int ComboBoxGetIndex(HWND hdlg, int wID);
 int ComboBoxSetByIndex(HWND hdlg, int wID, int index);
 
 int ComboBoxFillIntList(HWND hdlg, int wID, CB_INT_LIST *list, int n);
+int ComboBoxAddIntItem(HWND hdlg, int wID, char *text, int value);
 int ComboBoxGetIntValue(HWND hdlg, int wID);
 int ComboBoxSetByIntValue(HWND hdlg, int wID, int ival);
 
 int ComboBoxFillPtrList(HWND hdlg, int wID, CB_PTR_LIST *list, int n);
+int ComboBoxAddPtrItem(HWND hdlg, int wID, char *text, void *value);
 void *ComboBoxGetPtrValue(HWND hdlg, int wID);
 int ComboBoxSetByPtrValue(HWND hdlg, int wID, void *ival);
 

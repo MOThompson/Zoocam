@@ -149,7 +149,7 @@ static int Camera_Get_Gamma(HWND hdlg, WND_INFO *wnd, double *gamma);
 
 static void Camera_Info_Thread(void *arglist);
 
-static int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, RING_INFO *info);
+static int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, DCX_RING_INFO *info);
 	
 static int Camera_Save_Current_Frame(HWND hdlg, WND_INFO *wnd);
 
@@ -2768,8 +2768,8 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					/* Update the ring information */
 				case TIMER_FRAMEINFO_UPDATE:
 					{
-						RING_INFO ringinfo;
-						static RING_INFO ringhold = {-1,-1,-1,-1};
+						DCX_RING_INFO ringinfo;
+						static DCX_RING_INFO ringhold = {-1,-1,-1,-1};
 						Camera_Get_Ring_Info(hdlg, wnd, &ringinfo);
 						if (ringinfo.nSize  != ringhold.nSize)  SetDlgItemInt(hdlg, IDV_RING_SIZE,     ringinfo.nSize,  FALSE);
 						if (ringinfo.iLast  != ringhold.iLast)  SetDlgItemInt(hdlg, IDT_FRAME_COUNT,   ringinfo.iLast,  FALSE);
@@ -5030,7 +5030,7 @@ static void Camera_Info_Thread(void *arglist) {
 /* ===========================================================================
 -- Returns statistics on the ring buffers
 --
--- Usage: int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, RING_INFO *info);
+-- Usage: int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, DCX_RING_INFO *info);
 --
 -- Inputs: hdlg    - pointer to the window handle (will use IDC_CAMERA_LIST element)
 --         wnd     - handle to the main information structure
@@ -5042,7 +5042,7 @@ static void Camera_Info_Thread(void *arglist) {
 --           2 ==> info was NULL
 --           3 ==> no camera active
 =========================================================================== */
-static int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, RING_INFO *info) {
+static int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, DCX_RING_INFO *info) {
 	static char *rname = "Camera_Get_Ring_Info";
 
 	int rc;
@@ -5084,7 +5084,7 @@ static int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, RING_INFO *info) {
 /* ===========================================================================
 -- Interface to the RING functions
 --
--- Usage: int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, RING_ACTION request, int option, RING_INFO *response);
+-- Usage: int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, RING_ACTION request, int option, DCX_RING_INFO *response);
 --
 -- Inputs: hdlg    - pointer to the window handle (will use IDC_CAMERA_LIST element)
 --         wnd     - handle to the main information structure
@@ -5094,9 +5094,9 @@ static int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, RING_INFO *info) {
 --           (1) RING_SET_SIZE        ==> set number of frames in the ring
 --           (2) RING_GET_ACTIVE_CNT  ==> returns number of frames currently with data
 --         option - For RING_SET_SIZE, desired number
---         response - pointer to for return of RING_INFO data
+--         response - pointer to for return of DCX_RING_INFO data
 --
--- Output: *response - if !NULL, gets current RING_INFO data
+-- Output: *response - if !NULL, gets current DCX_RING_INFO data
 --
 -- Return: On error, -1 ==> or -2 ==> invalid request (not in enum)
 --             RING_GET_INFO:       configured number of rings
@@ -5104,7 +5104,7 @@ static int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, RING_INFO *info) {
 --		         RING_SET_SIZE:			new configured number of rings
 --		         RING_GET_ACTIVE_CNT:	number of buffers with image data
 =========================================================================== */
-int DCx_Ring_Actions(RING_ACTION request, int option, RING_INFO *response) {
+int DCx_Ring_Actions(RING_ACTION request, int option, DCX_RING_INFO *response) {
 
 	WND_INFO *wnd;
 	HWND hdlg;

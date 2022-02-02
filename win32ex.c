@@ -51,31 +51,72 @@
 
 
 
-
 /* ===========================================================================
 -- Secure version of string copy that will not overflow the buffer.
--- Unlike strcpy_s, this version simply truncates src if necessary to fit.
+-- Unlike strcpy_s, this version simply truncates src if necessary to
+-- fit and guarentees that dest will be null terminated as long as
+-- the size is greater than 0
 --
--- Usage: errno_t strcpy_m(char *dest, size_t dest_size, const char *src);
+-- Usage: int strcpy_m(char *dest, size_t count, const char *src);
 --
--- Inputs: dest - buffer for string copy
---         dest_size - defined length of dest
---         src  - source string
+-- Inputs: dest  - pointer to destination string location
+--         count - size of dest
+--         src   - pointer to source string
 --
--- Output: Copies up to dest_size-1 characters from src to dest and terminates
+-- Output: Copies up to count-1 characters from src to dest and terminates
 --         dest with a null character (guarenteed)
 --
--- Return: 0 if successful
---         EINVAL if dest or src are NULL
---         ERANGE if dest_size is <= 0
+-- Return: 0 if successful, !=0 otherwise
+--           EINVAL if dest or src are NULL
+--           ERANGE if count is <= 0
 =========================================================================== */
-errno_t strcpy_m(char *dest, size_t dest_size, const char *src) {
+errno_t strcpy_m(char *dest, size_t count, const char *src) {
 
+	/* Even on error, null terminate destination string if possible */
+	if (dest != NULL && count > 0) *dest = '\0';
+
+	/* Validate parameters */
 	if (dest == NULL || src == NULL) return EINVAL;
-	if (dest_size <= 0) return ERANGE;
+	if (count <= 0) return ERANGE;
 
-	strncpy(dest, src, dest_size);
-	dest[dest_size-1] = '\0';
+	/* Copy but no more than count-1 characters */
+	while (--count > 0 && *src) *(dest++) = *(src++);
+	*dest = '\0';
+	return 0;
+}
+
+/* ===========================================================================
+-- Secure version of string concatenate that will not overflow the buffer.
+-- Unlike strcat_s, this version simply truncates src if necessary to
+-- fit and guarentees that dest will be null terminated as long as
+-- the size is greater than 0 and something is copied into the space
+--
+-- Usage: int strcat_m(char *dest, size_t count, const char *src);
+--
+-- Inputs: dest  - pointer to destination string location
+--         count - size of dest
+--         src   - pointer to source string
+--
+-- Output: Appends dest to src, but only up to a total of count-1 chars;
+--         terminates dest with a null character unless error
+--
+-- Return: 0 if successful, !=0 otherwise
+--         EINVAL if dest or src are NULL
+--         ERANGE if count is <= 0
+=========================================================================== */
+errno_t strcat_m(char *dest, size_t count, const char *src) {
+
+	/* Validate parameters */
+	if (dest == NULL || src == NULL) return EINVAL;
+	if (count < 1) return ERANGE;
+
+	/* Point to the end of dest, but never further than count */
+	while (*dest != '\0' && count > 0) { dest++; count--; }
+	if (count == 0) return ERANGE;
+
+	/* We are now pointed at the end of the string, so just copy new string */
+	while (--count > 0 && *src) *(dest++) = *(src++);
+	*dest = '\0';
 	return 0;
 }
 
@@ -303,17 +344,20 @@ int GetRadioButtonIndex(HWND hdlg, int nID_first, int nID_last) {
 --			 int ComboBoxSetByIndex(HWND hdlg, int wID, int index);
 --
 --        int ComboBoxFillIntList(HWND hdlg, int wID, CB_INT_LIST *list, int n);
+--        int ComboBoxAddIntItem(HWND hdlg, int wID, char *text, int value);
 --        int ComboBoxGetIntValue(HWND hdlg, int wID);
 --        int ComboBoxSetByIntValue(HWND hdlg, int wID, int ival);
 --
 --        int ComboBoxFillPtrList(HWND hdlg, int wID, CB_PTR_LIST *list, int n);
+--			 int ComboBoxAddPtrItem(HWND hdlg, int wID, char *text, void *value);
 --        void *ComboBoxGetPtrValue(HWND hdlg, int wID);
 --        int ComboBoxSetByPtrValue(HWND hdlg, int wID, void *ival);
 --
--- Inputs: hdlg - dialog box handle for the combo box
---         wID  - specific control
---         list - either an integer value or pointer value list of id/value
---         n    - number of elements in list (use CB_COUNT macro)
+-- Inputs: hdlg  - dialog box handle for the combo box
+--         wID   - specific control
+--         list  - either an integer value or pointer value list of id/value
+--         value - either an integer value or pointer value list of id/value
+--         n     - number of elements in list (use CB_COUNT macro)
 --
 -- Output: FillIn     - creates the list on screen.
 --         SetByValue - selects an entry based on value (takes entry 0 if not found)
@@ -348,6 +392,12 @@ int ComboBoxSetByIndex(HWND hdlg, int wID, int index) {
 	return (int) SendDlgItemMessage(hdlg, wID, CB_SETCURSEL, index, (LPARAM) 0);
 }
 
+int ComboBoxAddIntItem(HWND hdlg, int wID, char *text, int value) {
+	int item;
+	item = (int) SendDlgItemMessage(hdlg, wID, CB_ADDSTRING, 0, (LPARAM) text);
+	return (SendDlgItemMessage(hdlg, wID, CB_SETITEMDATA, (WPARAM) item, (LPARAM) value) == CB_ERR) ? 1 : 0 ;
+}
+
 int ComboBoxFillIntList(HWND hdlg, int wID, CB_INT_LIST *list, int n) {
 	int i, item;
 	for (i=0; i<n; i++) {
@@ -373,6 +423,12 @@ int ComboBoxSetByIntValue(HWND hdlg, int wID, int ival) {
 	if (item >= count) { rc = 1; item = 0; }
 	SendDlgItemMessage(hdlg, wID, CB_SETCURSEL, item, (LPARAM) 0);
 	return rc;
+}
+
+int ComboBoxAddPtrItem(HWND hdlg, int wID, char *text, void *value) {
+	int item;
+	item = (int) SendDlgItemMessage(hdlg, wID, CB_ADDSTRING, 0, (LPARAM) text);
+	return (SendDlgItemMessage(hdlg, wID, CB_SETITEMDATA, (WPARAM) item, (LPARAM) value) == CB_ERR) ? 1 : 0 ;
 }
 
 int ComboBoxFillPtrList(HWND hdlg, int wID, CB_PTR_LIST *list, int n) {

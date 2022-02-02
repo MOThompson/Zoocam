@@ -32,6 +32,7 @@
 /* ------------------------------ */
 /* Local include files            */
 /* ------------------------------ */
+#include "win32ex.h"
 #include "graph.h"
 
 /* ------------------------------- */
@@ -46,9 +47,6 @@
 // #define	DEBUG
 
 #define	nint(x)	(((x)>0) ? ( (int) (x+0.5)) : ( (int) (x-0.5)) )
-
-#define GetDlgItemCheck(hwnd,ID)			(SendDlgItemMessage(hwnd,ID,BM_GETCHECK,0,0)==1)
-#define SetDlgItemCheck(hwnd,ID,on)		(SendDlgItemMessage(hwnd,ID,BM_SETCHECK,on,0))
 
 /* Structure to help with labeling of tick marks on graphs */
 typedef struct _LABEL_FORMAT {
@@ -1121,7 +1119,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 		case WMP_SET_X_TITLE:
 			if ( ((char *) wParam) != NULL) {
-				strcpy_s(graph->x_title, sizeof(graph->x_title), (char *) wParam);
+				strcpy_m(graph->x_title, sizeof(graph->x_title), (char *) wParam);
 				graph->x_title[sizeof(graph->x_title)-1] = '\0';
 			} else {
 				*graph->x_title = '\0';
@@ -1131,7 +1129,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 		case WMP_SET_Y_TITLE:
 			if ( ((char *) wParam) != NULL) {
-				strcpy_s(graph->y_title, sizeof(graph->y_title), (char *) wParam);
+				strcpy_m(graph->y_title, sizeof(graph->y_title), (char *) wParam);
 				graph->y_title[sizeof(graph->y_title)-1] = '\0';
 			} else {
 				*graph->y_title = '\0';
@@ -1948,7 +1946,7 @@ static int FormatLabels(LABEL_FORMAT *lab, double rmin, double rmax, double dx) 
 	/* And determine number of decimals required / creating format statement */
 	if (dx/lab->scale > 1.0) {										/* Does each interval correspond to integer changes? */
 		lab->mx = -1;
-		strcpy(lab->format, "%i");
+		strcpy_m(lab->format, sizeof(lab->format), "%i");
 	} else {
 		lab->mx = (int) (-log10(dx/lab->scale)+0.999);		/* Number of digits required to see dx */
 		sprintf_s(lab->format, sizeof(lab->format), "%%.%if", lab->mx);

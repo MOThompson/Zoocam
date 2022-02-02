@@ -132,7 +132,8 @@ int RunServerThread(char *name, unsigned short port, void (*ClientHandler)(void 
 	if ( (stub = calloc(1, sizeof(*stub))) == NULL) {
 		rc = 1;
 	} else {
-		strcpy_s(stub->name, sizeof(stub->name), name);
+		strcpy_s(stub->name, sizeof(stub->name), name);	/* w/ fix for null termination */
+		stub->name[sizeof(stub->name)-1] = '\0';			/* Ensure null terminated */
 		stub->port          = port;
 		stub->ClientHandler = ClientHandler;
 		stub->reset         = reset;
@@ -151,7 +152,8 @@ int RunServer(char *pname, unsigned short port, void (*ClientHandler)(void *), v
 	char name[32];
 
 /* Copy over the name since we will be here a while and don't want it changed out from under us */
-	strcpy_s(name, sizeof(name), pname);
+	strcpy_s(name, sizeof(name), pname);	/* w/ fix for null termination */
+	name[sizeof(name)-1] = '\0';				/* Ensure null terminated */
 
 /* Make sure we can inititiate and have sockets available */
 	if (InitSockets() != 0) return 3;

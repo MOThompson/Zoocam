@@ -21,6 +21,7 @@
 /* ------------------------------ */
 #include "server_support.h"		/* Server support */
 #include "wnd.h"						/* Access to the DCX info */
+// #include "DCx.h"						/* Currently has some of the info */
 #include "DCx_client.h"				/* For prototypes				*/
 
 /* ------------------------------- */
@@ -60,7 +61,7 @@ int main(int argc, char *argv[]) {
 
 	DCX_STATUS status;
 	DCX_EXPOSURE_PARMS exposure;
-	RING_INFO rings;
+	DCX_RING_INFO rings;
 	DCX_REMOTE_RING_IMAGE *ring_image;
 
 	unsigned char *data = NULL;
@@ -566,13 +567,13 @@ int DCxRemote_Set_Gains(int gamma, int master, int red, int green, int blue, DCX
 --         For others,
 --             Returns requested value ... or -n on error
 =========================================================================== */
-int DCxRemote_Get_Ring_Info(RING_INFO *rings) {
+int DCxRemote_Get_Ring_Info(DCX_RING_INFO *rings) {
 	CS_MSG request, reply;
-	RING_INFO *my_info = NULL;
+	DCX_RING_INFO *my_info = NULL;
 	int rc;
 
 	/* Fill in default response (no data) */
-	if (rings != NULL) memset(rings, 0, sizeof(RING_INFO));
+	if (rings != NULL) memset(rings, 0, sizeof(DCX_RING_INFO));
 
 	/* Query the exposure parameters */
 	memset(&request, 0, sizeof(request));
@@ -582,7 +583,7 @@ int DCxRemote_Get_Ring_Info(RING_INFO *rings) {
 
 	/* Copy the info over to user space */
 	if (my_info != NULL) {
-		if (rings != NULL) memcpy(rings, my_info, sizeof(RING_INFO));
+		if (rings != NULL) memcpy(rings, my_info, sizeof(DCX_RING_INFO));
 		free(my_info);
 	}
 
