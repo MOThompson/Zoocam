@@ -1,4 +1,8 @@
-#include "tl_camera_sdk.h"
+#ifndef tl_loaded
+
+#define tl_loaded
+
+// #include "tl_camera_sdk.h"					/* Somehow, this is already loaded */
 #include "tl_camera_sdk_load.h"
 #include "tl_mono_to_color_processing.h"
 #include "tl_color_enum.h"
@@ -128,3 +132,5 @@ int TL_GetMasterGain(TL_CAMERA *camera, double *dB_gain);
 #define	TL_IGNORE_GAIN		(-999)
 int TL_GetRGBGains(TL_CAMERA *camera, double *red, double *green, double *blue);
 int TL_SetRGBGains(TL_CAMERA *camera, double  red, double  green, double  blue);
+
+#endif			/* tl_loaded */

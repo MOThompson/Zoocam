@@ -1,6 +1,6 @@
 //{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ generated include file.
-// Used by DCx.rc
+// Used by ZooCam.rc
 //
 #define IDS_APP_TITLE                   103
 #define IDD_ABOUTBOX                    103
@@ -149,6 +149,7 @@
 #define IDT_CAMERA_FIRMWARE             2100
 #define IDG_COLOR_CORRECTION            2101
 #define IDS_TEXT_0                      2102
+#define IDC_SHOW_SUM                    2103
 #define IDC_GPIB                        2401
 #define IDC_STATIC                      -1
 
@@ -159,7 +160,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        143
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2103
+#define _APS_NEXT_CONTROL_VALUE         2104
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

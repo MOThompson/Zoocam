@@ -20,8 +20,7 @@
 /* Local include files            */
 /* ------------------------------ */
 #include "server_support.h"		/* Server support */
-#include "wnd.h"						/* Access to the DCX info */
-// #include "DCx.h"						/* Currently has some of the info */
+#include "ZooCam.h"					/* Access to the ZooCam info */
 #include "DCx_client.h"				/* For prototypes				*/
 
 /* ------------------------------- */

@@ -13,12 +13,13 @@ SYSLIBS = wsock32.lib user32.lib gdi32.lib comdlg32.lib comctl32.lib advapi32.li
 
 TL_SDK_INCLUDE = -I/code/lab/DCx/tl_sdk\include -I/code/lab/DCx/tl_sdk/load_dll_helpers
 
-OBJS = DCx.obj DCx_server.obj tl.obj numato_dio.obj focus_client.obj win32ex.obj graph.obj ki224.obj server_support.obj tl_camera_sdk_load.obj tl_mono_to_color_processing_load.obj timer.obj
+OBJS = ZooCam.obj dcx.obj tl.obj DCx_server.obj numato_dio.obj focus_client.obj win32ex.obj graph.obj ki224.obj server_support.obj tl_camera_sdk_load.obj tl_mono_to_color_processing_load.obj timer.obj
 
 # server.exe  -- removed since must now be able to access the dialog box
-ALL: client.exe DCxLive.exe
+# client.exe  -- removed for the moment
+ALL: ZooCam.exe
 
-INSTALL: z:\lab\exes\DCxLive.exe
+INSTALL: z:\lab\exes\ZooCam.exe
 
 CLEAN: 
 	rm *.exe *.obj *.res
@@ -26,14 +27,17 @@ CLEAN:
 	rm focus_client.c focus_client.h
 	rm tl_camera_sdk_load.c tl_mono_to_color_processing_load.c tl_mono_to_color_processing_load.h
 
-client.exe : DCx_client.c DCx_client.h wnd.h server_support.obj server_support.h
+client.exe : DCx_client.c DCx_client.h ZooCam.h server_support.obj server_support.h
 	cl -Feclient.exe -DLOCAL_CLIENT_TEST $(CFLAGS) DCx_client.c server_support.obj $(SYSLIBS)
 
 server.exe : server_test.c DCx_server.obj server_support.obj server_support.h DCx_server.h DCx_client.h 
 	cl -Feserver.exe $(CFLAGS) server_test.c DCx_server.obj server_support.obj $(SYSLIBS)
 
-DCx.obj : DCx.c wnd.h DCx_client.h uc480.h resource.h win32ex.h graph.h
-	cl -c  $(TL_SDK_INCLUDE) -DSTANDALONE $(CFLAGS) DCx.c
+ZooCam.obj : ZooCam.c ZooCam.h dcx.h tl.h DCx_client.h uc480.h resource.h win32ex.h graph.h
+	cl -c  $(TL_SDK_INCLUDE) -DSTANDALONE $(CFLAGS) ZooCam.c
+
+dcx.obj : dcx.c dcx.h tl.h
+	cl -c $(TL_SDK_INCLUDE) $(CFLAGS) dcx.c
 
 tl.obj : tl.c tl.h timer.h
 	cl -c $(TL_SDK_INCLUDE) $(CFLAGS) tl.c
@@ -43,6 +47,9 @@ win32ex.obj : win32ex.c win32ex.h
 
 graph.obj : graph.c graph.h
 	cl -c $(CFLAGS) graph.c
+
+dcx_server.obj : dcx_server.c
+	cl -c $(TL_SDK_INCLUDE) $(CFLAGS) dcx_server.c
 
 server_support.obj : server_support.c server_support.h
 	cl -c $(CFLAGS) server_support.c
@@ -62,14 +69,14 @@ tl_mono_to_color_processing_load.obj : tl_mono_to_color_processing_load.c
 timer.obj : timer.h
 	cl -c $(CFLAGS) timer.c
 
-DCxLive.exe : $(OBJS) DCx.res
-	cl $(CFLAGS) -FeDCxLive.exe $(OBJS) DCx.res $(DCx_LIB) $(NI488_LIB) $(SYSLIBS)
+ZooCam.exe : $(OBJS) ZooCam.res
+	cl $(CFLAGS) -FeZooCam.exe $(OBJS) ZooCam.res $(DCx_LIB) $(NI488_LIB) $(SYSLIBS)
 
-DCx.res : DCx.rc resource.h
-	rc $(RFLAGS) DCx.rc
+ZooCam.res : ZooCam.rc resource.h
+	rc $(RFLAGS) ZooCam.rc
 
 # Distribution for the lab use
-z:\lab\exes\DCxLive.exe : DCxLive.exe
+z:\lab\exes\ZooCam.exe : ZooCam.exe
 	copy $** $@
 
 # ---------------------------------------------------------------------------
@@ -114,6 +121,9 @@ tl_mono_to_color_processing_load.c : ..\TL_SDK\load_dll_helpers\tl_mono_to_color
 tl_mono_to_color_processing_load.h : ..\TL_SDK\load_dll_helpers\tl_mono_to_color_processing_load.h
 	copy $** $@
 
+# ---------------------------------------------------------------------------
+# .h dependencies
+# ---------------------------------------------------------------------------
 tl_mono_to_color_processing_load.obj : tl_mono_to_color_processing_load.h
 
 win32ex.obj : win32ex.h
@@ -122,6 +132,17 @@ ki224.obj : ki224.h win32ex.h
 
 tl.obj : tl.h
 
-dcx.obj : wnd.h dcx_server.h uc480.h resource.h win32ex.h graph.h timer.h focus_client.h ki224.h tl.h
+ZooCam.obj : win32ex.h graph.h resource.h timer.h numato_DIO.h ki224.h uc480.h ZooCam.h dcx_server.h tl.h focus_client.h
 
-server_test.obj : wnd.h
+DCX_client.obj : server_support.h ZooCam.h DCX_client.h
+
+DCX_server.obj : server_support.h ZooCam.h ki224.h DCX_server.h DCX_client.h
+
+# implicit is also ni4882.h but covered in the -I opriona
+ki224.obj : resource.h win32ex.h ki224.h
+
+numato_DIO.obj : numato_DIO.h
+
+server_test.obj : server_support.h ZooCam.h DCx_server.h DCx_client.h
+
+tl.obj : timer.h tl.h

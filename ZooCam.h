@@ -1,80 +1,15 @@
+#ifndef ZooCam_Loaded
+
+#define ZooCam_Loaded
+
 /* Global identifier of my window handle */
-HWND DCx_main_hdlg;
+HWND ZooCam_main_hdlg;
 
-#define USE_RINGS						/* Use ring buffers */
-#define DFLT_RING_SIZE	(10)		/* Default number of frames in ring */
-
-typedef enum _DCX_IMAGE_FORMAT { IMAGE_BMP=0, IMAGE_JPG=1, IMAGE_PNG=2 } DCX_IMAGE_FORMAT;
-typedef enum _DCX_IMAGE_TYPE   { IMAGE_MONOCHROME=0, IMAGE_COLOR=1 } DCX_IMAGE_TYPE;
+#include "dcx.h"
+#include "tl.h"
 
 /* Camera/window information structure */
 typedef struct _WND_INFO WND_INFO;
-
-/* Structure associated with an image information message in client/server */
-#pragma pack(4)
-typedef struct _DCX_IMAGE_INFO {
-	uint32_t width, height;			/* Image width and height */
-	uint32_t memory_pitch;			/* Bytes between each row (allocate memory pitch*height) */
-	double exposure;					/* Current exposure (ms) */
-	double gamma;						/* Gamma value */
-	uint32_t master_gain;			/* Gains in non-linear range [0,100] */
-	uint32_t red_gain, green_gain, blue_gain;
-	uint32_t color_correction;		/* 0,1,2,4,8 corresponding to disable, enable, BG40, HQ, IR Auto */
-	double color_correction_factor;
-	uint32_t red_saturate, green_saturate, blue_saturate;		/* Number saturated pixels */
-} DCX_IMAGE_INFO;
-#pragma pack()
-
-/* Structure associated with an camera status message in client/server */
-#pragma pack(4)
-typedef struct _DCX_STATUS {
-	char manufacturer[32];			/* Camera manufacturer */
-	char model[32];					/* Camera model */
-	char serial[32];					/* Camera serial number */
-	char version[32];					/* Camera version */
-	char date[32];						/* Firmware date */
-	uint32_t CameraID;				/* Camera ID (as set in EEPROM) */
-	DCX_IMAGE_TYPE color_mode;		/* Monochrome or color mode */
-	uint32_t pixel_pitch;			/* Pixel pitch in um */
-	double fps;							/* Frame rate (frames per second) */
-	double exposure;					/* Current exposure (ms) */
-	double gamma;						/* Gamma value */
-	uint32_t master_gain;			/* Gains in non-linear range [0,100] */
-	uint32_t red_gain, green_gain, blue_gain;
-	uint32_t color_correction;		/* 0,1,2,4,8 corresponding to disable, enable, BG40, HQ, IR Auto */
-	double color_correction_factor;
-} DCX_STATUS;
-#pragma pack()
-
-/* Structure used by DCX_CLIENT to allow changes to exposure */
-#pragma pack(4)
-/* Or'd bit-flags in option to control setting parameters */
-/* Exposure always has priority over FPS, but FPS will be maximized if not modified with exposure */
-	#define	DCXF_MODIFY_EXPOSURE		(0x01)	/* Modify exposure (value in ms) */
-	#define	DCXF_MODIFY_FPS			(0x02)	/* Modify frames per second */
-	#define	DCXF_MODIFY_GAMMA			(0x04)	/* Modify gamma */
-	#define	DCXF_MODIFY_MASTER_GAIN	(0x08)	/* Modify master gain */
-	#define	DCXF_MODIFY_RED_GAIN		(0x10)	/* Red channel gain */
-	#define	DCXF_MODIFY_GREEN_GAIN	(0x20)	/* Green channel gain */
-	#define	DCXF_MODIFY_BLUE_GAIN	(0x40)	/* Blue channel gain */
-typedef struct _DCX_EXPOSURE_PARMS {
-	double exposure;									/* Exposure time in ms				*/
-	double fps;											/* Frame rate (per second)			*/
-	uint32_t gamma;									/* Gamma value (0 < gamma < 100)	*/
-	uint32_t master_gain;							/* Master gain (0 < gain < 100)	*/
-	uint32_t red_gain, green_gain, blue_gain;	/* Individual channel gains		*/
-} DCX_EXPOSURE_PARMS;
-#pragma pack()
-
-/* Structure use for communicating ring size information in client/server */
-#pragma pack(4)
-typedef struct _DCX_RING_INFO {
-	int nSize;									/* Number of buffers in the ring */
-	int nValid;									/* Number of frames valid since last reset */
-	int iLast;									/* index of last buffer used (from events) */
-	int iShow;									/* index of currently displayed frame */
-} DCX_RING_INFO;
-#pragma pack()
 
 /* ===========================================================================
 -- Start a thread to run the dialog box for the camera
@@ -88,27 +23,6 @@ typedef struct _DCX_RING_INFO {
 -- Return: none
 =========================================================================== */
 void DCx_Start_Dialog(void *arglist);
-
-/* ===========================================================================
--- Interface routine to accept a request to save an image as a file
---
--- Usage: int DCX_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND HwndRenderBitmap);
---
--- Inputs: fname   - if not NULL, pointer to name of file to be saved
---                   if NULL, brings up a Save As ... dialog box
---         format  - one of IMAGE_BMP, IMAGE_JPG, IMAGE_PNG
---         quality - quality of image (primary JPEG)
---         info    - pointer (if not NULL) to structure to be filled with image info
---			  HwndRenderBitmap - if not NULL, handle were we should try to render the bitmap
---
--- Output: Saves the file as specified.
---         if info != NULL, *info filled with details of capture and basic image stats
---
--- Return: 0 - all okay
---         1 - camera is not initialized and active
---         2 - file save failed for some other reason
-=========================================================================== */
-int DCx_Capture_Image(char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND HwndRenderBitmap);
 
 /* ===========================================================================
 -- Interface routine to accept a request to grab and store an image in memory 
@@ -317,33 +231,6 @@ int DCx_Enable_Live_Video(int state);
 
 #ifdef INCLUDE_WND_DETAIL_INFO
 
-/* DCX type camera information */
-typedef struct _DCX_CAMERA {
-	HCAM hCam;
-	int CameraID;
-	CAMINFO CameraInfo;						/* Details on the camera */
-	SENSORINFO SensorInfo;					/* Details on the sensor */
-	BOOL IsSensorColor;						/* Is the camera a color camera */
-	int NumImageFormats;						/* Number of image formats available */
-	IMAGE_FORMAT_LIST *ImageFormatList;	/* List of formats for the active camera */
-	int ImageFormatID;						/* Currently selected Image Format */
-	BOOL EnableErrorReports;				/* Do we want error reports as message boxes? */
-
-		/* Associated with the selected resolution */
-	IMAGE_FORMAT_INFO *ImageFormatInfo;
-
-#ifdef USE_RINGS
-	DCX_RING_INFO rings;						/* Info regarding the rings */
-	int   *Image_PID;							/* Pointers to PIDs of each image in the ring */
-	char  **Image_Mem;						/* Pointers to the image memory */
-#else
-	int Image_PID;
-	char *Image_Mem;
-#endif
-	BOOL Image_Mem_Allocated;				/* Have we allocated (vis IS_AllocImageMem) the bufers */
-
-} DCX_CAMERA;
-
 /* Upperlevel camera information encoded in the combobox dropdown and ActiveCamera pointer */
 typedef struct _CAMERA_INFO {
 	enum {UNKNOWN=0, DCX=1, TL=2} driver;		/* empty initialization points to none */
@@ -399,8 +286,8 @@ typedef struct _WND_INFO {
 	BOOL track_centroid;								/* Continuously update cursor at centroid */
 	int red_saturate, green_saturate, blue_saturate;
 	GRAPH_CURVE *red_hist, *green_hist, *blue_hist;
-	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b;
-	GRAPH_CURVE *horz_w, *horz_r, *horz_g, *horz_b;
+	GRAPH_CURVE *vert_w, *vert_r, *vert_g, *vert_b, *vert_sum;
+	GRAPH_CURVE *horz_w, *horz_r, *horz_g, *horz_b, *horz_sum;
 
 #ifdef USE_NUMATO
 	/* Elements for Numator DIO */
@@ -418,3 +305,6 @@ typedef struct _WND_INFO {
 } WND_INFO;
 
 #endif			/* INCLUDE_DCX_DETAIL_INFO */
+
+#endif			/* ZooCam_Loaded */
+
