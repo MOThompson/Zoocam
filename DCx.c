@@ -67,7 +67,7 @@
 /* Locally defined global vars     */
 /* ------------------------------- */
 static BOOL initialized = FALSE;						/* Has the driver been initialized properly */
-
+DCX_CAMERA *local_dcx = NULL;
 
 /* ===========================================================================
 -- Routine to initialize the DCx driver.  Safe to call multiple times.
@@ -81,14 +81,29 @@ static BOOL initialized = FALSE;						/* Has the driver been initialized properl
 -- Return: 0 if successful (always)
 =========================================================================== */
 int DCx_Initialize(void) {
-	static BOOL done=FALSE;
+	static char *rname = "DCx_Initialize";
 
+	/* No initialization required, so just mark and return */
+	initialized = TRUE;
+	return 0;
+}
+
+/* ===========================================================================
+-- Routine to set debug mode within this driver.  Safe to call multiple times.
+-- 
+-- Usage: int DCx_SetDebug(BOOL debug);
+--
+-- Inputs: debug - TRUE to print error messages
+--
+-- Output: sets internal information
+--
+-- Return: 0 if successful (always)
+=========================================================================== */
+int DCx_SetDebug(BOOL debug) {
+	static char *rname = "DCx_SetDebug";
+	
 	/* Initialize the DCx software to pop up errors (for now so know when doing something wrong */
-	if (! initialized) {
-		is_SetErrorReport(0, IS_ENABLE_ERR_REP);
-		initialized = TRUE;
-	}
-
+	is_SetErrorReport(0, debug ? IS_ENABLE_ERR_REP : IS_DISABLE_ERR_REP);
 	return 0;
 }
 
@@ -311,6 +326,9 @@ int DCx_Select_Camera(DCX_CAMERA *dcx, int CameraID, int *nBestFormat) {
 		}
 	}
 
+	/* Copy the active DCX to the local copy for client-server */
+	local_dcx = dcx;
+
 	/* Return the recommended format (if we got one).  Return 0 with it, otherwise 4 */
 	if (nBestFormat != NULL) *nBestFormat = ImageFormatID;
 	return (ImageFormatID > 0) ? 0 : 1 ;
@@ -414,6 +432,59 @@ int DCx_Initialize_Resolution(DCX_CAMERA *dcx, int ImageFormatID) {
 
 
 /* ===========================================================================
+-- Set the exposure time on the camera
+--
+-- Usage: double DCx_SetExposure(DCX *dcx, double ms_expose);
+--
+-- Inputs: dcx       - pointer to valid DCX_CAMERA structure
+--         ms_expose - desired exposure time
+--
+-- Output: sets the camera exposure time
+--
+-- Return: value of actual exposure time from camera
+=========================================================================== */
+double DCx_SetExposure(DCX_CAMERA *dcx, double ms_expose) {
+	static char *rname = "DCx_SetExposure";
+
+	struct {
+		double rmin, rmax, rinc;
+	} exp_range;
+	double current, fps;
+
+/* -------------------------------------------------------------------------------
+	-- Get the exposure allowed range and the current exposure value
+	-- Note that is_Exposure(IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE) is limited by current
+	-- framerate while is_GetFrameTimeRange() is not.  But deal with bug in the return 
+	-- values from is_GetFrameTimeRange()
+	--------------------------------------------------------------------------- */
+//	is_Exposure(wnd->dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE, &exp_range, sizeof(exp_range));
+	is_GetFrameTimeRange(dcx->hCam, &exp_range.rmin, &exp_range.rmax, &exp_range.rinc);
+//	exp_range.rmin *= 1000;											/* Go from seconds to ms (but looks to already in ms so ignore) */
+	exp_range.rmax *= 1000;											/* Go from seconds to ms */
+	exp_range.rinc *= 1000;											/* Go from seconds to ms */
+	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &current, sizeof(current));
+	if (ms_expose < exp_range.rmin) ms_expose = exp_range.rmin;
+	if (ms_expose > exp_range.rmax) ms_expose = exp_range.rmax;
+	if (ms_expose > current && ms_expose-current < exp_range.rinc) ms_expose = current+1.01*exp_range.rinc;
+	if (ms_expose < current && current-ms_expose < exp_range.rinc) ms_expose = current-1.01*exp_range.rinc;
+
+	/* Unfortunately, while framerate will auto decrease exposure, exposure will not auto increase frame rate */
+	/* In this routine, always maximize framerate */
+	is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &fps);
+	if (1000.0/fps < ms_expose+0.1 || fps < DCX_MAX_FPS-0.1) {	/* Change framerate to best value for this  */
+		fps = ((int) (10*1000.0/ms_expose)) / 10.0;					/* Closest 0.1 value */
+		if (fps > DCX_MAX_FPS) fps = DCX_MAX_FPS;
+		is_SetFrameRate(dcx->hCam, fps, &fps);							/* Set and query simultaneously */
+	}
+
+	/* Now just set it, and then immediately verify to return exact value */
+	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_SET_EXPOSURE, &ms_expose, sizeof(ms_expose));
+	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &ms_expose, sizeof(ms_expose));
+
+	return ms_expose;
+}
+
+/* ===========================================================================
 -- Query the current exposure time of the camera
 --
 -- Usage: double DCx_GetExposure(DCX *dcx, BOOL bForceQuery);
@@ -435,6 +506,291 @@ double DCx_GetExposure(DCX_CAMERA *dcx, BOOL bForceQuery) {
 	return ms;
 }
 
+
+/* ===========================================================================
+-- Set the gamma value in conversion
+--
+-- Usage: double DCx_SetGamma(DCX *dcx, double gamma);
+--
+-- Inputs: dcx - pointer to valid DCX_CAMERA structure
+--         gamma - gamma parameter requested on [0.0, 10.0]
+--
+-- Output: sets camera parameter
+--
+-- Return: value read back from camera or 0.0 on error
+=========================================================================== */
+double DCx_SetGamma(DCX_CAMERA *dcx, double gamma) {
+	static char *rname = "DCx_SetGamma";
+
+	int ival;
+
+	if (dcx == NULL || dcx->hCam <= 0) return 0.0;
+
+	/* Set value is on [0,1000] for range [0.0,10.0] */
+	ival = (int) (100.0*gamma+0.5);
+	ival = max(0, min(1000, ival));
+	is_Gamma(dcx->hCam, IS_GAMMA_CMD_SET, &ival, sizeof(ival));
+
+	return DCx_GetGamma(dcx);
+}
+
+/* ===========================================================================
+-- Set the gamma value in conversion
+--
+-- Usage: double DCx_GetGamma(DCX *dcx);
+--
+-- Inputs: dcx - pointer to valid DCX_CAMERA structure
+--
+-- Output: none
+--
+-- Return: value of gamma on [0.0, 10.0] from camera, or 0.0 on error
+=========================================================================== */
+double DCx_GetGamma(DCX_CAMERA *dcx) {
+	static char *rname = "DCx_GetGamma";
+
+	int gamma = 0;
+
+	if (dcx == NULL || dcx->hCam <= 0) return 0.0;
+
+	/* Returned value is on [0,1000] */
+	is_Gamma(dcx->hCam, IS_GAMMA_CMD_GET, &gamma, sizeof(gamma));
+	return 0.01*gamma;
+}
+
+/* ===========================================================================
+-- Set the frame rate for the camera
+--
+-- Usage: double DCx_SetFPSControl(DCX_CAMERA *dcx, double fps);
+--
+-- Inputs: dcx - an opened DCx camera
+--         fps - requested frame rate
+--
+-- Output: attempts to set camera framerate
+--
+-- Return: value actually set or 0 if any type of error
+=========================================================================== */
+double DCx_SetFPSControl(DCX_CAMERA *dcx, double fps) {
+	static char *rname = "DCx_SetFPSControl";
+
+	/* Make sure we are alive and the camera is connected (open) */
+	if (dcx == NULL || dcx->hCam <= 0) return 0.0;
+
+	fps = max(DCX_MIN_FPS, max(DCX_MAX_FPS, fps));
+	is_SetFrameRate(dcx->hCam, fps, &fps);				/* Set and query simultaneously */
+
+	return fps;
+}
+
+/* ===========================================================================
+-- Query estimated frame rate based on image acquisition timestamps
+--
+-- Usage: double DCx_GetFPSActual(DCX_CAMERA *dcx);
+--
+-- Inputs: camera - an opened DCx camera
+--
+-- Output: none
+--
+-- Return: Measured frame rate from the camera
+=========================================================================== */
+double DCx_GetFPSControl(DCX_CAMERA *dcx) {
+	static char *rname = "DCx_GetFPSControl";
+	double fps;
+
+	/* Make sure we are alive and the camera is connected (open) */
+	if (dcx == NULL || dcx->hCam <= 0) return 0.0;
+
+	/* Query the parameter that is set, not actual */
+	is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &fps);
+	return fps;
+}
+
+/* ===========================================================================
+-- Query actual frame rate based on image acquisition timestamps
+--
+-- Usage: double DCx_GetFPSActual(DCX_CAMERA *dcx);
+--
+-- Inputs: camera - an opened DCx camera
+--
+-- Output: none
+--
+-- Return: Measured frame rate from the camera
+=========================================================================== */
+double DCx_GetFPSActual(DCX_CAMERA *dcx) {
+	static char *rname = "DCx_GetFPSActual";
+	double fps;
+
+	/* Make sure we are alive and the camera is connected (open) */
+	if (dcx == NULL || dcx->hCam <= 0) return 0.0;
+
+	is_GetFramesPerSecond(dcx->hCam, &fps);
+	return fps;
+}
+
+
+/* ===========================================================================
+-- Routine to set the gains on the camera (if enabled)
+--
+-- Usage: int DCx_SetRGBGains(DCX_CAMERA *dcx, int master, int red, int green, int blue);
+--
+-- Inputs: dcx    - pointer to info about the camera
+--         master - value in range [0,100] for hardware gain of the overall image
+--         red    - value in range [0,100] for hardware gain of the red channel
+--         green  - value in range [0,100] for hardware gain of the green channel
+--         blue   - value in range [0,100] for hardware gain of the blue channel
+--
+-- Output: Sets the hardware gain values to desired value
+--
+-- Return: 0 if successful
+=========================================================================== */
+int DCx_SetRGBGains(DCX_CAMERA *dcx, int master, int red, int green, int blue) {
+
+	/* Limit to [0,100] or set value to be ignored */
+	master = (master != DCX_IGNORE_GAIN) ? min(100,max(0,master)) : IS_IGNORE_PARAMETER;
+	red    = (red    != DCX_IGNORE_GAIN) ? min(100,max(0,red   )) : IS_IGNORE_PARAMETER;
+	green  = (green  != DCX_IGNORE_GAIN) ? min(100,max(0,green )) : IS_IGNORE_PARAMETER;
+	blue   = (blue   != DCX_IGNORE_GAIN) ? min(100,max(0,blue  )) : IS_IGNORE_PARAMETER;
+
+	is_SetHardwareGain(dcx->hCam, master, red, green, blue);
+
+	return 0;
+}
+
+/* ===========================================================================
+-- Routine to query the gains on the camera (if enabled)
+--
+-- Usage: int DCx_GetRGBGains(DCX_CAMERA *dcx, int *master, int *red, int *green, int *blue);
+--
+-- Inputs: dcx    - pointer to info about the camera
+--         master - pointer for return of value (or NULL if unneeded)
+--         red    - pointer for return of value (or NULL if unneeded)
+--         green  - pointer for return of value (or NULL if unneeded)
+--         blue   - pointer for return of value (or NULL if unneeded)
+--
+-- Output: For each non-null value, return gain as value on [0,100];
+--         If the gain does not exist, returns 0
+--
+-- Return: 0 if successful
+=========================================================================== */
+int DCx_GetRGBGains(DCX_CAMERA *dcx, int *master, int *red, int *green, int *blue) {
+	
+	/* Limit to [0,100] or set value to be ignored */
+	if (master != NULL)
+		*master = (dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(dcx->hCam, IS_GET_MASTER_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	if (red    != NULL)
+		*red    = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_RED_GAIN,    IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	if (green  != NULL)
+		*green  = (dcx->SensorInfo.bGGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_GREEN_GAIN,  IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	if (blue   != NULL)
+		*blue   = (dcx->SensorInfo.bBGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_BLUE_GAIN,   IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+
+	return 0;
+}
+
+
+/* ===========================================================================
+-- Routine to query the default gains on the camera (if enabled)
+--
+-- Usage: int DCx_GetDfltRGBGains(DCX_CAMERA *dcx, int *master, int *red, int *green, int *blue);
+--
+-- Inputs: dcx    - pointer to info about the camera
+--         master - pointer for return of value (or NULL if unneeded)
+--         red    - pointer for return of value (or NULL if unneeded)
+--         green  - pointer for return of value (or NULL if unneeded)
+--         blue   - pointer for return of value (or NULL if unneeded)
+--
+-- Output: For each non-null value, return the camera's default gain as value on [0,100];
+--         If the gain does not exist, returns 0
+--
+-- Return: 0 if successful
+=========================================================================== */
+int DCx_GetDfltRGBGains(DCX_CAMERA *dcx, int *master, int *red, int *green, int *blue) {
+
+	/* Limit to [0,100] or set value to be ignored */
+	if (master != NULL)
+		*master = (dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(dcx->hCam, IS_GET_DEFAULT_MASTER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	if (red    != NULL)
+		*red    = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_DEFAULT_RED,    IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	if (green  != NULL)
+		*green  = (dcx->SensorInfo.bGGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_DEFAULT_GREEN,  IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	if (blue   != NULL)
+		*blue   = (dcx->SensorInfo.bBGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_DEFAULT_BLUE,   IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+
+	return 0;
+}
+
+
+/* ===========================================================================
+-- Routine to read/save camera parameters to a file
+--
+-- Usage: DCx_LoadParameters(DCX_CAMERA *dcx, char *path);
+--
+-- Inputs: dcx    - pointer to info about the camera
+--         path   - pathname to load, or NULL for dialog box
+--
+-- Output: Loads and implements parameters saved in the file
+--         Saves current camera parameters to the file
+--
+-- Return: 0 if successful
+--           1 ==> invalid camera structure or no camera initialized
+--           2 ==> file does not match the current camera (on load)
+--           3 ==> general failure
+=========================================================================== */
+int DCx_LoadParameterFile(DCX_CAMERA *dcx, char *path) {
+	static char *rname = "DCx_LoadParameterFile";
+	int rc;
+
+	if (dcx == NULL || dcx->hCam <= 0) return 1;
+	
+	switch (is_ParameterSet(dcx->hCam, IS_PARAMETERSET_CMD_LOAD_FILE, path, 0)) {
+		case IS_SUCCESS:
+			rc = 0; break;
+		case IS_INVALID_CAMERA_TYPE:
+			rc = 2; break;
+		case IS_NO_SUCCESS:
+		default:
+			rc = 3; break;
+	}
+	return rc;
+}
+
+int DCx_SaveParameterFile(DCX_CAMERA *dcx, char *path) {
+	static char *rname = "DCx_SaveParameterFile";
+	int rc;
+
+	if (dcx == NULL || dcx->hCam <= 0) return 1;
+
+	switch (is_ParameterSet(dcx->hCam, IS_PARAMETERSET_CMD_SAVE_FILE, path, 0)) {
+		case IS_SUCCESS:
+			rc = 0; break;
+		case IS_INVALID_CAMERA_TYPE:
+			rc = 2; break;
+		case IS_NO_SUCCESS:
+		default:
+			rc = 3; break;
+	}
+	return rc;
+}
+
+/* ===========================================================================
+-- Allocate (or deallocate) ring buffer for images
+--
+-- Usage: int DCx_SetBufferSize(DCX_CAMERA *dcx, int nBuf);
+--
+-- Inputs: dcx  - structure associated with a camera
+--         nBuf - number of buffers to allocate in the ring (DCX_MAX_RING_SIZE)
+--                constrained within limits [1, DCX_MAX_RING_SIZE]
+--
+-- Output: Stops processing for a moment, changes buffers, and restarts
+--
+-- Return: Number of buffers or 0 on fatal errors; minimum number is 1
+--
+-- Note: A request can be ignored and will return previous size
+=========================================================================== */
+int DCx_SetRingBufferSize(DCX_CAMERA *dcx, int nBuf) {
+	static char *rname = "DCx_SetRingBufferSize";
+
+	return 0;
+}
 
 /* ===========================================================================
 -- Routine to return the PID, index, or pMem corresponding to an active pMem
@@ -530,6 +886,97 @@ int FindImagePIDFrompMem(DCX_CAMERA *dcx, unsigned char *pMem, int *index) {
 
 	return PID;
 #endif
+}
+
+
+/* ===========================================================================
+-- DCx_Set_Exposure_Parms
+--
+-- Usage: int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual);
+--
+-- Inputs: options - OR'd bitwise flag indicating parameters that will be modified
+--         request - pointer to structure with values for the selected conditions
+--         actual  - pointer to variable to receive the actual settings (all updated)
+--
+-- Output: *actual - if not NULL, values of all parameters after modification
+--
+-- Return: 0 ==> successful
+--         1 ==> no camera initialized
+--
+-- Notes:
+--    1) Parameters are validated but out-of-bound will not generate failure
+--    2) exposure is prioritized if both DCX_MODIFY_EXPOSURE and DCX_MODIFY_FPS
+--       are specified.  FPS will be modified only if lower than max possible
+--    3) If DCX_MODIFY_EXPOSURE is given without DCX_MODIFY_FPS,
+--       maximum FPS will be set
+--    4) Trying DCXF_MODIFY_BLUE_GAIN on a monochrome camera is a NOP
+=========================================================================== */
+int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual) {
+	static char *rname = "DCx_Set_Exposure_Parms";
+
+	DCX_EXPOSURE_PARMS mine;
+	DCX_CAMERA *dcx;
+	
+	int gamma;
+	int master,red,green,blue;
+	double fps;
+
+	/* Set response code to -1 to indicate major error */
+	if (actual == NULL) actual = &mine;			/* So don't have to check */
+	memset(actual, 0, sizeof(*actual));
+
+	/* Must have been started at some point to be able to do anything */
+	if ( (dcx = local_dcx) == NULL) return 1;					/* No camera active */
+	if (dcx->hCam <= 0) return 1;									/* No camera active */
+	
+#if 0																		/* No ability to reset the display ... belongs at camera equivalent routine */
+	hdlg = wnd->main_hdlg;
+	if (hdlg != NULL && ! IsWindow(hdlg)) hdlg = NULL;		/* Mark hdlg if not window */
+#endif
+
+	/* If we don't have data, we can't have any options for setting */
+	if (request == NULL) options = 0;
+
+	if (options & DCXF_MODIFY_GAMMA) {
+		gamma = min(100,max(0,request->gamma));
+		is_Gamma(dcx->hCam, IS_GAMMA_CMD_SET, &gamma, sizeof(gamma));
+#if 0
+		if (hdlg != NULL) SendMessage(hdlg, WMP_SHOW_GAMMA, 0, 0);
+#endif
+	}
+
+	if (options & (DCXF_MODIFY_MASTER_GAIN | DCXF_MODIFY_RED_GAIN | DCXF_MODIFY_GREEN_GAIN | DCXF_MODIFY_BLUE_GAIN)) {
+		master = (options & DCXF_MODIFY_MASTER_GAIN) ? min(100,max(0,request->master_gain)) : IS_IGNORE_PARAMETER;
+		red    = (options & DCXF_MODIFY_RED_GAIN)    ? min(100,max(0,request->red_gain))    : IS_IGNORE_PARAMETER;
+		green  = (options & DCXF_MODIFY_GREEN_GAIN)  ? min(100,max(0,request->green_gain))  : IS_IGNORE_PARAMETER;
+		blue   = (options & DCXF_MODIFY_BLUE_GAIN)   ? min(100,max(0,request->blue_gain))   : IS_IGNORE_PARAMETER;
+		is_SetHardwareGain(dcx->hCam, master, red, green, blue);
+#if 0
+		if (hdlg != NULL) SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
+#endif
+	}
+
+	/* Do the exposure first maximizing, and then maybe frame rate */
+	if (options & DCXF_MODIFY_EXPOSURE) {
+		DCx_SetExposure(dcx, request->exposure);
+		if (options & DCXF_MODIFY_FPS) {
+			is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &fps);		/* Determine maximized framerate */
+			if (request->fps < fps) is_SetFrameRate(dcx->hCam, request->fps, &fps);
+		}
+	} else if (options & DCXF_MODIFY_FPS) {
+		is_SetFrameRate(dcx->hCam, request->fps, &fps);
+	}
+
+	/* Retrieve the current values now */
+	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &actual->exposure, sizeof(actual->exposure));
+	is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &actual->fps);
+	is_Gamma(dcx->hCam, IS_GAMMA_CMD_GET, &actual->gamma, sizeof(actual->gamma));
+	actual->master_gain = (dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(dcx->hCam, IS_GET_MASTER_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	actual->red_gain    = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_RED_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	actual->green_gain  = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_GREEN_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	actual->blue_gain   = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_BLUE_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+
+	return 0;
 }
 
 

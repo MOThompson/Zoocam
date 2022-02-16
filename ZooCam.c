@@ -113,8 +113,6 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd);
 int Init_Known_Resolution(HWND hdlg, WND_INFO *wnd, HCAM hCam);
 void FreeCurve(GRAPH_CURVE *cv);
 
-static int ReleaseRingBuffers(WND_INFO *wnd);
-static int AllocRingBuffers(WND_INFO *wnd, int nRing);
 static int SaveBurstImages(WND_INFO *wnd);
 
 static void show_sharpness_dialog_thread(void *arglist);
@@ -125,28 +123,38 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 
 /* Camera functionsn ... just split to handle the multiple optional drivers */
 static int Camera_Open(HWND hdlg, WND_INFO *wnd, CAMERA_INFO *camera);
+static int Camera_Open_DCx(HWND hdlg, WND_INFO *wnd, DCX_CAMERA *dcx, UC480_CAMERA_INFO *info);
+static int Camera_Open_TL(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl);
+
 static int Camera_Close(HWND hdlg, WND_INFO *wnd);
+static int Camera_Close_DCx(HWND hdlg, WND_INFO *wnd, DCX_CAMERA *dcx, UC480_CAMERA_INFO *info);
+static int Camera_Close_TL(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl);
+
 static int Camera_Render_Frame(HWND hdlg, WND_INFO *wnd, int frame, HWND hwnd);
 
 static double Camera_Set_Exposure(HWND hdlg, WND_INFO *wnd, double ms_expose);
 static double Camera_Get_Exposure(HWND hdlg, WND_INFO *wnd);
 
-static int Camera_Set_Framerate(HWND hdlg, WND_INFO *wnd, double  rate);
-static int Camera_Get_Framerate(HWND hdlg, WND_INFO *wnd, double *rate);
+static double Camera_Set_Framerate(HWND hdlg, WND_INFO *wnd, double  rate);
+static double Camera_Get_Framerate(HWND hdlg, WND_INFO *wnd);
 
 typedef enum {M_CHAN=0, R_CHAN=1, G_CHAN=2, B_CHAN=3} GAIN_CHANNEL;
 typedef enum {IS_SLIDER, IS_VALUE} ENTRY_TYPE;
 static int Camera_Set_Gains(HWND hdlg, WND_INFO *wnd, GAIN_CHANNEL channel, ENTRY_TYPE entry, double value);
 static int Camera_Get_Gains(HWND hdlg, WND_INFO *wnd, double values[4], double slider[4]);
+static int Camera_Reset_Gains(HWND hdlg, WND_INFO *wnd);
 
-static int Camera_Set_Gamma(HWND hdlg, WND_INFO *wnd, double  gamma);
-static int Camera_Get_Gamma(HWND hdlg, WND_INFO *wnd, double *gamma);
+static double Camera_Set_Gamma(HWND hdlg, WND_INFO *wnd, double  gamma);
+static double Camera_Get_Gamma(HWND hdlg, WND_INFO *wnd);
 
 static void Camera_Info_Thread(void *arglist);
 
 static int Camera_Get_Ring_Info(HWND hdlg, WND_INFO *wnd, DCX_RING_INFO *info);
 	
 static int Camera_Save_Current_Frame(HWND hdlg, WND_INFO *wnd);
+
+/* Support routines that are now safe and simple */
+static int GenerateCrosshair(WND_INFO *wnd, HWND hwnd);
 
 /* ------------------------------- */
 /* My usage of other external fncs */
@@ -194,7 +202,7 @@ int AllCameraControls[] = {
 	IDR_COLOR_DISABLE, IDR_COLOR_ENABLE, IDR_COLOR_BG40, IDR_COLOR_HQ, IDR_COLOR_AUTO_IR, 
 	IDG_COLOR_CORRECTION, IDV_COLOR_CORRECT_FACTOR, IDS_TEXT_0,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
-	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN,
+	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN, IDB_RESET_GAINS,
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
 	IDC_SHOW_INTENSITY, IDC_SHOW_RGB, IDC_SHOW_SUM, IDC_TRACK_CENTROID,
 	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
@@ -210,7 +218,7 @@ int CameraOffControls[] = {
 	IDR_COLOR_DISABLE, IDR_COLOR_ENABLE, IDR_COLOR_BG40, IDR_COLOR_HQ, IDR_COLOR_AUTO_IR, 
 	IDG_COLOR_CORRECTION, IDV_COLOR_CORRECT_FACTOR, IDS_TEXT_0,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
-	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN,
+	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN, IDB_RESET_GAINS,
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
 	IDC_SHOW_INTENSITY, IDC_SHOW_RGB, IDC_SHOW_SUM, IDC_TRACK_CENTROID,
 	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
@@ -337,7 +345,7 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 	switch (msg) {
 
 		case WM_CREATE:
-			SetWindowText(hwnd, "DCx Camera Image");
+			SetWindowText(hwnd, "Zoo Camera Image");
 			hwndFloat = hwnd;
 			Camera_Render_Frame(NULL, main_wnd, 0, hwnd);						/* Render the current image */
 			rc = TRUE; break;
@@ -413,55 +421,6 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 
 /* ===========================================================================
 =========================================================================== */
-void GenerateCrosshair(WND_INFO *wnd, HWND hwnd) {
-	RECT rect;
-	HDC hdc;
-	int ix,iy, width, height;
-
-	/* Create brushes for the cross-hair */
-	static HBRUSH background, foreground;
-	static HPEN hpen;
-	static BOOL first = TRUE;
-
-	if (first) {
-		background = CreateSolidBrush(RGB(0,0,0));
-		foreground = CreateSolidBrush(RGB(255,255,255));
-		hpen = CreatePen(PS_SOLID, 1, RGB(255,255,255));
-		first = FALSE;
-	}
-
-	GetClientRect(hwnd, &rect);
-	width = rect.right; height = rect.bottom;
-	ix = (int) (wnd->cursor_posn.x*width  + 0.5);
-	iy = (int) (wnd->cursor_posn.y*height + 0.5);
-
-	hdc = GetDC(hwnd);				/* Get DC */
-	if (! wnd->cursor_posn.fullwidth) {
-		int isize;
-		isize = min(20,width/10);
-		SetRect(&rect, max(ix-isize,0),max(iy-1,0), min(ix+isize,width),min(iy+2,height));
-		FillRect(hdc, &rect, background);
-		SetRect(&rect, max(0,ix-1),max(0,iy-isize), min(ix+2,width),min(iy+isize,height));
-		FillRect(hdc, &rect, background);
-
-		SelectObject(hdc, hpen);
-		MoveToEx(hdc, max(ix-isize,0), iy, NULL); LineTo(hdc, min(ix+isize,width), iy);
-		MoveToEx(hdc, ix, max(iy-isize,0), NULL); LineTo(hdc, ix, min(iy+isize,height));
-	} else {
-		SetRect(&rect, 0,max(iy-1,0), width,min(iy+2,height));
-		FillRect(hdc, &rect, background);
-		SetRect(&rect, max(0,ix-1),0, min(ix+2,width),height);
-		FillRect(hdc, &rect, background);
-
-		SelectObject(hdc, hpen);
-		MoveToEx(hdc, 0, iy, NULL); LineTo(hdc, width, iy);
-		MoveToEx(hdc, ix, 0, NULL); LineTo(hdc, ix, height);
-	}		
-
-	ReleaseDC(hwnd, hdc);			/* Release DC */
-	return;
-}
-
 
 #ifdef USE_RINGS
 static void SequenceThread(void *arglist) {
@@ -1477,9 +1436,6 @@ int TL_Enum_Camera_List(int *pcount, TL_CAMERA **pinfo[]) {
 	int i, count;
 	TL_CAMERA **camera_list;
 
-	/* Initialize TL software interface (safe to call multiple times) */
-	TL_Initialize();
-
 	/* Initial return values */
 	if (pcount != NULL) *pcount = 0;
 	if (pinfo  != NULL) *pinfo = NULL;
@@ -1587,20 +1543,88 @@ BOOL Camera_Available(CAMERA_INFO *camera) {
 -- Open a camera (either DCx or TL) and start images flowing
 --
 -- Usage: int Camera_Open(HWND hdlg, WND_INFO *wnd, CAMERA_INFO *camera);
---			 int Camera_Open_DCx(HWND hdlg, WND_INFO *wnd, UC480_CAMERA_INFO *info);
---        int Camera_Open_TL (HWND hdlg, WND_INFO *wnd, TL_CAMERA *info);
+--			 int Camera_Open_DCx(HWND hdlg, WND_INFO *wnd, DCX_CAMERA *dcx, UC480_CAMERA_INFO *info);
+--        int Camera_Open_TL (HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl);
+--
+-- Inputs: hdlg   - pointer to current window
+--         wnd    - pointer to high level camera information
+--         camera - pointer to structure identifying desired camera
+--         dcx    - pointer to DCX_CAMERA structure for camera (open and fill)
+--         tl     - pointer to TL_CAMERA structure for camera (open and fill)
+--         
+-- Output: Initializes the requested camera and updates dialog box
+--
+-- Return: 0 if successful
+--           1 ==> camera structure invalid (NULL)
+--           2 ==> camera->driver not recognized
 =========================================================================== */
-static int Camera_Open_DCx(HWND hdlg, WND_INFO *wnd, UC480_CAMERA_INFO *info) {
+static int Camera_Open(HWND hdlg, WND_INFO *wnd, CAMERA_INFO *request) {
+	static char *rname = "Camera_Open";
+
+	int rc;
+	TL_CAMERA  *tl;
+	DCX_CAMERA *dcx;
+
+	if (request == NULL) return 1;
+
+	switch (request->driver) {
+		case DCX:
+			dcx  = wnd->dcx;
+			rc = Camera_Open_DCx(hdlg, wnd, dcx, (UC480_CAMERA_INFO *) request->details);
+			wnd->bColor = dcx->IsSensorColor;							/* Copy parameters to wnd structure */
+			wnd->height = dcx->height;
+			wnd->width  = dcx->width;
+			break;
+		case TL:
+			tl = (TL_CAMERA *) request->details;
+			rc = Camera_Open_TL(hdlg, wnd, tl);
+			wnd->bColor = tl->IsSensorColor;					/* Copy parameters to wnd structure */
+			wnd->height = tl->height;
+			wnd->width  = tl->width;
+			break;
+		default:
+			fprintf(stderr, "[%s:] Driver from camera structure invalid (%d)\n", rname, request->driver); fflush(stderr);
+			rc = 2;
+	}
+
+	/* If successful, copy to the main structure and update window */
+	if (rc == 0) {
+		wnd->bCamera = TRUE;
+		wnd->Camera = *request;
+
+		/* Enable the buttons to disconnect and to show camera information details */
+		EnableDlgItem(hdlg, IDB_CAMERA_DETAILS, TRUE);
+		EnableDlgItem(hdlg, IDB_CAMERA_DISCONNECT, TRUE);
+
+		/* Enable/disable RGB profile options based on sensor type */
+		EnableDlgItem  (hdlg, IDC_SHOW_RGB, wnd->bColor);
+		SetDlgItemCheck(hdlg, IDC_SHOW_RGB, wnd->bColor);
+		wnd->vert_r->visible = wnd->vert_g->visible = wnd->vert_b->visible = wnd->bColor;
+		wnd->horz_r->visible = wnd->horz_g->visible = wnd->horz_b->visible = wnd->bColor;
+
+		SendMessage(hdlg, WMP_SHOW_GAMMA, 0, 0);
+		SendMessage(hdlg, WMP_SHOW_COLOR_CORRECT, 0, 0);
+		SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
+		SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);
+		SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
+	} else {
+		wnd->bCamera = FALSE;
+		wnd->Camera.driver = UNKNOWN;
+	}
+
+	return rc;
+}
+
+/* ---------------------------------------------------------------------------
+--------------------------------------------------------------------------- */
+
+static int Camera_Open_DCx(HWND hdlg, WND_INFO *wnd, DCX_CAMERA *dcx, UC480_CAMERA_INFO *info) {
 	static char *rname = "Camera_Open_DCx";
 
 	int i, rc, nformat;
-	DCX_CAMERA *dcx;
 	IMAGE_FORMAT_INFO *ImageFormatInfo;
 	CB_INT_LIST *list;
 	char szBuf[80];
-	
-	/* Local copy of the camera information */
-	dcx = wnd->dcx;
 	
 	/* Disable live video in case currently running */
 	wnd->LiveVideo = FALSE;													/* Disable live video */
@@ -1652,9 +1676,6 @@ static int Camera_Open_DCx(HWND hdlg, WND_INFO *wnd, UC480_CAMERA_INFO *info) {
 	}
 #endif
 
-	/* Have a camera now loaded, grab the structure */
-	dcx = wnd->dcx;
-
 	/* Enable and disable optional controls (CameraOnControls automatically enabled) */
 	EnableDlgItem(hdlg, IDS_MASTER_GAIN, dcx->SensorInfo.bMasterGain);
 	EnableDlgItem(hdlg, IDV_MASTER_GAIN, dcx->SensorInfo.bMasterGain);
@@ -1664,6 +1685,7 @@ static int Camera_Open_DCx(HWND hdlg, WND_INFO *wnd, UC480_CAMERA_INFO *info) {
 	EnableDlgItem(hdlg, IDS_GREEN_GAIN,  dcx->SensorInfo.bGGain);
 	EnableDlgItem(hdlg, IDV_BLUE_GAIN,   dcx->SensorInfo.bBGain);
 	EnableDlgItem(hdlg, IDS_BLUE_GAIN,   dcx->SensorInfo.bBGain);
+	EnableDlgItem(hdlg, IDB_RESET_GAINS, TRUE);
 
 	EnableDlgItem(hdlg, IDV_FRAME_RATE, TRUE);
 	EnableDlgItem(hdlg, IDS_FRAME_RATE, TRUE);
@@ -1687,6 +1709,9 @@ static int Camera_Open_DCx(HWND hdlg, WND_INFO *wnd, UC480_CAMERA_INFO *info) {
 	return 0;
 }
 
+/* ---------------------------------------------------------------------------
+--------------------------------------------------------------------------- */
+
 static int Camera_Open_TL(HWND hdlg, WND_INFO *wnd, TL_CAMERA *camera) {
 	static char *rname = "Camera_Open_TL";
 
@@ -1696,9 +1721,6 @@ static int Camera_Open_TL(HWND hdlg, WND_INFO *wnd, TL_CAMERA *camera) {
 
 	/* Set the exposure */
 	printf("Exposure: %.3f ms\n", TL_SetExposure(camera, 25.0)); fflush(stdout);
-
-	/* Set the gain */
-	TL_SetMasterGain(camera, 6.0);
 
 	/* Set camera to continuously capture frames by setting the # of frames to 0 */
 	if (tl_camera_set_frames_per_trigger_zero_for_unlimited(camera->handle, 0) != 0) { fprintf(stderr, "Unable to set trigger: %s\n", tl_camera_get_last_error()); }
@@ -1727,6 +1749,7 @@ static int Camera_Open_TL(HWND hdlg, WND_INFO *wnd, TL_CAMERA *camera) {
 	EnableDlgItem(hdlg, IDS_RED_GAIN,    camera->IsSensorColor);
 	EnableDlgItem(hdlg, IDS_GREEN_GAIN,  camera->IsSensorColor);
 	EnableDlgItem(hdlg, IDS_BLUE_GAIN,   camera->IsSensorColor);
+	EnableDlgItem(hdlg, IDB_RESET_GAINS, TRUE);
 
 	EnableDlgItem(hdlg, IDV_FRAME_RATE, camera->bFrameRateControl);
 	EnableDlgItem(hdlg, IDS_FRAME_RATE, camera->bFrameRateControl);
@@ -1739,65 +1762,82 @@ static int Camera_Open_TL(HWND hdlg, WND_INFO *wnd, TL_CAMERA *camera) {
 	EnableDlgItem(hdlg, IDB_SAVE_PARAMETERS, FALSE);
 
 	/* And, finally, start the video now */
+	return 0;
+}
+
+/* ===========================================================================
+-- Close/disconnect a camera (either DCx or TL) and stop image rendering
+--
+-- Usage: int Camera_Close(HWND hdlg, WND_INFO *wnd);
+--			 int Camera_Close_DCx(HWND hdlg, WND_INFO *wnd, UC480_CAMERA_INFO *info);
+--        int Camera_Close_TL (HWND hdlg, WND_INFO *wnd, TL_CAMERA *info);
+=========================================================================== */
+static int Camera_Close(HWND hdlg, WND_INFO *wnd) {
+	static char *rname = "Camera_Close";
+
+	int rc;
+
+	if (wnd == NULL) return 1;											/* Invalid call */
+	if (! wnd->bCamera) return 0;										/* Already closed */
+
+	switch (wnd->Camera.driver) {
+		case DCX:
+			rc = Camera_Close_DCx(hdlg, wnd, wnd->dcx, (UC480_CAMERA_INFO *) wnd->Camera.details);
+			break;
+		case TL:
+			rc = Camera_Close_TL(hdlg, wnd, (TL_CAMERA *) wnd->Camera.details);
+			break;
+		default:
+			fprintf(stderr, "[%s:] Driver from camera structure invalid (%d)\n", rname, wnd->Camera.driver); fflush(stderr);
+			rc = 2;
+	}
+
+	/* No camera now active */
+	wnd->bCamera = FALSE;
+	wnd->Camera.driver = UNKNOWN;
+
+	return rc;
+}
+
+/* ---------------------------------------------------------------------------
+--------------------------------------------------------------------------- */
+
+static int Camera_Close_DCx(HWND hdlg, WND_INFO *wnd, DCX_CAMERA *dcx, UC480_CAMERA_INFO *info) {
+	static char *rname = "Camera_Close_DCx";
+
+	if (dcx->hCam > 0) {
+		ReleaseRingBuffers(wnd);
+		is_DisableEvent(dcx->hCam, IS_SET_EVENT_FRAME);
+#ifdef USE_RINGS
+		is_DisableEvent(dcx->hCam, IS_SET_EVENT_SEQ);
+		is_ExitEvent(dcx->hCam, IS_SET_EVENT_SEQ);
+#endif		
+		is_ExitCamera(dcx->hCam);
+		dcx->hCam = 0;
+	}
 
 	return 0;
 }
 
-static int Camera_Open(HWND hdlg, WND_INFO *wnd, CAMERA_INFO *request) {
-	static char *rname = "Camera_Open";
+/* ---------------------------------------------------------------------------
+--------------------------------------------------------------------------- */
 
-	int rc;
-	TL_CAMERA  *tl_camera;
-	DCX_CAMERA *dcx_camera;
+static int Camera_Close_TL(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl) {
+	static char *rname = "Camera_Close_TL";
+	int i;
 
-	switch (request->driver) {
-		case DCX:
-			rc = Camera_Open_DCx(hdlg, wnd, (UC480_CAMERA_INFO *) request->details);
-			dcx_camera  = wnd->dcx;
-			dcx_camera->height = dcx_camera->ImageFormatInfo->nHeight;				/* Store values to root level in dcx structure */
-			dcx_camera->width  = dcx_camera->ImageFormatInfo->nWidth;
-			wnd->bColor = dcx_camera->IsSensorColor;					/* Copy parameters to wnd structure */
-			wnd->height = dcx_camera->height;
-			wnd->width  = dcx_camera->width;
-			break;
-		case TL:
-			tl_camera = (TL_CAMERA *) request->details;
-			rc = Camera_Open_TL(hdlg, wnd, tl_camera);
-			wnd->bColor = tl_camera->IsSensorColor;					/* Copy parameters to wnd structure */
-			wnd->height = tl_camera->height;
-			wnd->width  = tl_camera->width;
-			break;
-		default:
-			fprintf(stderr, "[%s:] Driver from camera structure invalid (%d)\n", rname, request->driver); fflush(stderr);
-			rc = 2;
+	if (tl != NULL && tl->handle != NULL) {					/* Is it possibly open */
+
+		/* Abort the process thread cleanly ... waiting as long as 2 seconds */
+		Process_TL_Image_Thread_Abort = TRUE;	
+		for (i=0; i<20 && Process_TL_Image_Thread_Active; i++) Sleep(100);
+
+		if (tl_camera_disarm(tl->handle) != 0) { fprintf(stderr, "[%s:] Unable to disarm camera: %s\n", rname, tl_camera_get_last_error()); fflush(stderr); }
+		if (i >= 20) { fprintf(stderr, "[%s:] Failed to see processing thread terminate\n", rname); fflush(stderr); }
+		TL_CloseCamera(tl);
 	}
 
-	/* If successful, copy to the main structure and update window */
-	if (rc == 0) {
-		wnd->bCamera = TRUE;
-		wnd->Camera = *request;
-
-		/* Enable the buttons to disconnect and to show camera information details */
-		EnableDlgItem(hdlg, IDB_CAMERA_DETAILS, TRUE);
-		EnableDlgItem(hdlg, IDB_CAMERA_DISCONNECT, TRUE);
-
-	/* Enable/disable RGB profile options based on sensor type */
-		EnableDlgItem  (hdlg, IDC_SHOW_RGB, wnd->bColor);
-		SetDlgItemCheck(hdlg, IDC_SHOW_RGB, wnd->bColor);
-		wnd->vert_r->visible = wnd->vert_g->visible = wnd->vert_b->visible = wnd->bColor;
-		wnd->horz_r->visible = wnd->horz_g->visible = wnd->horz_b->visible = wnd->bColor;
-
-		SendMessage(hdlg, WMP_SHOW_GAMMA, 0, 0);
-		SendMessage(hdlg, WMP_SHOW_COLOR_CORRECT, 0, 0);
-		SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
-		SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);
-		SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
-	} else {
-		wnd->bCamera = FALSE;
-		wnd->Camera.driver = UNKNOWN;
-	}
-	
-	return rc;
+	return 0;
 }
 
 /* ===========================================================================
@@ -1822,12 +1862,12 @@ double Camera_Get_Exposure(HWND hdlg, WND_INFO *wnd) {
 	if (wnd == NULL || ! wnd->bCamera) return 0;
 	switch (wnd->Camera.driver) {
 		case DCX:
-			dcx = wnd->dcx;		/* (DCX_CAMERA *) wnd->Camera.details; */
-			rval = DCx_GetExposure(dcx, FALSE);										/* Just query for ms expose time */
+			dcx = (DCX_CAMERA *) wnd->dcx;						/* (DCX_CAMERA *) wnd->Camera.details; */
+			rval = DCx_GetExposure(dcx, FALSE);					/* Just query (not necessary to request) */
 			break;
 		case TL:
 			camera = (TL_CAMERA *) wnd->Camera.details;
-			rval = TL_GetExposure(camera, FALSE);									/* Just query for ms expose time */
+			rval = TL_GetExposure(camera, FALSE);				/* Just query (not necessary to request) */
 			break;
 		default:
 			rval = 1.0;
@@ -1887,73 +1927,6 @@ static int Camera_Render_Frame(HWND hdlg, WND_INFO *wnd, int frame, HWND hwnd) {
 	return 0;
 }
 	
-
-/* ===========================================================================
--- Close/disconnect a camera (either DCx or TL) and stop image rendering
---
--- Usage: int Camera_Close(HWND hdlg, WND_INFO *wnd);
---			 int Camera_Close_DCx(HWND hdlg, WND_INFO *wnd, UC480_CAMERA_INFO *info);
---        int Camera_Close_TL (HWND hdlg, WND_INFO *wnd, TL_CAMERA *info);
-=========================================================================== */
-static int Camera_Close_DCx(HWND hdlg, WND_INFO *wnd, UC480_CAMERA_INFO *info) {
-	static char *rname = "Camera_Close_DCx";
-
-	if (wnd->dcx->hCam > 0) {
-		ReleaseRingBuffers(wnd);
-		is_DisableEvent(wnd->dcx->hCam, IS_SET_EVENT_FRAME);
-#ifdef USE_RINGS
-		is_DisableEvent(wnd->dcx->hCam, IS_SET_EVENT_SEQ);
-		is_ExitEvent(wnd->dcx->hCam, IS_SET_EVENT_SEQ);
-#endif		
-		is_ExitCamera(wnd->dcx->hCam);
-		wnd->dcx->hCam = 0;
-	}
-
-	return 0;
-}
-
-static int Camera_Close_TL(HWND hdlg, WND_INFO *wnd, TL_CAMERA *camera) {
-	static char *rname = "Camera_Close_TL";
-	int i;
-
-	if (camera->handle != NULL) {								/* Is it possibly open */
-
-		/* Abort the process thread cleanly ... waiting as long as 2 seconds */
-		Process_TL_Image_Thread_Abort = TRUE;	
-		for (i=0; i<20 && Process_TL_Image_Thread_Active; i++) Sleep(100);
-
-		if (tl_camera_disarm(camera->handle) != 0) { fprintf(stderr, "[%s:] Unable to disarm camera: %s\n", rname, tl_camera_get_last_error()); fflush(stderr); }
-		if (i >= 20) { fprintf(stderr, "[%s:] Failed to see processing thread terminate\n", rname); fflush(stderr); }
-		TL_CloseCamera(camera);
-	}
-	return 0;
-}
-
-static int Camera_Close(HWND hdlg, WND_INFO *wnd) {
-	static char *rname = "Camera_Close";
-
-	int rc;
-
-	if (! wnd->bCamera) return 0;										/* Already closed */
-
-	switch (wnd->Camera.driver) {
-		case DCX:
-			rc = Camera_Close_DCx(hdlg, wnd, (UC480_CAMERA_INFO *) wnd->Camera.details);
-			break;
-		case TL:
-			rc = Camera_Close_TL(hdlg, wnd, (TL_CAMERA *) wnd->Camera.details);
-			break;
-		default:
-			fprintf(stderr, "[%s:] Driver from camera structure invalid (%d)\n", rname, wnd->Camera.driver); fflush(stderr);
-			rc = 2;
-	}
-
-	/* No camera now active */
-	wnd->bCamera = FALSE;
-	wnd->Camera.driver = UNKNOWN;
-
-	return rc;
-}
 
 /* ===========================================================================
 -- Queries all available DCX and TL cameras and builds the combobox with options
@@ -2316,9 +2289,13 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			SetDlgItemText(hdlg, IDT_MAX_EXPOSURE, ExposureList[0].str_max);
 
 			/* Initialize DCx driver and set error reporting mode */
-			DCx_Initialize();														/* Safe to call multiple times */
-			is_SetErrorReport(0, wnd->dcx->EnableErrorReports ? IS_ENABLE_ERR_REP : IS_DISABLE_ERR_REP);
-			SetDlgItemCheck(hdlg, IDC_ENABLE_DCX_ERRORS, wnd->dcx->EnableErrorReports);
+			DCx_Initialize();									/* Safe to call multiple times */
+			TL_Initialize();
+
+			/* Set debug mode in each driver */
+			DCx_SetDebug(wnd->EnableErrorReports);		/* Internal request for debugging */
+			TL_SetDebug(wnd->EnableErrorReports);
+			SetDlgItemCheck(hdlg, IDC_ENABLE_DCX_ERRORS, wnd->EnableErrorReports);
 
 			/* Fill in the list of cameras, possibly return one to initialize */
 			Fill_Camera_List_Control(hdlg, wnd, &nfree, &nfirst);
@@ -2434,7 +2411,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					fps = 0.0;
 					if (wnd->bCamera) {
 						if (wnd->Camera.driver == DCX) {
-							if (wnd->dcx->hCam > 0) is_GetFramesPerSecond(wnd->dcx->hCam, &fps);
+							fps = DCx_GetFPSActual((DCX_CAMERA *) wnd->dcx);
 						} else if (wnd->Camera.driver == TL) {
 							fps = TL_GetFPSActual((TL_CAMERA *) wnd->Camera.details);
 						}
@@ -2609,7 +2586,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			rc = TRUE; break;
 
 		case WMP_SHOW_GAMMA:
-			Camera_Get_Gamma(hdlg, wnd, &rval);
+			rval = Camera_Get_Gamma(hdlg, wnd);
 			SendDlgItemMessage(hdlg, IDS_GAMMA, TBM_SETPOS, TRUE, (int) (rval*100.0+0.5));
 			SetDlgItemDouble(hdlg, IDV_GAMMA, "%.2f", rval);
 			rcode = TRUE; break;
@@ -2651,7 +2628,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			rcode = TRUE; break;
 
 		case WMP_SHOW_FRAMERATE:
-			Camera_Get_Framerate(hdlg, wnd, &fps);
+			fps = Camera_Get_Framerate(hdlg, wnd);
 			if (fps > 0.0) {
 				SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPOS, TRUE, (int) (10.0*fps));
 				SetDlgItemDouble(hdlg, IDV_FRAME_RATE, "%.2f", fps);
@@ -2739,8 +2716,9 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					rcode = TRUE; break;
 
 				case IDC_ENABLE_DCX_ERRORS:
-					wnd->dcx->EnableErrorReports = GetDlgItemCheck(hdlg, wID);
-					is_SetErrorReport(0, wnd->dcx->EnableErrorReports ? IS_ENABLE_ERR_REP : IS_DISABLE_ERR_REP);
+					wnd->EnableErrorReports = GetDlgItemCheck(hdlg, wID);
+					DCx_SetDebug(wnd->EnableErrorReports);		/* Internal request for debugging */
+					TL_SetDebug(wnd->EnableErrorReports);
 					rcode = TRUE; break;
 
 #ifdef USE_RINGS
@@ -2891,7 +2869,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case IDB_LOAD_PARAMETERS:
 					if (BN_CLICKED == wNotifyCode) {
 						if (wnd->bCamera && wnd->Camera.driver == DCX) {
-							is_ParameterSet(wnd->dcx->hCam, IS_PARAMETERSET_CMD_LOAD_FILE, NULL, 0);
+							DCx_LoadParameterFile(wnd->dcx, NULL);
 							SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);
 							SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
 							SendMessage(hdlg, WMP_SHOW_GAMMA, 0, 0);
@@ -2904,7 +2882,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case IDB_SAVE_PARAMETERS:
 					if (BN_CLICKED == wNotifyCode) {
 						if (wnd->bCamera && wnd->Camera.driver == DCX) {
-							is_ParameterSet(wnd->dcx->hCam, IS_PARAMETERSET_CMD_SAVE_FILE, NULL, 0);
+							DCx_SaveParameterFile(wnd->dcx, NULL);
 						}
 					}
 					rcode = TRUE; break;
@@ -3003,6 +2981,11 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					}
 					rcode = TRUE; break;
 
+				case IDB_RESET_GAINS:
+					Camera_Reset_Gains(hdlg, wnd);
+					SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
+					rcode = TRUE; break;
+					
 				case IDT_CURSOR_X_PIXEL:
 					if (EN_KILLFOCUS == wNotifyCode) {
 						rval = ((double) GetDlgItemIntEx(hdlg, wID)) / wnd->width + 0.5;
@@ -3025,7 +3008,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 						if (wnd->Camera.driver == DCX) {
 							AllocRingBuffers(wnd, ineed);
 						} else {
-							ineed = TL_SetBufferSize((TL_CAMERA *) wnd->Camera.details, ineed);
+							ineed = TL_SetRingBufferSize((TL_CAMERA *) wnd->Camera.details, ineed);
 							SetDlgItemInt(hdlg, wID, ineed, FALSE);
 						}
 					}
@@ -3169,7 +3152,7 @@ static int SaveBurstImages(WND_INFO *wnd) {
 
 	if ( (wasLive = wnd->LiveVideo) ) {					/* Try to make sure we are stopped */
 		rc = is_FreezeVideo(dcx->hCam, IS_WAIT);
-		is_GetFramesPerSecond(dcx->hCam, &fps);						
+		fps = DCx_GetFPSActual(dcx);
 		Sleep((int) (2000/fps+1));
 	}
 	wnd->LiveVideo = FALSE;
@@ -3664,6 +3647,7 @@ BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lP
 	WND_INFO *wnd;
 	TL_CAMERA *camera;
 	int wID, wNotifyCode, rcode;
+	double db_min, db_max;
 	char szTmp[256];
 
 	/* Copy the source of all information */
@@ -3692,8 +3676,9 @@ BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lP
 				SetDlgItemDouble(hdlg, IDT_CAMERA_EXPOSE_MIN, "%.3f", 0.001*camera->us_expose_min);
 				SetDlgItemDouble(hdlg, IDT_CAMERA_EXPOSE_MAX, "%.0f", 0.001*camera->us_expose_max);
 
-				SetDlgItemDouble(hdlg, IDT_CAMERA_GAIN_MIN, "%.1f", camera->db_gain_min);
-				SetDlgItemDouble(hdlg, IDT_CAMERA_GAIN_MAX, "%.1f", camera->db_gain_max);
+				TL_GetMasterGainInfo(camera, NULL, NULL, &db_min, &db_max);
+				SetDlgItemDouble(hdlg, IDT_CAMERA_GAIN_MIN, "%.1f", db_min);
+				SetDlgItemDouble(hdlg, IDT_CAMERA_GAIN_MAX, "%.1f", db_max);
 
 				SetDlgItemDouble(hdlg, IDT_CAMERA_FPS_MIN, "%.2f", camera->fps_min);
 				SetDlgItemDouble(hdlg, IDT_CAMERA_FPS_MAX, "%.2f", camera->fps_max);
@@ -4156,11 +4141,10 @@ static int Camera_Set_Gains(HWND hdlg, WND_INFO *wnd, GAIN_CHANNEL channel, ENTR
 
 	/* Make sure we have valid structures */
 	if (wnd == NULL) wnd = main_wnd;
-	if (wnd == NULL || ! wnd->bCamera) return 1;
 	if (hdlg == NULL) hdlg = wnd->main_hdlg;
 
 	/* Must have an active camera to set */
-	if (! wnd->bCamera) return 1;
+	if (wnd == NULL || ! wnd->bCamera) return 1;
 
 	rc = 0;
 	switch (wnd->Camera.driver) {
@@ -4169,15 +4153,17 @@ static int Camera_Set_Gains(HWND hdlg, WND_INFO *wnd, GAIN_CHANNEL channel, ENTR
 			if (IS_SLIDER == entry) value *= 100.0;										/* Rescale fraction to in on [0,100] */
 			ival = (int) (value+0.5);
 			ival = max(0,min(100,ival));
-			if (channel == M_CHAN) is_SetHardwareGain(dcx->hCam, ival, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER);
-			if (channel == R_CHAN) is_SetHardwareGain(dcx->hCam, IS_IGNORE_PARAMETER, ival, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER);
-			if (channel == G_CHAN) is_SetHardwareGain(dcx->hCam, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, ival, IS_IGNORE_PARAMETER);
-			if (channel == B_CHAN) is_SetHardwareGain(dcx->hCam, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, ival);
+			if (channel == M_CHAN) DCx_SetRGBGains(dcx, ival, DCX_IGNORE_GAIN, DCX_IGNORE_GAIN, DCX_IGNORE_GAIN);
+			if (channel == R_CHAN) DCx_SetRGBGains(dcx, DCX_IGNORE_GAIN, ival, DCX_IGNORE_GAIN, DCX_IGNORE_GAIN);
+			if (channel == G_CHAN) DCx_SetRGBGains(dcx, DCX_IGNORE_GAIN, DCX_IGNORE_GAIN, ival, DCX_IGNORE_GAIN);
+			if (channel == B_CHAN) DCx_SetRGBGains(dcx, DCX_IGNORE_GAIN, DCX_IGNORE_GAIN, DCX_IGNORE_GAIN, ival);
 			break;
 		case TL:
 			camera = (TL_CAMERA *) wnd->Camera.details;
 			if (channel == M_CHAN) {												/* Handle master channel as dB */
-				if (IS_SLIDER == entry) value = camera->db_gain_min + value*(camera->db_gain_max-camera->db_gain_min);
+				double db_min, db_max;
+				TL_GetMasterGainInfo(camera, NULL, NULL, &db_min, &db_max);
+				if (IS_SLIDER == entry) value = db_min + value*(db_max-db_min);
 				TL_SetMasterGain(camera, value);
 			} else {
 				if (entry == IS_SLIDER) value = 0.5*exp(value*log(20));	/* For slider, logarithmic on [0.5,10.0] */
@@ -4185,6 +4171,61 @@ static int Camera_Set_Gains(HWND hdlg, WND_INFO *wnd, GAIN_CHANNEL channel, ENTR
 				if (channel == G_CHAN) TL_SetRGBGains(camera, TL_IGNORE_GAIN, value, TL_IGNORE_GAIN);
 				if (channel == B_CHAN) TL_SetRGBGains(camera, TL_IGNORE_GAIN, TL_IGNORE_GAIN, value);
 			}
+			break;
+		default:
+			break;
+	}
+
+	return rc;
+}
+
+
+/* ===========================================================================
+-- Reset RGB gains to default values (original when camera opened)
+--
+-- Usage: int Camera_Reset_Gains(HWND hdlg, WND_INFO *wnd);
+--
+-- Inputs: hdlg    - pointer to the window handle (will use IDC_CAMERA_LIST element)
+--         wnd     - handle to the main information structure
+--
+-- Output: resets gains of all channels to defaults if possible
+--
+-- Return: 0 if successful; otherwise error code
+--           1 ==> camera is not active
+=========================================================================== */
+static int Camera_Reset_Gains(HWND hdlg, WND_INFO *wnd) {
+	static char *rname = "Camera_Reset_Gains";
+
+	int rc;
+
+	/* Make sure we have valid structures */
+	if (wnd == NULL) wnd = main_wnd;
+	if (hdlg == NULL) hdlg = wnd->main_hdlg;
+
+	/* Must have an active camera to set */
+	if (wnd == NULL || ! wnd->bCamera) return 1;
+
+	rc = 0;
+	switch (wnd->Camera.driver) {
+		case DCX:
+		{
+			int master, red, green, blue;
+			DCX_CAMERA *dcx;
+
+			dcx = wnd->dcx;
+			DCx_GetDfltRGBGains(dcx, &master, &red, &green, &blue);
+			DCx_SetRGBGains(dcx, master, red, green, blue);
+		}
+			break;
+		case TL:
+		{
+			double master, red, green, blue;
+			TL_CAMERA *camera;
+
+			camera = (TL_CAMERA *) wnd->Camera.details;
+			TL_GetMasterGainInfo(camera, NULL, &master, NULL, NULL);	TL_SetMasterGain(camera, master);
+			TL_GetDfltRGBGains(camera, &red, &green, &blue);			TL_SetRGBGains(camera, red, green, blue);
+		}
 			break;
 		default:
 			break;
@@ -4216,48 +4257,43 @@ static int Camera_Get_Gains(HWND hdlg, WND_INFO *wnd, double values[4], double s
 	int i, rc;
 	TL_CAMERA *camera;
 	DCX_CAMERA *dcx;
-	double rval[4];
-
-	/* Make sure we have valid structures */
-	if (wnd == NULL) wnd = main_wnd;
-	if (wnd == NULL || ! wnd->bCamera) return 1;
-	if (hdlg == NULL) hdlg = wnd->main_hdlg;
+	double rval[4], db_min, db_max;
+	int ival[4];
 
 	/* Initial return values */
 	if (values != NULL) for (i=0; i<4; i++) values[i] = 0.0;
 	if (slider != NULL) for (i=0; i<4; i++) slider[i] = 0.0;
 
+	/* Make sure we have valid structures */
+	if (wnd == NULL) wnd = main_wnd;
+	if (hdlg == NULL) hdlg = wnd->main_hdlg;
+
 	/* Must have an active camera to set */
-	if (! wnd->bCamera) return 1;
+	if (wnd == NULL || ! wnd->bCamera) return 1;
 
 	rc = 0;
 	switch (wnd->Camera.driver) {
 		case DCX:
 			dcx = (DCX_CAMERA *) wnd->dcx;
-			rval[0] = (dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(dcx->hCam, IS_GET_MASTER_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0.0 ;
-			rval[1] = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_RED_GAIN,    IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0.0 ;
-			rval[2] = (dcx->SensorInfo.bGGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_GREEN_GAIN,  IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0.0 ;
-			rval[3] = (dcx->SensorInfo.bBGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_BLUE_GAIN,   IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0.0 ;
-			if (values != NULL) for (i=0; i<4; i++) values[i] = rval[i];
-			if (slider != NULL) for (i=0; i<4; i++) slider[i] = rval[i] / 100.0 ;
+			DCx_GetRGBGains(dcx, &ival[0], &ival[1], &ival[2], &ival[3]);
+			if (values != NULL) for (i=0; i<4; i++) values[i] = ival[i];
+			if (slider != NULL) {
+				for (i=0; i<4; i++) slider[i] = ival[i] / 100.0 ;
+				for (i=0; i<4; i++) slider[i] = max(0.0, min(1.0, slider[i]));
+			}
 			break;
 
 		case TL:
 			camera = (TL_CAMERA *) wnd->Camera.details;
-			if (camera->bGainControl) {										/* Does camera have a master gain? */
-				TL_GetMasterGain(camera, &rval[0]);
-			} else {
-				rval[0] = 0.0;
-			}
+			TL_GetMasterGain(camera, &rval[0]);
+			TL_GetMasterGainInfo(camera, NULL, NULL, &db_min, &db_max);
 			TL_GetRGBGains(camera, &rval[1], &rval[2], &rval[3]);
 
 			if (values != NULL) for (i=0; i<4; i++) values[i] = rval[i];
 			if (slider != NULL) {
-				slider[0] = camera->bGainControl ? (rval[0]-camera->db_gain_min)/(camera->db_gain_max-camera->db_gain_min) : 0.0 ;
-				for (i=1; i<4; i++) {
-					slider[i] = log(2*max(0.5,rval[i]))/log(20.0);
-					slider[i] = max(0.0, min(1.0, slider[i]));
-				}
+				slider[0] = (rval[0]-db_min)/(db_max-db_min+1E-10);
+				for (i=1; i<4; i++) slider[i] = log(2*max(0.5,rval[i]))/log(20.0);
+				for (i=0; i<4; i++) slider[i] = max(0.0, min(1.0, slider[i]));
 			}
 			break;
 
@@ -4272,7 +4308,7 @@ static int Camera_Get_Gains(HWND hdlg, WND_INFO *wnd, double values[4], double s
 /* ===========================================================================
 -- Set the framerate on cameras supporting
 --
--- Usage: int Camera_Set_Framerate(HWND hdlg, WND_INFO *wnd, double fps);
+-- Usage: double Camera_Set_Framerate(HWND hdlg, WND_INFO *wnd, double fps);
 --
 -- Inputs: hdlg - pointer to the window handle (will use IDC_CAMERA_LIST element)
 --         wnd  - handle to the main information structure
@@ -4280,99 +4316,82 @@ static int Camera_Get_Gains(HWND hdlg, WND_INFO *wnd, double values[4], double s
 --
 -- Output: sets fps if possible
 --
--- Return: 0 on error, otherwise error code
---           1 => invalid wnd or no camera active
---           2 => camera does not support or error setting
+-- Return: Actual value set, or 0 if error
 =========================================================================== */
-static int Camera_Set_Framerate(HWND hdlg, WND_INFO *wnd, double fps) {
+static double Camera_Set_Framerate(HWND hdlg, WND_INFO *wnd, double fps) {
 	static char *rname = "Camera_Set_Framerate";
 	
 	DCX_CAMERA *dcx;
-	int rc;
+	TL_CAMERA *tl;
 
 	/* Make sure we have valid structures and an active camera */
 	if (wnd == NULL) wnd = main_wnd;
 	if (wnd == NULL || ! wnd->bCamera) return 1;
 	if (hdlg == NULL) hdlg = wnd->main_hdlg;
 
-	rc = 0;
 	switch (wnd->Camera.driver) {
 		case DCX:
 			dcx = (DCX_CAMERA *) wnd->dcx;
-			fps = max(MIN_FPS, min(MAX_FPS, fps));
-			is_SetFrameRate(dcx->hCam, fps, &fps);				/* Set and query simultaneously */
+			fps = DCx_SetFPSControl(dcx, fps);
 			break;
 
 		case TL:
-			camera = (TL_CAMERA *) wnd->Camera.details;
-			rc = (TL_SetFPSControl(camera, fps) != 0) ? 2 : 0 ;
+			tl = (TL_CAMERA *) wnd->Camera.details;
+			fps = TL_SetFPSControl(tl, fps);
 			break;
 			
 		default:
-			rc = 2;
+			fps = 0.0;
 			break;
 	}
 
-	return rc;
+	return fps;
 }
 
 /* ===========================================================================
 -- Return the framerate setting on cameras supporting
 --
--- Usage: int Camera_Get_Framerate(HWND hdlg, WND_INFO *wnd, double *rate);
+-- Usage: double Camera_Get_Framerate(HWND hdlg, WND_INFO *wnd);
 --
 -- Inputs: hdlg - pointer to the window handle (will use IDC_CAMERA_LIST element)
 --         wnd  - handle to the main information structure
---         rate - pointer for return of framerate value
 --
--- Output: *rate - current framerate setting in fps if supported or <= 0 on error
+-- Output: none
 --
--- Return: 0 on error, otherwise error code
---           1 => invalid wnd or no camera active
---           2 => camera does not support gamma settings
---
--- Test either for the return value or for less than or equal to zero to indicated 
--- and error unsupported capability
+-- Return: - current framerate setting in fps if supported or <= 0 on error
 =========================================================================== */
-static int Camera_Get_Framerate(HWND hdlg, WND_INFO *wnd, double *rate) {
+static double Camera_Get_Framerate(HWND hdlg, WND_INFO *wnd) {
 	static char *rname = "Camera_Get_Framerate";
 
-	int rc;
 	TL_CAMERA *camera;
 	DCX_CAMERA *dcx;
 	double fps;
 
-	/* Default return value (indicating error) in case ! bCamera */
-	if (rate != NULL) *rate = -1.0;
-
 	/* Make sure we have valid structures and an active camera */
 	if (wnd == NULL) wnd = main_wnd;
-	if (wnd == NULL || ! wnd->bCamera) return 1;
+	if (wnd == NULL || ! wnd->bCamera) return 0.0;
 	if (hdlg == NULL) hdlg = wnd->main_hdlg;
 
-	rc = 0;
 	switch (wnd->Camera.driver) {
 		case DCX:
 			dcx = (DCX_CAMERA *) wnd->dcx;
-			is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &fps);
+			fps = DCx_GetFPSControl(dcx);
 			break;
 		case TL:
 			camera = (TL_CAMERA *) wnd->Camera.details;
 			fps = TL_GetFPSControl(camera);
 			break;
 		default:
-			fps = -1.0;
+			fps = 0.0;
 	}
-	if (fps <= 0) rc = 2;
 
-	if (rate != NULL) *rate = fps;
-	return rc;
+	return fps;
 }	
 
 /* ===========================================================================
 -- Set the gamma factor on cameras supporting
 --
--- Usage: int Camera_Set_Gamma(HWND hdlg, WND_INFO *wnd, double gamma);
+-- Usage: double Camera_Set_Gamma(HWND hdlg, WND_INFO *wnd, double gamma);
 --
 -- Inputs: hdlg - pointer to the window handle (will use IDC_CAMERA_LIST element)
 --         wnd  - handle to the main information structure
@@ -4380,14 +4399,11 @@ static int Camera_Get_Framerate(HWND hdlg, WND_INFO *wnd, double *rate) {
 --
 -- Output: sets gamma factor on active camera
 --
--- Return: 0 on error, otherwise error code
---           1 => invalid wnd or no camera active
---           2 => camera does not support gamma settings
+-- Return: value actually set or 0.0 on error
 =========================================================================== */
-static int Camera_Set_Gamma(HWND hdlg, WND_INFO *wnd, double gamma) {
+static double Camera_Set_Gamma(HWND hdlg, WND_INFO *wnd, double gamma) {
 	static char *rname = "Camera_Set_Gamma";
 
-	int nGamma;
 	DCX_CAMERA *dcx;
 
 	/* Verify structure and values */
@@ -4395,47 +4411,32 @@ static int Camera_Set_Gamma(HWND hdlg, WND_INFO *wnd, double gamma) {
 	if (wnd->Camera.driver != DCX) return 2;
 	dcx = wnd->dcx;
 
-	nGamma = (int) (100*gamma+0.5);				/* Integer on [0,1000] for range [0,10.0] */
-	is_Gamma(dcx->hCam, IS_GAMMA_CMD_SET, &nGamma, sizeof(nGamma));
-
-	return 0;
+	return DCx_SetGamma(dcx, gamma);
 }
 
 /* ===========================================================================
 -- Return the gamma factor on cameras supporting
 --
--- Usage: int Camera_Get_Gamma(HWND hdlg, WND_INFO *wnd, double *gamma);
+-- Usage: double Camera_Get_Gamma(HWND hdlg, WND_INFO *wnd, double *gamma);
 --
 -- Inputs: hdlg - pointer to the window handle (will use IDC_CAMERA_LIST element)
 --         wnd  - handle to the main information structure
---         gamma - pointer for return of gamma value
 --
--- Output: *gamma - set with current value of gamma (if supported) or 1.0
+-- Output: none
 --
--- Return: 0 on error, otherwise error code
---           1 => invalid wnd or no camera active
---           2 => camera does not support gamma settings
+-- Return: gamma value from camera, or 0 on error
 =========================================================================== */
-static int Camera_Get_Gamma(HWND hdlg, WND_INFO *wnd, double *gamma) {
+static double Camera_Get_Gamma(HWND hdlg, WND_INFO *wnd) {
 	static char *rname = "Camera_Get_Gamma";
 
-	int nGamma;
 	DCX_CAMERA *dcx;
 
-	/* Set default return value */
-	if (gamma != NULL) *gamma = 1.0;										/* Set as default value */
-
 	/* Verify that we are using the DCX camera */
-	if (wnd == NULL || ! wnd->bCamera) return 1;
-	if (wnd->Camera.driver != DCX) return 2;
+	if (wnd == NULL || ! wnd->bCamera) return 0.0;
+	if (wnd->Camera.driver != DCX) return 0.0;
 
-	dcx = wnd->dcx;
-
-	is_Gamma(dcx->hCam, IS_GAMMA_CMD_GET, &nGamma, sizeof(nGamma));
-	fprintf(stderr, "Returned value: %d\n", nGamma); fflush(stderr);
-	if (gamma != NULL) *gamma = 0.01*nGamma;
-
-	return 0;
+	dcx = (DCX_CAMERA *) wnd->dcx;
+	return DCx_GetGamma(dcx);
 }
 
 /* ===========================================================================
@@ -4455,10 +4456,8 @@ static int Camera_Get_Gamma(HWND hdlg, WND_INFO *wnd, double *gamma) {
 double Camera_Set_Exposure(HWND hdlg, WND_INFO *wnd, double ms_expose) {
 	static char *rname = "Camera_Set_Exposure";
 
-	struct {
-		double rmin, rmax, rinc;
-	} exp_range;
-	double current, fps;
+	TL_CAMERA *camera;
+	DCX_CAMERA *dcx;
 
 	/* Make sure we have valid structures */
 	if (wnd == NULL) wnd = main_wnd;
@@ -4468,36 +4467,8 @@ double Camera_Set_Exposure(HWND hdlg, WND_INFO *wnd, double ms_expose) {
 	/* Now just switch on the type of camera */
 	switch (wnd->Camera.driver) {
 		case DCX:
-			/* -------------------------------------------------------------------------------
-			-- Get the exposure allowed range and the current exposure value
-			-- Note that is_Exposure(IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE) is limited by current
-			-- framerate while is_GetFrameTimeRange() is not.  But deal with bug in the return 
-			-- values from is_GetFrameTimeRange()
-			--------------------------------------------------------------------------- */
-//			is_Exposure(wnd->dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE, &exp_range, sizeof(exp_range));
-			is_GetFrameTimeRange(wnd->dcx->hCam, &exp_range.rmin, &exp_range.rmax, &exp_range.rinc);
-//			exp_range.rmin *= 1000;											/* Go from seconds to ms (but looks to already in ms so ignore) */
-			exp_range.rmax *= 1000;											/* Go from seconds to ms */
-			exp_range.rinc *= 1000;											/* Go from seconds to ms */
-			is_Exposure(wnd->dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &current, sizeof(current));
-			if (ms_expose < exp_range.rmin) ms_expose = exp_range.rmin;
-			if (ms_expose > exp_range.rmax) ms_expose = exp_range.rmax;
-			if (ms_expose > current && ms_expose-current < exp_range.rinc) ms_expose = current+1.01*exp_range.rinc;
-			if (ms_expose < current && current-ms_expose < exp_range.rinc) ms_expose = current-1.01*exp_range.rinc;
-
-			/* Unfortunately, while framerate will auto decrease exposure, exposure will not auto increase frame rate */
-			/* In this routine, always maximize framerate */
-			is_SetFrameRate(wnd->dcx->hCam, IS_GET_FRAMERATE, &fps);
-			if (1000.0/fps < ms_expose+0.1 || fps < MAX_FPS-0.1) {	/* Change framerate to best value for this  */
-				fps = (int) (10*1000.0/ms_expose) / 10.0;			/* Closest 0.1 value */
-				if (fps > MAX_FPS) fps = MAX_FPS;
-				is_SetFrameRate(wnd->dcx->hCam, fps, &fps);			/* Set and query simultaneously */
-				if (hdlg != NULL && IsWindow(hdlg)) SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);	/* Make sure this is up to date */
-			}
-
-			/* Now just set it, and then immediately verify to return exact value */
-			is_Exposure(wnd->dcx->hCam, IS_EXPOSURE_CMD_SET_EXPOSURE, &ms_expose, sizeof(ms_expose));
-			is_Exposure(wnd->dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &ms_expose, sizeof(ms_expose));
+			dcx = (DCX_CAMERA *) wnd->dcx;
+			ms_expose = DCx_SetExposure(dcx, ms_expose);
 			break;
 			
 		case TL:
@@ -4509,7 +4480,12 @@ double Camera_Set_Exposure(HWND hdlg, WND_INFO *wnd, double ms_expose) {
 			break;
 	}
 
-	if (hdlg != NULL && IsWindow(hdlg)) SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
+	/* Update exposure, but also deal with fact that framerate may change */
+	if (hdlg != NULL && IsWindow(hdlg)) {
+		SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
+		SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);
+	}
+
 	return ms_expose;
 }				
 
@@ -4740,90 +4716,6 @@ int DCx_Ring_Actions(RING_ACTION request, int option, DCX_RING_INFO *response) {
 	return (request == RING_GET_ACTIVE_CNT) ? dcx->rings.nValid : dcx->rings.nSize ;
 }
 
-
-/* ===========================================================================
--- DCx_Set_Exposure_Parms
---
--- Usage: int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual) {
---
--- Inputs: options - OR'd bitwise flag indicating parameters that will be modified
---         request - pointer to structure with values for the selected conditions
---         actual  - pointer to variable to receive the actual settings (all updated)
---
--- Output: *actual - if not NULL, values of all parameters after modification
---
--- Return: 0 ==> successful
---         1 ==> no camera initialized
---
--- Notes:
---    1) Parameters are validated but out-of-bound will not generate failure
---    2) exposure is prioritized if both DCX_MODIFY_EXPOSURE and DCX_MODIFY_FPS
---       are specified.  FPS will be modified only if lower than max possible
---    3) If DCX_MODIFY_EXPOSURE is given without DCX_MODIFY_FPS,
---       maximum FPS will be set
---    4) Trying DCXF_MODIFY_BLUE_GAIN on a monochrome camera is a NOP
-=========================================================================== */
-int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual) {
-	static char *rname = "DCx_Set_Exposure_Parms";
-
-	WND_INFO *wnd;
-	HWND hdlg;
-	DCX_EXPOSURE_PARMS mine;
-
-	int gamma;
-	int master,red,green,blue;
-	double fps;
-
-	/* Set response code to -1 to indicate major error */
-	if (actual == NULL) actual = &mine;			/* So don't have to check */
-	memset(actual, 0, sizeof(*actual));
-
-	/* Must have been started at some point to be able to do anything */
-	if (main_wnd == NULL || main_wnd->dcx->hCam <= 0) return 1;
-	wnd  = main_wnd;
-	hdlg = wnd->main_hdlg;
-	if (hdlg != NULL && ! IsWindow(hdlg)) hdlg = NULL;		/* Mark hdlg if not window */
-
-	/* If we don't have data, we can't have any options for setting */
-	if (request == NULL) options = 0;
-
-	if (options & DCXF_MODIFY_GAMMA) {
-		gamma = min(100,max(0,request->gamma));
-		is_Gamma(wnd->dcx->hCam, IS_GAMMA_CMD_SET, &gamma, sizeof(gamma));
-		if (hdlg != NULL) SendMessage(hdlg, WMP_SHOW_GAMMA, 0, 0);
-	}
-
-	if (options & (DCXF_MODIFY_MASTER_GAIN | DCXF_MODIFY_RED_GAIN | DCXF_MODIFY_GREEN_GAIN | DCXF_MODIFY_BLUE_GAIN)) {
-		master = (options & DCXF_MODIFY_MASTER_GAIN) ? min(100,max(0,request->master_gain)) : IS_IGNORE_PARAMETER;
-		red    = (options & DCXF_MODIFY_RED_GAIN)    ? min(100,max(0,request->red_gain))    : IS_IGNORE_PARAMETER;
-		green  = (options & DCXF_MODIFY_GREEN_GAIN)  ? min(100,max(0,request->green_gain))  : IS_IGNORE_PARAMETER;
-		blue   = (options & DCXF_MODIFY_BLUE_GAIN)   ? min(100,max(0,request->blue_gain))   : IS_IGNORE_PARAMETER;
-		is_SetHardwareGain(wnd->dcx->hCam, master, red, green, blue);
-		if (hdlg != NULL) SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
-	}
-
-	/* Do the exposure first maximizing, and then maybe frame rate */
-	if (options & DCXF_MODIFY_EXPOSURE) {
-		Camera_Set_Exposure(hdlg, wnd, request->exposure);
-		if (options & DCXF_MODIFY_FPS) {
-			is_SetFrameRate(wnd->dcx->hCam, IS_GET_FRAMERATE, &fps);		/* Determine maximized framerate */
-			if (request->fps < fps) is_SetFrameRate(wnd->dcx->hCam, request->fps, &fps);
-		}
-	} else if (options & DCXF_MODIFY_FPS) {
-		is_SetFrameRate(wnd->dcx->hCam, request->fps, &fps);
-	}
-
-	/* Retrieve the current values now */
-	is_Exposure(wnd->dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &actual->exposure, sizeof(actual->exposure));
-	is_SetFrameRate(wnd->dcx->hCam, IS_GET_FRAMERATE, &actual->fps);
-	is_Gamma(wnd->dcx->hCam, IS_GAMMA_CMD_GET, &actual->gamma, sizeof(actual->gamma));
-	actual->master_gain = (wnd->dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(wnd->dcx->hCam, IS_GET_MASTER_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-	actual->red_gain    = (wnd->dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(wnd->dcx->hCam, IS_GET_RED_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-	actual->green_gain  = (wnd->dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(wnd->dcx->hCam, IS_GET_GREEN_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-	actual->blue_gain   = (wnd->dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(wnd->dcx->hCam, IS_GET_BLUE_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-
-	return 0;
-}
 
 /* ===========================================================================
 -- Interface to the BURST functions
@@ -5057,10 +4949,7 @@ int DCx_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer) {
 		info->gamma = nGamma / 100.0;
 		info->color_correction = is_SetColorCorrection(hCam, IS_GET_CCOR_MODE, &info->color_correction_factor);
 
-		info->master_gain = (dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(hCam, IS_GET_MASTER_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-		info->red_gain    = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(hCam, IS_GET_RED_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-		info->green_gain  = (dcx->SensorInfo.bGGain)      ? is_SetHardwareGain(hCam, IS_GET_GREEN_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-		info->blue_gain   = (dcx->SensorInfo.bBGain)      ? is_SetHardwareGain(hCam, IS_GET_BLUE_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+		DCx_GetRGBGains(dcx, &info->master_gain, &info->red_gain, &info->green_gain, &info->blue_gain);
 
 		/* Calculate the number of saturated pixels on each color plane */
 		info->red_saturate = info->green_saturate = info->blue_saturate = 0;
@@ -5122,8 +5011,8 @@ int DCx_Status(DCX_STATUS *status) {
 	if (status == NULL) return 0;
 
 	/* Now maybe give information */
-	is_SetFrameRate(hCam, IS_GET_FRAMERATE, &status->fps);
-	is_Exposure(hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &status->exposure, sizeof(status->exposure));
+	status->fps = DCx_GetFPSControl(dcx);
+	status->exposure = DCx_GetExposure(dcx, FALSE);
 
 	is_Gamma(hCam, IS_GAMMA_CMD_GET, &nGamma, sizeof(nGamma));
 	status->gamma = nGamma / 100.0;
@@ -5194,40 +5083,6 @@ int DCx_WriteParameters(char *pre_text, FILE *funit) {
 
 	return rc;
 }
-
-/* ===========================================================================
--- Routine to set the gains on the camera (if enabled)
---
--- Usage: int DCx_Set_Gains(WND_INFO *wnd, int master, int red, int green, int blue, HWND hdlg);
---
--- Inputs: wnd - pointer to info about the camera or NULL to use default
---         master - value in range [0,100] for hardware gain of the channel
---         red   - value in range [0,100] for hardware gain of the red channel
---         green - value in range [0,100] for hardware gain of the green channel
---         blue  - value in range [0,100] for hardware gain of the blue channel
---         hdlg - if a window, will receive WMP_SHOW_GAINS message
---
--- Output: Sets the hardware gain values to desired value
---
--- Return: 0 if successful
---
--- Notes: If wnd is unknown (and hdlg), can set wnd to NULL to use static
---        value.  This is used by the client/server code to simplify life.
-=========================================================================== */
-int DCx_Set_Gains(WND_INFO *wnd, int master, int red, int green, int blue, HWND hdlg) {
-
-	/* If dcx is NULL, then use defaults for dcx and main dialog as hdlg (unless !NULL) */
-	if (wnd == NULL) {
-		wnd = main_wnd;
-		if (hdlg == NULL) hdlg = wnd->main_hdlg;
-	}
-
-	/* Set the gains immediately */
-	is_SetHardwareGain(wnd->dcx->hCam, master, red, green, blue);
-	if (hdlg != NULL && IsWindow(hdlg)) SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
-
-	return 0;
-}				
 
 /* ===========================================================================
 -- Routine to enable or disable Live Video (from client/server)
@@ -5353,7 +5208,7 @@ static int AllocRingBuffers(WND_INFO *wnd, int nRequest) {
 #else
 
 	/* Determine the new size (or size) of the ring buffer */
-	if (nRequest == 0) nRequest = DFLT_RING_SIZE;
+	if (nRequest == 0) nRequest = DCX_DFLT_RING_SIZE;
 	if (nRequest <= 1) nRequest = dcx->rings.nSize;						/* If 0, use current size */
 	if (nRequest >= 1000) nRequest = 999;									/* Limit to reasonable */
 	if (nRequest == dcx->rings.nSize) return 0;							/* If no change, do nothing */
@@ -5407,105 +5262,75 @@ static int AllocRingBuffers(WND_INFO *wnd, int nRequest) {
 }
 
 
-/** =======================================================================
-========================== OBSOLETED ROUTINES =============================
-======================================================================= **/
-
-#if 0
+/* ===========================================================================
+================ SUPPORT ROUTINES ... usage is obvious =======================
+=========================================================================== */
 
 /* ===========================================================================
--- Routine to set the exposure on the camera (if enabled)
+-- Draw crosshair (full or small cross) on a bitmap window
 --
--- Usage: int DCx_Set_Exposure(WND_INFO *wnd, double exposure, BOOL maximize_framerate, HWND hdlg);
+-- Usage: int GenerateCrosshair(WND_INFO *wnd, HWND hwnd);
 --
--- Inputs: wnd - pointer to info about the camera or NULL to use default
---         exposure - desired exposure in ms
---         maximize_framerate - if TRUE, maximize framerate for given exposure
---         hdlg - if a window, will receive WMP_SHOW_FRAMERATE and WMP_SHOW_EXPOSURE messages
+-- Inputs: wnd - general information about camera application
+--               uses only wnd->cursor_posn
+--         hwnd - handle to window to draw in
 --
--- Output: Sets the camera exposure to desired value, and optionally maximizes 
---         the framerate
+-- Output: adds crosshair to image
 --
--- Return: 0 if successful
---
--- Notes: If wnd is unknown (and hdlg), can set wnd to NULL to use static
---        value.  This is used by the client/server code to simplify life.
+-- Return: 0 if successful, 1 if hwnd is not a window
 =========================================================================== */
-int DCx_Set_Exposure(WND_INFO *wnd, double exposure, BOOL maximize_framerate, HWND hdlg) {
+static int GenerateCrosshair(WND_INFO *wnd, HWND hwnd) {
+	RECT rect;
+	HDC hdc;
+	int ix,iy, width, height;
 
-	struct {
-		double rmin, rmax, rinc;
-	} exp_range;
-	double current, fps;
+	/* Create brushes for the cross-hair */
+	static HBRUSH background, foreground;
+	static HPEN hpen;
+	static BOOL first = TRUE;
 
-	/* If wnd is NULL, then use defaults for dcx and main dialog as hdlg (unless !NULL) */
-	if (wnd == NULL) {
-		wnd = main_wnd;
-		if (hdlg == NULL) hdlg = wnd->main_hdlg;
+	/* Create brushes and keep them persistent throughout run */
+	if (first) {
+		background = CreateSolidBrush(RGB(0,0,0));
+		foreground = CreateSolidBrush(RGB(255,255,255));
+		hpen = CreatePen(PS_SOLID, 1, RGB(255,255,255));
+		first = FALSE;
 	}
 
-/* -------------------------------------------------------------------------------
--- Get the exposure allowed range and the current exposure value
--- Note that is_Exposure(IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE) is limited by current
--- framerate while is_GetFrameTimeRange() is not.  But deal with bug in the return 
--- values from is_GetFrameTimeRange()
---------------------------------------------------------------------------- */
-//	is_Exposure(wnd->dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE, &exp_range, sizeof(exp_range));
-	is_GetFrameTimeRange(wnd->dcx->hCam, &exp_range.rmin, &exp_range.rmax, &exp_range.rinc);
-//	exp_range.rmin *= 1000;											/* Go from seconds to ms (but looks to already in ms so ignore) */
-	exp_range.rmax *= 1000;											/* Go from seconds to ms */
-	exp_range.rinc *= 1000;											/* Go from seconds to ms */
-	is_Exposure(wnd->dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &current, sizeof(current));
-	if (exposure < exp_range.rmin) exposure = exp_range.rmin;
-	if (exposure > exp_range.rmax) exposure = exp_range.rmax;
-	if (exposure > current && exposure-current < exp_range.rinc) exposure = current+1.01*exp_range.rinc;
-	if (exposure < current && current-exposure < exp_range.rinc) exposure = current-1.01*exp_range.rinc;
+	/* If the specified hwnd is not a valid window, we can safely exit */
+	if (! IsWindow(hwnd)) return 1;
 
-	/* Unfortunately, while framerate will auto decrease exposure, exposure will not auto increase frame rate */
-	if (maximize_framerate) {
-		is_SetFrameRate(wnd->dcx->hCam, IS_GET_FRAMERATE, &fps);
-		if (1000.0/fps < exposure+0.1 || fps < MAX_FPS-0.1) {	/* Change framerate to best value for this  */
-			fps = (int) (10*1000.0/exposure) / 10.0;			/* Closest 0.1 value */
-			if (fps > MAX_FPS) fps = MAX_FPS;
-			is_SetFrameRate(wnd->dcx->hCam, fps, &fps);			/* Set and query simultaneously */
-			if (hdlg != NULL && IsWindow(hdlg)) SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);	/* Make sure this is up to date */
-		}
-	}
-	is_Exposure(wnd->dcx->hCam, IS_EXPOSURE_CMD_SET_EXPOSURE, &exposure, sizeof(exposure));
-	if (hdlg != NULL && IsWindow(hdlg)) SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
+	/* Process the request */
+	GetClientRect(hwnd, &rect);
+	width = rect.right; height = rect.bottom;
+	ix = (int) (wnd->cursor_posn.x*width  + 0.5);
+	iy = (int) (wnd->cursor_posn.y*height + 0.5);
 
+	hdc = GetDC(hwnd);				/* Get DC */
+	if (! wnd->cursor_posn.fullwidth) {
+		int isize;
+		isize = min(20,width/10);
+		SetRect(&rect, max(ix-isize,0),max(iy-1,0), min(ix+isize,width),min(iy+2,height));
+		FillRect(hdc, &rect, background);
+		SetRect(&rect, max(0,ix-1),max(0,iy-isize), min(ix+2,width),min(iy+isize,height));
+		FillRect(hdc, &rect, background);
+
+		SelectObject(hdc, hpen);
+		MoveToEx(hdc, max(ix-isize,0), iy, NULL); LineTo(hdc, min(ix+isize,width), iy);
+		MoveToEx(hdc, ix, max(iy-isize,0), NULL); LineTo(hdc, ix, min(iy+isize,height));
+	} else {
+		SetRect(&rect, 0,max(iy-1,0), width,min(iy+2,height));
+		FillRect(hdc, &rect, background);
+		SetRect(&rect, max(0,ix-1),0, min(ix+2,width),height);
+		FillRect(hdc, &rect, background);
+
+		SelectObject(hdc, hpen);
+		MoveToEx(hdc, 0, iy, NULL); LineTo(hdc, width, iy);
+		MoveToEx(hdc, ix, 0, NULL); LineTo(hdc, ix, height);
+	}		
+
+	ReleaseDC(hwnd, hdc);			/* Release DC */
+
+	/* Return successful */
 	return 0;
-}				
-
-/* ===========================================================================
--- Routine to try to return a high precision timer value.  The return
--- should be in units of seconds with the highest precision that is
--- reasonable for the system.  It is guarenteed to be monotonic but not
--- to be absolute.
---
--- Usage: double my_timer(BOOL reset)
---
--- Inputs: reset - should system reset the timer to zero return?
---
--- Output: none
---
--- Return: Time in seconds since first call or last reset of the counter
-=========================================================================== */
-static double my_timer(BOOL reset) {
-
-	static BOOL init=FALSE;
-	static LARGE_INTEGER freq, count0;
-	LARGE_INTEGER counts;
-
-	if (! init || reset) {
-		init = TRUE;
-		QueryPerformanceFrequency(&freq);
-		QueryPerformanceCounter(&count0);
-		return 0.0;
-	}
-	QueryPerformanceCounter(&counts);
-
-	return (freq.QuadPart == 0) ? 0.0 : (1.0*(counts.QuadPart-count0.QuadPart))/freq.QuadPart;
 }
-
-#endif

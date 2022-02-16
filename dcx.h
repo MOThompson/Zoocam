@@ -7,7 +7,13 @@
 #undef	_PURE_C
 
 #define USE_RINGS						/* Use ring buffers */
-#define DFLT_RING_SIZE	(10)		/* Default number of frames in ring */
+#define DFLT_RING_SIZE	(10)		
+
+#define	DCX_MIN_FPS				(0.1)		/* Nominal minimum frame rate */
+#define	DCX_MAX_FPS				(25.0)	/* Nominal maximum frame rate */
+
+#define	DCX_MAX_RING_SIZE		(50)		/* Maximum number ring buffers */
+#define	DCX_DFLT_RING_SIZE	(10)		/* Default number of frames in ring */
 
 typedef enum _DCX_IMAGE_FORMAT { IMAGE_BMP=0, IMAGE_JPG=1, IMAGE_PNG=2 } DCX_IMAGE_FORMAT;
 typedef enum _DCX_IMAGE_TYPE   { IMAGE_MONOCHROME=0, IMAGE_COLOR=1 } DCX_IMAGE_TYPE;
@@ -89,7 +95,6 @@ typedef struct _DCX_CAMERA {
 	int NumImageFormats;						/* Number of image formats available */
 	IMAGE_FORMAT_LIST *ImageFormatList;	/* List of formats for the active camera */
 	int ImageFormatID;						/* Currently selected Image Format */
-	BOOL EnableErrorReports;				/* Do we want error reports as message boxes? */
 
 	/* Associated with the selected resolution */
 	IMAGE_FORMAT_INFO *ImageFormatInfo;
@@ -107,14 +112,39 @@ typedef struct _DCX_CAMERA {
 } DCX_CAMERA;
 
 /* Generic routines that can be called */
-int DCx_Capture_Image(DCX_CAMERA *dcx, char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
-int DCx_Initialize(void);
-int DCx_Shutdown(void);
-int DCx_Enum_Camera_List(int *pcount, UC480_CAMERA_INFO **pinfo);
-int DCx_Select_Camera(DCX_CAMERA *dcx, int CameraID, int *nBestFormat);
-int DCx_Initialize_Resolution(DCX_CAMERA *dcx, int ImageFormatID);
+int    DCx_Capture_Image(DCX_CAMERA *dcx, char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
+int    DCx_Initialize(void);
+int	 DCx_SetDebug(BOOL debug);
+int    DCx_Shutdown(void);
+int    DCx_Enum_Camera_List(int *pcount, UC480_CAMERA_INFO **pinfo);
+int    DCx_Select_Camera(DCX_CAMERA *dcx, int CameraID, int *nBestFormat);
+int    DCx_Initialize_Resolution(DCX_CAMERA *dcx, int ImageFormatID);
 
+double DCx_SetExposure(DCX_CAMERA *dcx, double ms_expose);
 double DCx_GetExposure(DCX_CAMERA *dcx, BOOL bForceQuery);
+
+double DCx_SetFPSControl(DCX_CAMERA *dcx, double fps);
+double DCx_GetFPSControl(DCX_CAMERA *dcx);
+double DCx_GetFPSActual(DCX_CAMERA *dcx);
+
+#define	DCX_IGNORE_GAIN		(-999)
+int DCx_SetRGBGains    (DCX_CAMERA *dcx, int  master, int  red, int  green, int  blue);
+int DCx_GetRGBGains    (DCX_CAMERA *dcx, int *master, int *red, int *green, int *blue);
+int DCx_GetDfltRGBGains(DCX_CAMERA *dcx, int *master, int *red, int *green, int *blue);
+
+double DCx_SetGamma(DCX_CAMERA *dcx, double gamma);
+double DCx_GetGamma(DCX_CAMERA *dcx);
+
+int DCx_LoadParameterFile(DCX_CAMERA *dcx, char *path);
+int DCx_SaveParameterFile(DCX_CAMERA *dcx, char *path);
+
+/* Ring buffer control */
+int DCx_SetBufferSize(DCX_CAMERA *dcx, int nBuf);
+int DCx_ReleaseRingBuffers(DCX_CAMERA *dcx);
+
+/* Linked to server */
+int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual);
+int DCx_Status(DCX_STATUS *status);
 
 int FindImageIndexFromPID(DCX_CAMERA *dcx, int PID);
 int FindImageIndexFrompMem(DCX_CAMERA *dcx, char *pMem);

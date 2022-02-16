@@ -42,20 +42,6 @@ void DCx_Start_Dialog(void *arglist);
 =========================================================================== */
 int DCx_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer);
 
-/* ===========================================================================
--- Query of DCX camera status
---
--- Usage: int DCX_Status(DCX_STATUS *status);
---
--- Inputs: conditions - if not NULL, filled with details of the current
---                      imaging conditions
---
--- Output: Fills in *conditions if requested
---
--- Return: 0 - camera is ready for imaging
---         1 - camera is not initialized and/or not active
-=========================================================================== */
-int DCx_Status(DCX_STATUS *status);
 
 /* ===========================================================================
 -- Write DCx camera properties to a logfile
@@ -92,27 +78,6 @@ int DCx_WriteParameters(char *pre_text, FILE *funit);
 --        value.  This is used by the client/server code to simplify life.
 =========================================================================== */
 int DCx_Set_Exposure(WND_INFO *wnd, double exposure, BOOL maximize_framerate, HWND hdlg);
-
-/* ===========================================================================
--- Routine to set the gains on the camera (if enabled)
---
--- Usage: int DCx_Set_Gains(WND_INFO *wnd, int master, int red, int green, int blue, HWND hdlg);
---
--- Inputs: dcx - pointer to info about the camera or NULL to use default
---         master - value in range [0,100] for hardware gain of the channel
---         red   - value in range [0,100] for hardware gain of the red channel
---         green - value in range [0,100] for hardware gain of the green channel
---         blue  - value in range [0,100] for hardware gain of the blue channel
---         hdlg - if a window, will receive WMP_SHOW_GAINS message
---
--- Output: Sets the hardware gain values to desired value
---
--- Return: 0 if successful
---
--- Notes: If dcx is unknown (and hdlg), can set dcx to NULL to use static
---        value.  This is used by the client/server code to simplify life.
-=========================================================================== */
-int DCx_Set_Gains(WND_INFO *wnd, int master, int red, int green, int blue, HWND hdlg);
 
 
 /* ===========================================================================
@@ -189,31 +154,6 @@ int DCx_Query_Frame_Data(int frame, double *tstamp, int *width, int *height, int
 
 
 /* ===========================================================================
--- DCx_Set_Exposure_Parms
---
--- Usage: int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual) {
---
--- Inputs: options - OR'd bitwise flag indicating parameters that will be modified
---         request - pointer to structure with values for the selected conditions
---         actual  - pointer to variable to receive the actual settings (all updated)
---
--- Output: *actual - if not NULL, values of all parameters after modification
---
--- Return: 0 ==> successful
---         1 ==> no camera initialized
---
--- Notes:
---    1) Parameters are validated but out-of-bound will not generate failure
---    2) exposure is prioritized if both DCX_MODIFY_EXPOSURE and DCX_MODIFY_FPS
---       are specified.  FPS will be modified only if lower than max possible
---    3) If DCX_MODIFY_EXPOSURE is given without DCX_MODIFY_FPS,
---       maximum FPS will be set
---    4) Trying DCXF_MODIFY_BLUE_GAIN on a monochrome camera is a NOP
-=========================================================================== */
-int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual);
-
-
-/* ===========================================================================
 -- Routine to enable or disable Live Video (from client/server)
 --
 -- Usage: int DCx_Enable_Live_Video(int state);
@@ -278,6 +218,9 @@ typedef struct _WND_INFO {
 		BOOL fullwidth;						/* Cursor should extend over full range of image */
 	} cursor_posn;
 
+	/* Should we generate error reports */
+	BOOL EnableErrorReports;				/* Do we want error reports as message boxes? */
+
 	/* Associated with opening a DCX camera */
 	DCX_CAMERA *dcx;
 
@@ -305,6 +248,9 @@ typedef struct _WND_INFO {
 } WND_INFO;
 
 #endif			/* INCLUDE_DCX_DETAIL_INFO */
+
+int ReleaseRingBuffers(WND_INFO *wnd);
+int AllocRingBuffers(WND_INFO *wnd, int nRequest);
 
 #endif			/* ZooCam_Loaded */
 

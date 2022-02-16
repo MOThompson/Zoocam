@@ -27,14 +27,17 @@ typedef struct _TL_CAMERA {
 	float color_correction[9];								/* Color correction matrix			*/
 	float white_balance[9];									/* Default white balance matrix	*/
 
+	BOOL bGainControl;										/* Has master gain control?		*/
+	double db_min, db_max;									/* Min/max gain in dB */
+	double db_dflt;											/* Default (original) master gain */
+	double red_dflt, green_dflt, blue_dflt;			/* Default (original) RGB gains	*/
+
 	long long us_expose_min, us_expose_max;			/* Min and max exposure times		*/
 	long long us_expose;										/* Exposure time in us				*/
 
 	BOOL bFrameRateControl;									/* Is framerate control possible	*/
 	double fps_min, fps_max;								/* Min and max frame rate			*/
 
-	BOOL bGainControl;										/* Is gain control possible		*/
-	double db_gain_min, db_gain_max;						/* Min/max gain in dB */
 
 	int clock_Hz;												/* Camera clock frequency (or 0)	*/
 
@@ -86,6 +89,7 @@ int tl_camera_count;
 
 /* Functions */
 int TL_Initialize(void);
+int TL_SetDebug(BOOL debug);
 int TL_Shutdown(void);
 
 /* Find  initializes structures with minimal resources  */
@@ -96,7 +100,8 @@ TL_CAMERA *TL_FindCamera(char *ID, int *rc);
 int TL_ForgetCamera(TL_CAMERA *camera);
 int TL_OpenCamera(TL_CAMERA *camera, int nBuf);
 int TL_CloseCamera(TL_CAMERA *camera);
-int TL_SetBufferSize(TL_CAMERA *camera, int nBuf);
+
+int TL_SetRingBufferSize(TL_CAMERA *camera, int nBuf);
 
 int TL_FindAllCameras(TL_CAMERA **list[]);
 int TL_CloseAllCameras(void);
@@ -122,15 +127,17 @@ int TL_RenderImage(TL_CAMERA *camera, int frame, HWND hwnd);
 double TL_SetExposure(TL_CAMERA *camera, double ms_expose);
 double TL_GetExposure(TL_CAMERA *camera, BOOL bForceQuery);
 
-int TL_SetFPSControl(TL_CAMERA *camera, double fps);
+double TL_SetFPSControl(TL_CAMERA *camera, double fps);
 double TL_GetFPSControl(TL_CAMERA *camera);
 double TL_GetFPSActual(TL_CAMERA *camera);
 
+int TL_GetMasterGainInfo(TL_CAMERA *camera, BOOL *bGain, double *db_dflt, double *db_min, double *db_max);
 int TL_SetMasterGain(TL_CAMERA *camera, double dB_gain);
 int TL_GetMasterGain(TL_CAMERA *camera, double *dB_gain);
 
 #define	TL_IGNORE_GAIN		(-999)
 int TL_GetRGBGains(TL_CAMERA *camera, double *red, double *green, double *blue);
 int TL_SetRGBGains(TL_CAMERA *camera, double  red, double  green, double  blue);
+int TL_GetDfltRGBGains(TL_CAMERA *camera, double *red, double *green, double *blue);
 
 #endif			/* tl_loaded */

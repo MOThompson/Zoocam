@@ -143,6 +143,24 @@ int TL_Initialize(void) {
 }
 
 /* ===========================================================================
+-- Routine to set debug mode within this driver.  Safe to call multiple times.
+-- 
+-- Usage: int TL_SetDebug(BOOL debug);
+--
+-- Inputs: debug - TRUE to print error messages
+--
+-- Output: sets internal information
+--
+-- Return: 0 if successful (always)
+=========================================================================== */
+int TL_SetDebug(BOOL debug) {
+	static char *rname = "TL_SetDebug";
+
+	/* Not sure how to implement ... really have to track the rc messages */
+	return 0;
+}
+
+/* ===========================================================================
 -- Shutdown the TL interface (close and free all cameras, close SDK, etc.)
 --
 -- Usage: int TL_Shutdown();
@@ -372,7 +390,7 @@ TL_CAMERA *TL_FindCamera(char *ID, int *rc) {
 
 	if (tl_camera_get_gain_range (handle, &ilow, &ihigh) != 0) { fprintf(stderr, "Unable to get gain range for camera %s: %s\n", camera->ID, tl_camera_get_last_error()); }
 	camera->bGainControl = ihigh > 0;		
-	camera->db_gain_min = 0.1*ilow; camera->db_gain_max = 0.1*ihigh;
+	camera->db_min = 0.1*ilow; camera->db_max = 0.1*ihigh;
 
 	if (tl_camera_get_frame_rate_control_value_range(handle, &camera->fps_min, &camera->fps_max) != 0) { fprintf(stderr, "Error determining min/max frame rate for camera %s: %s\n", camera->ID, tl_camera_get_last_error()); fflush(stderr); }
 	camera->bFrameRateControl = camera->fps_max > 0.0;
@@ -491,6 +509,10 @@ int TL_OpenCamera(TL_CAMERA *camera, int nBuf) {
 		camera->rgb24 = malloc(camera->nbytes_rgb24);
 	}
 
+	/* Query the initial gains so could be reset later */
+	TL_GetMasterGain(camera, &camera->db_dflt);
+	TL_GetRGBGains(camera, &camera->red_dflt, &camera->green_dflt, &camera->blue_dflt);
+
 	/* Register the routine that will process images */
 	if (tl_camera_set_frame_available_callback(handle, frame_available_callback, 0) != 0) { 
 		fprintf(stderr, "Unable to set frame_available_callback: %s\n", tl_camera_get_last_error());
@@ -503,9 +525,9 @@ int TL_OpenCamera(TL_CAMERA *camera, int nBuf) {
 }
 
 /* ===========================================================================
--- Routine to open a camera for use (active)
+-- Allocate (or deallocate) ring buffer for images
 --
--- Usage: int TL_SetBufferSize(TL_CAMERA *camera, int nBuf);
+-- Usage: int TL_SetRingBufferSize(TL_CAMERA *camera, int nBuf);
 --
 -- Inputs: camera - a partially completed structure from TL_FindCamera()
 --         nBuf   - number of buffers to allocate in the ring (TL_MAX_RING_SIZE)
@@ -516,8 +538,8 @@ int TL_OpenCamera(TL_CAMERA *camera, int nBuf) {
 --
 -- Note: A request can be ignored and will return previous size
 =========================================================================== */
-int TL_SetBufferSize(TL_CAMERA *camera, int nBuf) {
-	static char *rname = "TL_SetBufferSize";
+int TL_SetRingBufferSize(TL_CAMERA *camera, int nBuf) {
+	static char *rname = "TL_SetRingBufferSize";
 
 	int i;
 
@@ -1406,38 +1428,41 @@ double TL_SetExposure(TL_CAMERA *camera, double ms_expose) {
 }
 
 /* ===========================================================================
--- Set the frame rate
+-- Sets the frame rate
 --
--- Usage: int TL_SetFPSControl(TL_CAMERA *camera, double fps);
+-- Usage: double TL_SetFPSControl(TL_CAMERA *camera, double fps);
 --
 -- Inputs: camera - an opened TL camera
 --         fps    - desired fps rate
 --
 -- Output: none
 --
--- Return: Returns 0 if successful
---           1 => camera invalid
---           2 => camera does not support
---           3 => failed to set
+-- Return: framerate or 0.0 on any error
 =========================================================================== */
-int TL_SetFPSControl(TL_CAMERA *camera, double fps) {
+double TL_SetFPSControl(TL_CAMERA *camera, double fps) {
 	static char *rname = "TL_SetFPSControl";
 
 	/* Make sure we are alive and the camera is connected (open) */
-	if (camera == NULL || camera->magic != TL_CAMERA_MAGIC) return 1;
+	if (camera == NULL || camera->magic != TL_CAMERA_MAGIC) return 0.0;
 
 	/* Query will fail if camera does not support frame rate control */
-	if (! camera->bFrameRateControl) return 2;
+	if (! camera->bFrameRateControl) return 0.0;
 
 	/* Try to set */
 	if (tl_camera_set_frame_rate_control_value(camera->handle, fps) != 0) {
 		fprintf(stderr, "[%s:] Failed to get frame rate control: %s)\n", rname, tl_camera_get_last_error());
 		fflush(stderr);
-		return 3;
+	} 
+
+	/* And try to read back value for return, even if unsuccessful */
+	if (tl_camera_get_frame_rate_control_value(camera->handle, &fps) != 0) {
+		fprintf(stderr, "[%s:] Failed to get frame rate control: %s)\n", rname, tl_camera_get_last_error());
+		fflush(stderr);
+		fps = 0.0;
 	}
 
-	/* Successful */
-	return 0;
+	/* Return best guess of value */
+	return fps;
 }
 
 
@@ -1525,8 +1550,8 @@ int TL_SetMasterGain(TL_CAMERA *camera, double dB_gain) {
 	/* Must be able to control gain */
 	if (! camera->bGainControl) return 2;
 	
-	if (dB_gain < camera->db_gain_min) dB_gain = camera->db_gain_min;
-	if (dB_gain > camera->db_gain_max) dB_gain = camera->db_gain_max;
+	if (dB_gain < camera->db_min) dB_gain = camera->db_min;
+	if (dB_gain > camera->db_max) dB_gain = camera->db_max;
 
 	if (tl_camera_convert_decibels_to_gain(camera->handle, dB_gain, &gain_index) != 0) { 
 		fprintf(stderr, "[%s:] Unable to convert gain dB: %s\n", rname, tl_camera_get_last_error());
@@ -1580,6 +1605,49 @@ int TL_GetMasterGain(TL_CAMERA *camera, double *db) {
 }
 
 /* ===========================================================================
+-- Query the master gain range for the camera (in dB)
+--
+-- Usage: int TL_GetMasterGainInfo(TL_CAMERA *camera, BOOL *bGain, double *db_dflt, double *db_min, double *db_max);
+--
+-- Inputs: camera  - pointer to valid TL_CAMERA
+--         bGain   - pointer for flag whether the camera implements gain
+--         db_dflt - pointer for default gain setting (dB)
+--         db_min  - pointer for lower limit for gain settings (dB)
+--         db_max  - pointer for upper limit for gain settings (dB)
+--
+-- Output: *bGain   - if ! NULL, flag set to true if camera implements master gain
+--         *db_dflt - default gain value (on camera initialization)
+--         *db_min  - minimum gain setting (0 if no gain capability)
+--         *db_max  - maximum gain setting (6 if no gain capability)
+--
+-- Return: 0 if successful
+--           1 ==> bad camera structure
+--           2 ==> camera does not support gain
+=========================================================================== */
+int TL_GetMasterGainInfo(TL_CAMERA *camera, BOOL *bGain, double *db_dflt, double *db_min, double *db_max) {
+	static char *rname = "TL_GetMasterGainRange";
+
+	/* Default return values */
+	if (bGain   != NULL) *bGain   = FALSE;
+	if (db_dflt != NULL) *db_dflt = 0;
+	if (db_min  != NULL) *db_min  = 0;
+	if (db_max  != NULL) *db_max  = 6;
+
+	/* Must be valid structure */
+	if (camera == NULL || camera->magic != TL_CAMERA_MAGIC) return 1;
+
+	/* Otherwise, copy values to return */
+	if (bGain != NULL) *bGain = camera->bGainControl;
+	if (camera->bGainControl) {
+		if (db_dflt != NULL) *db_dflt = camera->db_dflt;
+		if (db_min  != NULL) *db_min  = camera->db_min;
+		if (db_max  != NULL) *db_max  = camera->db_max;
+	}
+	return 0;
+}
+
+
+/* ===========================================================================
 -- Query the RGB channel gains
 --
 -- Usage: double TL_GetRGBGains(TL_CAMERA *camera, double *red, double *green, double *blue);
@@ -1628,6 +1696,40 @@ int TL_GetRGBGains(TL_CAMERA *camera, double *red, double *green, double *blue) 
 
 	return rc;
 }
+
+/* ===========================================================================
+-- Query the default RGB channel gains (original values)
+--
+-- Usage: double TL_GetDfltRGBGains(TL_CAMERA *camera, double *red, double *green, double *blue);
+--
+-- Inputs: camera - pointer to valid TL_CAMERA
+--         red, green, blue - pointers to variable to receive gain values
+--
+-- Output: none
+--
+-- Return: 0 success
+--          -1 ==> bad camera structure
+--          -2 ==> camera does not support gain
+=========================================================================== */
+int TL_GetDfltRGBGains(TL_CAMERA *camera, double *red, double *green, double *blue) {
+	static char *rname = "TL_DfltGetRGBGains";
+
+	/* Default return value */
+	if (red   != NULL) *red   = 0;
+	if (green != NULL) *green = 0;
+	if (blue  != NULL) *blue  = 0;
+
+	/* Verify we can report a value */
+	if (camera == NULL || camera->magic != TL_CAMERA_MAGIC) return 1;
+
+	/* All okay, so report initial value when we started */
+	if (red   != NULL) *red   = camera->red_dflt;
+	if (green != NULL) *green = camera->green_dflt;
+	if (blue  != NULL) *blue  = camera->blue_dflt;
+
+	return 0;
+}
+
 
 /* ===========================================================================
 -- Set the RGB channel gains

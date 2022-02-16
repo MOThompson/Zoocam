@@ -150,6 +150,8 @@
 #define IDG_COLOR_CORRECTION            2101
 #define IDS_TEXT_0                      2102
 #define IDC_SHOW_SUM                    2103
+#define IDC_BUTTON1                     2104
+#define IDB_RESET_GAINS                 2104
 #define IDC_GPIB                        2401
 #define IDC_STATIC                      -1
 
@@ -160,7 +162,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        143
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2104
+#define _APS_NEXT_CONTROL_VALUE         2105
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif
