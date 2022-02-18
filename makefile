@@ -13,7 +13,7 @@ SYSLIBS = wsock32.lib user32.lib gdi32.lib comdlg32.lib comctl32.lib advapi32.li
 
 TL_SDK_INCLUDE = -I/code/lab/DCx/tl_sdk\include -I/code/lab/DCx/tl_sdk/load_dll_helpers
 
-OBJS = ZooCam.obj dcx.obj tl.obj DCx_server.obj numato_dio.obj focus_client.obj win32ex.obj graph.obj ki224.obj server_support.obj tl_camera_sdk_load.obj tl_mono_to_color_processing_load.obj timer.obj
+OBJS = ZooCam.obj camera.obj dcx.obj tl.obj DCx_server.obj numato_dio.obj focus_client.obj win32ex.obj graph.obj ki224.obj server_support.obj tl_camera_sdk_load.obj tl_mono_to_color_processing_load.obj timer.obj
 
 # server.exe  -- removed since must now be able to access the dialog box
 # client.exe  -- removed for the moment
@@ -36,7 +36,10 @@ server.exe : server_test.c DCx_server.obj server_support.obj server_support.h DC
 ZooCam.obj : ZooCam.c ZooCam.h dcx.h tl.h DCx_client.h uc480.h resource.h win32ex.h graph.h
 	cl -c  $(TL_SDK_INCLUDE) -DSTANDALONE $(CFLAGS) ZooCam.c
 
-dcx.obj : dcx.c dcx.h tl.h
+camera.obj : camera.c camera.h ZooCam.h dcx.h tl.h 
+	cl -c $(CFLAGS) camera.c
+
+dcx.obj : dcx.c dcx.h tl.h win32ex.h
 	cl -c $(TL_SDK_INCLUDE) $(CFLAGS) dcx.c
 
 tl.obj : tl.c tl.h timer.h

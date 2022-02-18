@@ -20,6 +20,9 @@
 /* Local include files            */
 /* ------------------------------ */
 #include "server_support.h"		/* Server support routine */
+#include "camera.h"
+#include "dcx.h"
+#include "tl.h"
 #include "ZooCam.h"					/* Access to the ZooCam info */
 #include "Ki224.h"					/* Access to the current control */
 #include "DCx_server.h"				/* Prototypes for main	  */
@@ -143,8 +146,8 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 	/* And more information buffers that get transferred - some need to be kept */
 	DCX_STATUS camera_info;
 	DCX_EXPOSURE_PARMS exposure;
-	DCX_RING_INFO ring_info;
 	DCX_REMOTE_RING_IMAGE *ring_image=NULL;
+	RING_INFO ring_info;
 
 /* Get standard request from client and process */
 	ServerActive = TRUE;
@@ -174,7 +177,7 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 
 			case DCX_GET_CAMERA_INFO:
 				fprintf(stderr, "  DCx msg server: DCX_GET_CAMERA_INFO()\n");	fflush(stderr);
-				reply.rc = DCx_Status(&camera_info);			/* Get the information */
+				reply.rc = DCx_Status(NULL, &camera_info);			/* Get the information */
 				reply.data_len = sizeof(camera_info);
 				reply_data = (void *) &camera_info;
 				break;

@@ -40,7 +40,10 @@
 /* ------------------------------ */
 /* Local include files            */
 /* ------------------------------ */
-#include "dcx.h"
+#include "win32ex.h"						/* Needed for strcpy_m */
+#include "camera.h"
+#define INCLUDE_DCX_DETAIL_INFO
+#include "dcx.h"							/* DCX camera specific routines */
 
 /* ------------------------------- */
 /* My local typedef's and defines  */
@@ -119,14 +122,113 @@ int DCx_SetDebug(BOOL debug) {
 -- Return: 0 if successful (always)
 =========================================================================== */
 int DCx_Shutdown(void) {
+	static char *rname = "DCx_Shutdown";
 
-	/* Initialize the DCx software to pop up errors (for now so know when doing something wrong */
-	if (initialized) {
-		initialized = FALSE;
-	}
+	/* If there is a camera hanging around open, close it and then terminate */
+	if (initialized && local_dcx != NULL) DCx_CloseCamera(local_dcx);
+
+	local_dcx = NULL;
+	initialized = FALSE;
 
 	return 0;
 }
+
+/* ===========================================================================
+-- Routine to close a DCx camera.  NOP if already closed or not there.
+-- 
+-- Usage: int DCx_CloseCamera(DCX_CAMERA *dcx);
+--
+-- Inputs: dcx - pointer to structure for camera
+--
+-- Output: closes the camera and releases associated resources
+--
+-- Return: 0 if successful or -1 if dcx invalid or camera not enabled
+=========================================================================== */
+int DCx_CloseCamera(DCX_CAMERA *dcx) {
+
+	/* Make sure the structure is valid and there is still an opened camera */
+	if (dcx == NULL || dcx->hCam <= 0) return -1;
+
+	/* Disable events being called for rendering */
+	is_DisableEvent(dcx->hCam, IS_SET_EVENT_FRAME);
+
+#ifdef USE_RINGS
+	is_DisableEvent(dcx->hCam, IS_SET_EVENT_SEQ);
+	is_ExitEvent(dcx->hCam, IS_SET_EVENT_SEQ);
+#endif		
+
+	/* Relaese buffers to recover memory */
+	DCx_ReleaseRingBuffers(dcx);
+
+	is_ExitCamera(dcx->hCam);
+	dcx->hCam = 0;
+
+	return 0;
+}
+
+
+/* ===========================================================================
+-- Query of DCX camera status
+--
+-- Usage: int DCX_Status(DCX_CAMERA *dcx, DCX_STATUS *status);
+--
+-- Inputs: dcx    - camera structure, or if NULL use local default version
+--         status - if !NULL, filled with details of the current
+--                  imaging conditions
+--
+-- Output: *status - filled with information about current imaging
+--
+-- Return: 0 - camera is ready for imaging
+--         1 - camera is not initialized and/or not active
+=========================================================================== */
+int DCx_Status(DCX_CAMERA *dcx, DCX_STATUS *status) {
+
+	HCAM hCam;
+	CAMINFO camInfo;
+	SENSORINFO SensorInfo;
+	int nGamma;
+
+	/* In case of errors, return all zeros in the structure if it exists */
+	if (status != NULL) memset(status, 0, sizeof(*status));
+
+	/* Must have been started at some point to be able to return images */
+	if (dcx == NULL) dcx = local_dcx;
+	if (dcx == NULL || dcx->hCam <= 0) return 1;
+	hCam = dcx->hCam;
+
+	/* If status is NULL, only interested in if the camera is alive and configured */
+	if (status == NULL) return 0;
+
+	/* Now maybe give information */
+	status->fps = DCx_GetFPSControl(dcx);
+	status->exposure = DCx_GetExposure(dcx, FALSE);
+
+	is_Gamma(hCam, IS_GAMMA_CMD_GET, &nGamma, sizeof(nGamma));
+	status->gamma = nGamma / 100.0;
+
+	status->master_gain = (dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(hCam, IS_GET_MASTER_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	status->red_gain    = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(hCam, IS_GET_RED_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	status->green_gain  = (dcx->SensorInfo.bGGain)      ? is_SetHardwareGain(hCam, IS_GET_GREEN_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	status->blue_gain   = (dcx->SensorInfo.bBGain)      ? is_SetHardwareGain(hCam, IS_GET_BLUE_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+
+	if (is_GetSensorInfo(hCam, &SensorInfo) == IS_SUCCESS) {
+		status->pixel_pitch = SensorInfo.wPixelSize;
+		strcpy_m(status->model, sizeof(status->model), SensorInfo.strSensorName);
+		status->color_mode = SensorInfo.nColorMode == IS_COLORMODE_MONOCHROME ? IMAGE_MONOCHROME : IMAGE_COLOR ;
+	}
+	if (is_GetCameraInfo(hCam, &camInfo) == IS_SUCCESS) {
+		strcpy_m(status->serial, sizeof(status->serial), camInfo.SerNo); 
+		strcpy_m(status->manufacturer, sizeof(status->manufacturer), camInfo.ID); 
+		strcpy_m(status->version, sizeof(status->version), camInfo.Version); 
+		strcpy_m(status->date, sizeof(status->date), camInfo.Date); 
+		status->CameraID = camInfo.Select;
+	}
+
+	status->color_correction = is_SetColorCorrection(dcx->hCam, IS_GET_CCOR_MODE, &status->color_correction_factor);
+
+	return 0;
+}
+
 
 /* ===========================================================================
 -- Enumerate list of available cameras into an array structure for use with the
@@ -432,6 +534,47 @@ int DCx_Initialize_Resolution(DCX_CAMERA *dcx, int ImageFormatID) {
 
 
 /* ===========================================================================
+-- Get exposure parameters from camera
+--
+-- Usage: int DCx_GetExposureParms(DCX_CAMERA *dcx, double *ms_min, double *ms_max, double *ms_inc);
+--
+-- Inputs: dcx     - pointer to valid DCX_CAMERA structure
+--         *ms_min - pointer to get minimum allowed exposure time
+--         *ms_max - pointer to get maximum allowed exposure time
+--         *ms_inc - pointer to get increment value on exposure time
+--
+-- Output: for each non-NULL parameter, gets value
+--
+-- Return: 0 if successful, 1 if dcx or camera invalid
+=========================================================================== */
+int DCx_GetExposureParms(DCX_CAMERA *dcx, double *ms_min, double *ms_max, double *ms_inc) {
+	static char *rname = "DCx_GetExposureParms";
+	double low, high, incr;
+
+	/* Default return values */
+	if (ms_min != NULL) *ms_min = 0.01;
+	if (ms_max != NULL) *ms_max = 1000.0;
+	if (ms_inc != NULL) *ms_inc = 0.01;
+
+	if (dcx == NULL || dcx->hCam <= 0) return 1;
+
+	/* -------------------------------------------------------------------------------
+	-- Get camera information on range of exposure allowed
+	-- Note that is_Exposure(IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE) is limited by current
+	-- framerate while is_GetFrameTimeRange() is not.  But deal with bug in the return 
+	-- values from is_GetFrameTimeRange()
+	--------------------------------------------------------------------------- */
+	is_GetFrameTimeRange(dcx->hCam, &low, &high, &incr);
+
+	/* Return values */
+	if (ms_min != NULL) *ms_min = low;				/* Go from seconds to ms (but looks to already in ms so ignore) */
+	if (ms_max != NULL) *ms_max = high * 1000.0;	/* Go from seconds to ms */
+	if (ms_inc != NULL) *ms_inc = incr * 1000.0;	/* Go from seconds to ms */
+
+	return 0;
+}
+
+/* ===========================================================================
 -- Set the exposure time on the camera
 --
 -- Usage: double DCx_SetExposure(DCX *dcx, double ms_expose);
@@ -720,6 +863,81 @@ int DCx_GetDfltRGBGains(DCX_CAMERA *dcx, int *master, int *red, int *green, int 
 
 
 /* ===========================================================================
+-- Set/Query the color correction mode for the camera
+--
+-- Usage: COLOR_CORRECT DCx_SetColorCorrection(DCX_CAMERA dcx, COLOR_CORRECT mode, double rval);
+--        COLOR_CORRECT DCx_GetColorCorrection(DCX_CAMERA dcx, COLOR_CORRECT mode, double *rval);
+--
+-- Inputs: dcx  - pointer to initialized 
+--         mode - one of the allowed color correction modes
+--                  IS_CCOR_DISABLE, IS_CCOR_ENABLE_NORMAL, 
+--						  IS_CCOR_ENABLE_BG40_ENHANCED, IS_CCOR_ENABLE_HQ_ENHANCED,
+--						  IS_CCOR_SET_IR_AUTOMATIC
+--         rval - strength of color corrections (camera dependent)
+--
+-- Output: Sets color correction mode
+--
+-- Return: Actual color correction mode set for camera or <0 on error
+=========================================================================== */
+typedef struct _TRANSLATE_COLOR {
+	COLOR_CORRECT camera;
+	int dcx;
+} TRANSLATE_COLOR;
+
+static TRANSLATE_COLOR color_modes[] = {
+	{COLOR_DISABLE,	IS_CCOR_DISABLE},
+	{COLOR_ENABLE,		IS_CCOR_ENABLE_NORMAL},
+	{COLOR_BG40,		IS_CCOR_ENABLE_BG40_ENHANCED},
+	{COLOR_HQ,			IS_CCOR_ENABLE_HQ_ENHANCED},
+	{COLOR_AUTO_IR,	IS_CCOR_SET_IR_AUTOMATIC}
+};
+
+COLOR_CORRECT DCx_SetColorCorrection(DCX_CAMERA *dcx, COLOR_CORRECT mode, double rval) {
+	static char *rname = "DCx_SetColorCorrection";
+
+	TRANSLATE_COLOR *entry;
+	int i, rc;
+
+	/* Make sure we are alive and the camera is connected (open) */
+	if (dcx == NULL || dcx->hCam <= 0) return -1;
+
+	/* Find this entry in the list to translate ti DCX call value */
+	entry = NULL;
+	for (i=0; i<sizeof(color_modes)/sizeof(color_modes[0]); i++) {
+		if (color_modes[i].camera == mode) { entry = color_modes+i; break; }
+	}
+	if (entry == NULL) return -2;
+
+	/* Set the value and then read back parameters */
+	rc = is_SetColorCorrection(dcx->hCam, entry->dcx, &rval);
+
+	/* Query the value and return */
+	return DCx_GetColorCorrection(dcx, NULL);
+}
+
+COLOR_CORRECT DCx_GetColorCorrection(DCX_CAMERA *dcx, double *rval) {
+	static char *rname = "DCx_GetColorCorrection";
+
+	TRANSLATE_COLOR *entry;
+	int i, rc;
+	double tmp;
+
+	/* Make sure we are alive and the camera is connected (open) */
+	if (dcx == NULL || dcx->hCam <= 0) return -1;
+	if (rval == NULL) rval = &tmp;
+
+	/* Query the value and return */
+	rc = is_SetColorCorrection(dcx->hCam, IS_GET_CCOR_MODE, rval);
+	entry = color_modes;							/* Default return of first entry */
+	for (i=0; i<sizeof(color_modes)/sizeof(color_modes[0]); i++) {
+		if (color_modes[i].dcx == rc) { entry = color_modes+i; break; }
+	}
+
+	return entry->camera;
+}
+
+
+/* ===========================================================================
 -- Routine to read/save camera parameters to a file
 --
 -- Usage: DCx_LoadParameters(DCX_CAMERA *dcx, char *path);
@@ -772,6 +990,108 @@ int DCx_SaveParameterFile(DCX_CAMERA *dcx, char *path) {
 }
 
 /* ===========================================================================
+-- Software trigger of camera (single frame)
+--
+-- Usage: int DCx_Trigger(DCX_CAMERA *dcx, int msWait);
+--
+-- Inputs: dcx    - structure associated with a camera
+--         msWait - time to wait before forcing change
+--                  <0 ==> wait indefinitely (IS_WAIT)
+--                   0 ==> stop immediately (IS_DONT_WAIT)
+--                  >0 ==> timeout; 10 ms resolution from 40 ms to 1193 hrs
+--
+-- Output: Triggers camera immediately (last time if FREERUN)
+--
+-- Return: 0 if successful
+--           1 ==> dcx or dcx->hCam invalid
+--           2 ==> not in SOFTWARE or EXTERNAL triggering modes
+--
+-- Notes: msWait < 0 will wait until there is an image captured
+--               = 0 returns immediately but still triggers the capture
+--        If trigger mode was FREERUN, will be set to SOFTWARE after call
+=========================================================================== */
+static int ms_to_wait(int msWait) {						/* Returns wait parameter for is_xxx calls */
+	if      (msWait  < 0) msWait = IS_WAIT;
+	else if (msWait == 0) msWait = IS_DONT_WAIT;
+	else if (msWait < 40) msWait = 4;
+	else                  msWait = (msWait+9)/10;	/* 10 ms increments */
+	return msWait;
+}
+
+int DCx_Trigger(DCX_CAMERA *dcx, int msWait) {
+	static char *rname = "DCx_Trigger";
+
+	/* Validate parameters and that we are in a soft-trigger mode */
+	if (dcx == NULL || dcx->hCam <= 0) return 1;
+
+	is_FreezeVideo(dcx->hCam, ms_to_wait(msWait));		/* Switches out of FREERUN */
+	if (TRIG_FREERUN == dcx->Trig_Mode) dcx->Trig_Mode = TRIG_SOFTWARE;
+
+	return 0;
+}
+
+/* ===========================================================================
+-- Set/Query the triggering mode for the camera
+--
+-- Usage: TRIG_MODE DCx_SetTrigMode(DCX_CAMERA *dcx, TRIG_MODE mode, int msWait);
+--        TRIG_MODE DCx_GetTrigMode(DCX_CAMERA *dcx);
+--
+-- Inputs: dcx    - structure associated with a camera
+--         mode   - one of the allowed triggering modes
+--                  TRIG_SOFTWARE, TRIG_FREERUN, TRIG_EXTERNAL
+--         msWait - time to wait before forcing change
+--                  <0 ==> wait indefinitely (IS_WAIT)
+--                   0 ==> stop immediately (IS_DONT_WAIT)
+--                  >0 ==> timeout; 10 ms resolution from 40 ms to 1193 hrs
+--
+-- Output: Sets camera triggering mode
+--
+-- Return: Mode in camera or -1 on error
+=========================================================================== */
+TRIG_MODE DCx_GetTrigMode(DCX_CAMERA *dcx) {
+	static char *rname = "DCx_GetTrigMode";
+	return dcx->Trig_Mode;
+}
+
+TRIG_MODE DCx_SetTrigMode(DCX_CAMERA *dcx, TRIG_MODE mode, int msWait) {
+	static char *rname = "DCx_SetTrigMode";
+
+	/* Validate call parameters */
+	if (dcx == NULL || dcx->hCam <= 0) return -1;
+	if (mode != TRIG_SOFTWARE && mode != TRIG_FREERUN && mode != TRIG_EXTERNAL) mode = TRIG_SOFTWARE;
+
+	if (dcx->Trig_Mode != mode) {						/* Do we need to change? */
+
+		/* Move to TRIG_SOFTWARE (especially pause video if in FREERUN) */
+		if (dcx->Trig_Mode == TRIG_FREERUN) {
+			int rc;
+			if ( (rc = is_FreezeVideo(dcx->hCam, ms_to_wait(msWait))) != 0) {
+				switch (rc) {
+					case IS_TIMED_OUT:
+						fprintf(stderr, "%s: is_FreezeVideo() timed out [rc=%d]\n", rname, rc); fflush(stderr);
+						break;
+					default:
+						fprintf(stderr, "%s: is_FreezeVideo() unknown error [rc=%d]\n", rname, rc); fflush(stderr);
+						break;
+				}
+				is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);		/* Try forced stop */
+			}
+		}
+
+		/* Now, do what's necessary to get to desired mode */
+		dcx->Trig_Mode = mode;
+		if (dcx->Trig_Mode == TRIG_FREERUN) {
+			is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+			dcx->iLast = dcx->iShow = dcx->nValid = 0;			/* All reset these values */
+		}
+	}
+
+	/* Return current mode */
+	return dcx->Trig_Mode;
+}
+
+
+/* ===========================================================================
 -- Allocate (or deallocate) ring buffer for images
 --
 -- Usage: int DCx_SetBufferSize(DCX_CAMERA *dcx, int nBuf);
@@ -786,11 +1106,158 @@ int DCx_SaveParameterFile(DCX_CAMERA *dcx, char *path) {
 --
 -- Note: A request can be ignored and will return previous size
 =========================================================================== */
-int DCx_SetRingBufferSize(DCX_CAMERA *dcx, int nBuf) {
+int DCx_SetRingBufferSize(DCX_CAMERA *dcx, int nRequest) {
 	static char *rname = "DCx_SetRingBufferSize";
+
+	int i, rc, rval;
+	TRIG_MODE trig_hold;
+
+	/* Must be valid structure */
+	if (dcx == NULL || dcx->hCam <= 0) return 0;
+
+	/* Save video trigger mode and stop captures */
+	trig_hold = dcx->Trig_Mode;
+	DCx_SetTrigMode(dcx, TRIG_SOFTWARE, 0);							/* Stop the video */
+
+#ifndef USE_RINGS
+
+	rc = is_AllocImageMem(dcx->hCam, wnd->width, wnd->height, dcx->IsSensorColor ? 24 : 8, &dcx->Image_Mem, &dcx->Image_PID);
+	rc = is_SetImageMem(dcx->hCam, dcx->Image_Mem, dcx->Image_PID); 
+	fprintf(stderr, "  Allocated Image memory: %p  PID: %d\n", dcx->Image_Mem, dcx->Image_PID); fflush(stderr);
+	dcx->Image_Mem_Allocated = TRUE;
+	rval = 1;																		/* Report 1 ring allocated */
+
+#else
+
+	/* Determine the new size (or size) of the ring buffer */
+	if (nRequest == 0) nRequest = DCX_DFLT_RING_SIZE;
+	if (nRequest <= 1) nRequest = dcx->nSize;						/* If 0 or negative, reuse current size (query) */
+	nRequest = min(nRequest, DCX_MAX_RING_SIZE);							/* Limit to reasonable */
+	if (nRequest == dcx->nSize) return nRequest;					/* If no change, do nothing */
+
+	/* Release existing buffers if present */
+	DCx_ReleaseRingBuffers(dcx);												/* Okay since video is definitely stopped */
+
+	/* Store the new ring size and allocate memory buffers */
+	dcx->nSize = nRequest;
+	dcx->Image_Mem   = calloc(dcx->nSize, sizeof(dcx->Image_Mem[0]));
+	dcx->Image_PID   = calloc(dcx->nSize, sizeof(dcx->Image_PID[0]));
+	fprintf(stderr, "Allocating memory for [%d] ring frames ... ", dcx->nSize); fflush(stderr);
+	for (i=0; i<dcx->nSize; i++) {
+		if (i%20 == 19) fprintf(stderr, "\n   ");
+		fprintf(stderr, "[%d", i+1); fflush(stderr);
+		rc = is_AllocImageMem(dcx->hCam, dcx->width, dcx->height, dcx->IsSensorColor ? 24 : 8, &dcx->Image_Mem[i], &dcx->Image_PID[i]);
+		fprintf(stderr, "m"); fflush(stderr);
+		if (rc != IS_SUCCESS) {
+			fprintf(stderr, "  Image memory allocation failed (rc=%d)\n", rc); fflush(stderr);
+			continue;
+		}
+		rc = is_AddToSequence(dcx->hCam, dcx->Image_Mem[i], dcx->Image_PID[i]);
+		fprintf(stderr, "s]"); fflush(stderr);
+		if (rc != IS_SUCCESS) {
+			fprintf(stderr, "  Adding image to the list failed (rc=%d)\n", rc); fflush(stderr);
+			continue;
+		}
+	}
+	dcx->iLast = dcx->iShow = dcx->nValid = 0;
+	dcx->Image_Mem_Allocated = TRUE;							/* Memory now allocated */
+	rval = dcx->nSize;									/* Report number of rings allocated */
+
+	fprintf(stderr, " ... done\n"); fflush(stderr);
+#endif
+
+	/* Restore trigger mode and start video if in freerun mode */
+	DCx_SetTrigMode(dcx, trig_hold, 0);
+
+	/* Return number of image buffers that exist */
+	return rval;
+}
+
+
+/* ===========================================================================
+-- Release ring buffers / memory associated with a camera.
+--
+-- Usage: int DCx_ReleaseRingBuffers(DCX_CAMERA *dcx);
+--
+-- Inputs: dcx  - structure associated with a camera
+--
+-- Output: Clears ring information in camera and releases image memory
+--
+-- Return: 0 on success
+--
+-- WARNING: Camera must be stopped before calling
+=========================================================================== */
+int DCx_ReleaseRingBuffers(DCX_CAMERA *dcx) {
+	static char *rname = "DCx_ReleaseRingBuffers";
+	
+
+#ifndef USE_RINGS
+
+	if (dcx->Image_Mem_Allocated) {
+		DCx_SetTrigMode(dcx, TRIG_SOFTWARE, 0);				/* Make sure we can't trigger unexpectedly */
+		is_FreeImageMem(dcx->hCam, wnd->Image_Mem, wnd->Image_PID);
+	}
+	dcx->Image_Mem_Allocated = FALSE;
+
+#else
+	int i, rc;
+
+	/* If already released, nothing to do */
+	if (dcx->Image_Mem_Allocated) {
+		DCx_SetTrigMode(dcx, TRIG_SOFTWARE, 0);				/* Make sure we can't trigger unexpectedly */
+
+		if ( (rc = is_ClearSequence(dcx->hCam)) != IS_SUCCESS) {	fprintf(stderr, "is_ClearSequence failed [rc=%d]\n", rc); fflush(stderr); }
+		for (i=0; i<dcx->nSize; i++) {
+			if ( (rc = is_FreeImageMem(dcx->hCam, dcx->Image_Mem[i], dcx->Image_PID[i])) != IS_SUCCESS) { fprintf(stderr, "is_FreeImageMem failed [i=%d rc=%d]\n", i, rc); fflush(stderr); }
+		}
+		free(dcx->Image_Mem); dcx->Image_Mem = NULL;
+		free(dcx->Image_PID); dcx->Image_PID = NULL;
+		dcx->nSize = 0;
+	}
+	dcx->Image_Mem_Allocated = FALSE;
+#endif
 
 	return 0;
 }
+
+/* ===========================================================================
+-- Render an image in a specified window
+-- 
+-- Usage: int DCx_RenderImage(DCX_CAMERA *dcx, int frame, HWND hwnd);
+--
+-- Inputs: dcx    - an opened DCX camera
+--         frame  - frame to process from buffers (0 = most recent)
+--         hwnd   - window to render the bitmap to
+--
+-- Output: converts image to RGB, generates bitmap, and displays in window
+--
+-- Return: 0 if successful, otherwise an error code
+--           1 ==> dcx invalid, no camera, or not a window
+--           2 ==> no valid image frames
+=========================================================================== */
+int DCx_RenderImage(DCX_CAMERA *dcx, int frame, HWND hwnd) {
+	static char *rname = "DCx_RenderImage";
+
+	int rc;
+
+	/* Verify parameters */
+	if (dcx == NULL || ! dcx->hCam <= 0 || ! IsWindow(hwnd)) return 1;
+
+	rc = 0;							/* Assume success */
+#ifndef USE_RINGS
+	is_RenderBitmap(dcx->hCam, dcx->Image_PID, hwnd, IS_RENDER_FIT_TO_WINDOW);
+#else
+	if (dcx->nValid <= 0) {						/* No valid images to display */
+		rc = 2;
+	} else {
+		frame = max(0, min(frame, dcx->nValid-1));
+		is_RenderBitmap(dcx->hCam, dcx->Image_PID[frame], hwnd, IS_RENDER_FIT_TO_WINDOW);
+	}
+#endif
+
+	return rc;
+}
+
 
 /* ===========================================================================
 -- Routine to return the PID, index, or pMem corresponding to an active pMem
@@ -822,7 +1289,7 @@ int FindImageIndexFromPID(DCX_CAMERA *dcx, int PID) {
 #else
 	int i;
 
-	for (i=0; i<dcx->rings.nSize; i++) {
+	for (i=0; i<dcx->nSize; i++) {
 		if (dcx->Image_PID[i] == PID) return i;
 	}
 	return -1;
@@ -835,7 +1302,7 @@ int FindImageIndexFrompMem(DCX_CAMERA *dcx, char *pMem) {
 	return 0;
 #else
 	int i;
-	for (i=0; i<dcx->rings.nSize; i++) {
+	for (i=0; i<dcx->nSize; i++) {
 		if (dcx->Image_Mem[i] == pMem) return i;
 	}
 	return -1;
@@ -850,7 +1317,7 @@ unsigned char *FindImagepMemFromPID(DCX_CAMERA *dcx, int PID, int *index) {
 #else
 	int i;
 	if (index != NULL) *index = -1;
-	for (i=0; i<dcx->rings.nSize; i++) {
+	for (i=0; i<dcx->nSize; i++) {
 		if (dcx->Image_PID[i] == PID) {
 			if (index != NULL) *index = i;
 			return dcx->Image_Mem[i];
@@ -873,14 +1340,14 @@ int FindImagePIDFrompMem(DCX_CAMERA *dcx, unsigned char *pMem, int *index) {
 
 	/* Scan through the list */
 	if (dcx != NULL && dcx->Image_Mem_Allocated) {
-		for (i=0; i<dcx->rings.nSize; i++) {
+		for (i=0; i<dcx->nSize; i++) {
 			if (dcx->Image_Mem[i] == pMem) {
 				PID = dcx->Image_PID[i];
 				if (index != NULL) *index = i;
 				break;
 			}
 		}
-		if (i >= dcx->rings.nSize) { fprintf(stderr, "ERROR: Unable to find a PID corresponding to the image memory (%p)\n", pMem); fflush(stderr); }
+		if (i >= dcx->nSize) { fprintf(stderr, "ERROR: Unable to find a PID corresponding to the image memory (%p)\n", pMem); fflush(stderr); }
 //		fprintf(stderr, "Buffer %3.3d: PID=%3.3d  buffer=%p\n", i, PID, pMem); fflush(stderr);
 	}
 
@@ -888,6 +1355,103 @@ int FindImagePIDFrompMem(DCX_CAMERA *dcx, unsigned char *pMem, int *index) {
 #endif
 }
 
+
+/* ===========================================================================
+   ===========================================================================
+   ========================  SERVERS SIDE FUNCTIONS  =========================
+   ===========================================================================
+=========================================================================== */
+
+/* ===========================================================================
+-- Interface routine to accept a request to grab and store an image in memory 
+--
+-- Usage: int DCX_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer);
+--
+-- Inputs: info    - pointer (if not NULL) to structure to be filled with image info
+--         buffer  - pointer set to location of image in memory;
+--                   calling routine responsible for freeing this memory after use
+--
+-- Output: Captures an image and copies the buffer to memory location
+--         if info != NULL, *info filled with details of capture and basic image stats
+--
+-- Return: 0 - all okay
+--         1 - camera is not initialized and active
+--         2 - file save failed for some other reason
+=========================================================================== */
+int DCx_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer) {
+	static char *rname = "DCx_Acquire_Image";
+
+	DCX_CAMERA *dcx;
+	HCAM hCam;
+	int trig_hold;
+
+	int rc, col, line, height, width, pitch, nGamma;
+	unsigned char *pMem, *aptr;
+
+	/* If info provided, clear it in case we have a failure */
+	if (info != NULL) memset(info, 0, sizeof(DCX_IMAGE_INFO));
+	if (buffer == NULL) return -1;
+
+	/* Must have been started at some point to be able to do anything */
+	if ( (dcx = local_dcx) == NULL) return 1;					/* No camera active */
+	if (dcx->hCam <= 0) return 1;									/* No camera active */
+	hCam = dcx->hCam;
+
+	/* Capture and hold an image */
+	trig_hold = dcx->Trig_Mode;
+	if ( (rc = is_FreezeVideo(hCam, IS_WAIT)) != 0) {		/* Forces image capture and resets to software trigger mode */
+		printf("[%s:] is_FreezeVideo returned failure (rc=%d)", rname, rc);
+		rc = is_FreezeVideo(hCam, IS_WAIT);
+		printf("  Retry gives: %d\n", rc);
+		fflush(stdout);
+	}
+	dcx->Trig_Mode = TRIG_SOFTWARE;
+
+	rc = is_GetImageMem(hCam, &pMem);
+	rc = is_GetImageMemPitch(hCam, &pitch);
+	height = dcx->height;
+	width  = dcx->width;
+
+	/* Copy the image to an allocated buffer */
+	*buffer = malloc(pitch*height);			/* Allocate space for new memory */
+	memcpy(*buffer, pMem, pitch*height);
+
+	if (info != NULL) {
+
+		/* Copy over information */
+		info->width = width;
+		info->height = height;
+		info->memory_pitch = pitch;
+
+		is_Exposure(hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &info->exposure, sizeof(info->exposure));
+
+		is_Gamma(hCam, IS_GAMMA_CMD_GET, &nGamma, sizeof(nGamma));
+		info->gamma = nGamma / 100.0;
+		info->color_correction = is_SetColorCorrection(hCam, IS_GET_CCOR_MODE, &info->color_correction_factor);
+
+		DCx_GetRGBGains(dcx, &info->master_gain, &info->red_gain, &info->green_gain, &info->blue_gain);
+
+		/* Calculate the number of saturated pixels on each color plane */
+		info->red_saturate = info->green_saturate = info->blue_saturate = 0;
+		for (line=0; line<height; line++) {
+			aptr = pMem + line*pitch;					/* Pointer to this line */
+			for (col=0; col<width; col++) {
+				if (dcx->IsSensorColor) {
+					if (aptr[3*col+0] >= 255) info->blue_saturate++;
+					if (aptr[3*col+1] >= 255) info->green_saturate++;
+					if (aptr[3*col+2] >= 255) info->red_saturate++;
+				} else {
+					if (aptr[col] >= 255) info->blue_saturate = info->green_saturate = ++info->red_saturate;
+				}
+			}
+		}
+	}
+
+	trig_hold = dcx->Trig_Mode;
+	DCx_SetTrigMode(dcx, trig_hold, 0);
+
+	return 0;
+}
 
 /* ===========================================================================
 -- DCx_Set_Exposure_Parms
@@ -981,9 +1545,95 @@ int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSUR
 
 
 /* ===========================================================================
+-- Query the current ring buffer values
+--
+-- Usage: int DCx_GetRingInfo(DCX_CAMERA *dcx, int *nSize, int *nValid, int *iLast, int *iShow);
+--
+-- Inputs: dcx    - structure associated with a camera
+--         nSize  - pointer for # of buffers in the ring
+--			  nValid - pointer for # of buffers in the ring current with valid images
+--			  iLast  - pointer for index of buffer with last image from the camera
+--			  iShow  - pointer for index of buffer currently being shown (rgb values)
+--
+-- Output: For all parameter !NULL, copies appropriate value from internals
+--
+-- Return: 0 if successful, 1 if dcx invalid
+=========================================================================== */
+int DCx_GetRingInfo(DCX_CAMERA *dcx, int *nSize, int *nValid, int *iLast, int *iShow) {
+	static char *rname = "DCx_GetRingInfo";
+	BOOL valid;
+
+	/* Is structure valid ... return default values or values from the structure */
+	valid = dcx != NULL;
+
+	if (nSize  != NULL) *nSize  = valid ? dcx->nSize   : 1 ;
+	if (nValid != NULL) *nValid = valid ? dcx->nValid  : 0 ;
+	if (iLast  != NULL) *iLast  = valid ? dcx->iLast   : 0 ;
+	if (iShow  != NULL) *iShow  = valid ? dcx->iShow   : 0 ;
+
+	return valid ? 0 : 1 ;
+}
+
+
+/* ===========================================================================
+-- Save image as file
+--
+-- Usage: int DCX_SaveImage(DCX_CAMERA *dcx);
+--
+-- Inputs: dcx     - pointer to structure with information about the DCx camera
+--
+-- Output: Saves the file as specified.
+--         if info != NULL, *info filled with details of capture and basic image stats
+--
+-- Return: 0 - all okay
+--         1 - camera is not initialized and active
+--         2 - file save failed for some other reason
+=========================================================================== */
+int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int format) {
+	static char *rname = "DCx_SaveImage";
+
+	wchar_t fname_w[MAX_PATH];
+	IMAGE_FILE_PARAMS ImageParams;
+	size_t ncount;
+	int rc;
+
+	/* Convert the filename or leave NULL for dialog box */
+	if (fname != NULL) {
+		mbstowcs_s(&ncount, fname_w, MAX_PATH, fname, strlen(fname));
+		ImageParams.pwchFileName = fname_w;
+	} else {
+		ImageParams.pwchFileName = NULL;
+	}
+
+	/* Choose a format */
+	switch (format) {
+		case IMAGE_JPG:
+			ImageParams.nFileType = IS_IMG_JPG; break;
+		case IMAGE_PNG:
+			ImageParams.nFileType = IS_IMG_PNG; break;
+		case IMAGE_BMP:
+		default:
+			ImageParams.nFileType = IS_IMG_BMP; break;
+	}
+
+	/* Specify the compression for PNG and JPG - BMP is uncompressed */
+	ImageParams.nQuality = 75;
+
+	/* Default values for remaining parameters */
+	ImageParams.pnImageID    = NULL;	
+	ImageParams.ppcImageMem  = NULL;
+
+	/* Let the driver do all the work */
+	rc = is_ImageFile(dcx->hCam, IS_IMAGE_FILE_CMD_SAVE, &ImageParams, sizeof(ImageParams));
+
+	return rc;
+}
+
+
+/* ===========================================================================
 -- Capture an image and save as a file
 --
--- Usage: int DCX_Capture_Image(DCX_CAMERA *dcx, char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
+-- Usage: int DCX_CaptureImage(DCX_CAMERA *dcx, char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
 --
 -- Inputs: dcx     - pointer to structure with information about the DCx camera
 --         fname   - if not NULL, pointer to name of file to be saved
@@ -1000,8 +1650,8 @@ int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSUR
 --         1 - camera is not initialized and active
 --         2 - file save failed for some other reason
 =========================================================================== */
-int DCx_Capture_Image(DCX_CAMERA *dcx, char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap) {
-	static char *rname = "DCx_Capture_Image";
+int DCx_CaptureImage(DCX_CAMERA *dcx, char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap) {
+	static char *rname = "DCx_CaptureImage";
 
 	wchar_t fname_w[MAX_PATH];
 	IMAGE_FILE_PARAMS ImageParams;

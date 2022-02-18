@@ -1,15 +1,27 @@
-#ifndef ZooCam_Loaded
+#ifndef ZOOCAM_LOADED
 
-#define ZooCam_Loaded
-
-/* Global identifier of my window handle */
-HWND ZooCam_main_hdlg;
-
-#include "dcx.h"
-#include "tl.h"
+#define ZOOCAM_LOADED
 
 /* Camera/window information structure */
 typedef struct _WND_INFO WND_INFO;
+
+/* Global identifier of my window handle */
+HWND ZooCam_main_hdlg;
+WND_INFO *main_wnd;
+
+/* Special calls to the display thread */
+#define	WMP_SHOW_FRAMERATE		(WM_APP+3)
+#define	WMP_SHOW_EXPOSURE			(WM_APP+4)
+#define	WMP_SHOW_GAMMA				(WM_APP+6)
+#define	WMP_SHOW_COLOR_CORRECT	(WM_APP+7)
+#define	WMP_SHOW_GAINS				(WM_APP+8)
+#define	WMP_SHOW_CURSOR_POSN		(WM_APP+9)
+#define	WMP_BURST_ARM				(WM_APP+10)
+#define	WMP_BURST_ABORT			(WM_APP+11)
+#define	WMP_BURST_TRIG_COMPLETE	(WM_APP+12)
+
+/* Support routines that are now safe and simple */
+int GenerateCrosshair(WND_INFO *wnd, HWND hwnd);
 
 /* ===========================================================================
 -- Start a thread to run the dialog box for the camera
@@ -23,24 +35,6 @@ typedef struct _WND_INFO WND_INFO;
 -- Return: none
 =========================================================================== */
 void DCx_Start_Dialog(void *arglist);
-
-/* ===========================================================================
--- Interface routine to accept a request to grab and store an image in memory 
---
--- Usage: int DCX_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer);
---
--- Inputs: info    - pointer (if not NULL) to structure to be filled with image info
---         buffer  - pointer set to location of image in memory;
---                   calling routine responsible for freeing this memory after use
---
--- Output: Captures an image and copies the buffer to memory location
---         if info != NULL, *info filled with details of capture and basic image stats
---
--- Return: 0 - all okay
---         1 - camera is not initialized and active
---         2 - file save failed for some other reason
-=========================================================================== */
-int DCx_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer);
 
 
 /* ===========================================================================
@@ -128,7 +122,7 @@ int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
 =========================================================================== */
 typedef enum _RING_ACTION {RING_GET_INFO=0, RING_GET_SIZE=1, RING_SET_SIZE=2, RING_GET_ACTIVE_CNT=3} RING_ACTION;
 
-int DCx_Ring_Actions(RING_ACTION request, int option, DCX_RING_INFO *response);
+int DCx_Ring_Actions(RING_ACTION request, int option, struct _RING_INFO *response);
 
 /* ===========================================================================
 -- Interface to the BURST functions
@@ -171,7 +165,7 @@ int DCx_Enable_Live_Video(int state);
 
 #ifdef INCLUDE_WND_DETAIL_INFO
 
-/* Upperlevel camera information encoded in the combobox dropdown and ActiveCamera pointer */
+/* Upper level camera information encoded in the combobox dropdown and ActiveCamera pointer */
 typedef struct _CAMERA_INFO {
 	enum {UNKNOWN=0, DCX=1, TL=2} driver;		/* empty initialization points to none */
 	char id[64];										/* Up to 32 char id for combobox */
@@ -249,8 +243,7 @@ typedef struct _WND_INFO {
 
 #endif			/* INCLUDE_DCX_DETAIL_INFO */
 
-int ReleaseRingBuffers(WND_INFO *wnd);
 int AllocRingBuffers(WND_INFO *wnd, int nRequest);
 
-#endif			/* ZooCam_Loaded */
+#endif			/* ZOOCAM_LOADED */
 

@@ -43,6 +43,7 @@
 #define IDB_FLOAT                       2005
 #define IDB_CAPTURE                     2006
 #define IDB_BURST                       2007
+#define IDB_SAVE_BURST                  2007
 #define IDB_SAVE_PARAMETERS             2008
 #define IDB_LOAD_PARAMETERS             2009
 #define IDC_CAMERA_LIST                 2010
@@ -150,7 +151,6 @@
 #define IDG_COLOR_CORRECTION            2101
 #define IDS_TEXT_0                      2102
 #define IDC_SHOW_SUM                    2103
-#define IDC_BUTTON1                     2104
 #define IDB_RESET_GAINS                 2104
 #define IDC_GPIB                        2401
 #define IDC_STATIC                      -1
