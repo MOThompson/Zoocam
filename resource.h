@@ -39,10 +39,9 @@
 #define IDC_STATIC_ABOUT_APPNAME        2001
 #define IDC_DISPLAY                     2003
 #define IDB_LIVE                        2004
-#define IDB_UNDOCK                      2005
 #define IDB_FLOAT                       2005
 #define IDB_CAPTURE                     2006
-#define IDB_BURST                       2007
+#define IDB_TRIGGER                     2006
 #define IDB_SAVE_BURST                  2007
 #define IDB_SAVE_PARAMETERS             2008
 #define IDB_LOAD_PARAMETERS             2009
@@ -63,7 +62,6 @@
 #define IDT_PIXEL_CLOCK_MIN             2022
 #define IDV_FRAME_RATE                  2023
 #define IDT_PIXEL_CLOCK_DEFAULT         2023
-#define IDT_FRAMERATE                   2024
 #define IDT_PIXEL_CLOCK_CURRENT         2024
 #define IDT_ACTUALFRAMERATE             2024
 #define IDS_EXPOSURE_TIME               2025
@@ -108,8 +106,8 @@
 #define IDC_ENABLE_DCX_ERRORS           2060
 #define IDC_FULL_WIDTH_CURSOR           2061
 #define IDB_AUTO_EXPOSURE               2062
-#define IDT_CURSOR_X_PIXEL              2063
-#define IDT_CURSOR_Y_PIXEL              2064
+#define IDV_CURSOR_X_PIXEL              2063
+#define IDV_CURSOR_Y_PIXEL              2064
 #define IDV_RING_SIZE                   2065
 #define IDT_FRAME_COUNT                 2066
 #define IDT_FRAME_VALID                 2067
@@ -118,11 +116,11 @@
 #define IDV_CURRENT_FRAME               2068
 #define IDT_SHARPNESS                   2069
 #define IDB_SHARPNESS_DIALOG            2070
-#define IDB_LED_CONTROL                 2071
 #define IDB_LED_CONFIGURE               2071
 #define IDV_COM_PORT                    2072
 #define IDC_TRACK_CENTROID              2072
 #define IDC_ENABLE                      2073
+#define IDV_TRIG_COUNT                  2073
 #define IDV_LED_ON                      2074
 #define IDV_LED_OFF                     2075
 #define IDR_LED_OFF                     2076
@@ -135,9 +133,9 @@
 #define IDB_CLEAR_FOCUS_GRAPH           2083
 #define IDT_EST_FOCUS                   2084
 #define IDB_SET_EST_FOCUS               2085
-#define IDB_ARM                         2086
 #define IDB_PREV_FRAME                  2087
 #define IDB_NEXT_FRAME                  2088
+#define IDB_BURST_ARM                   2090
 #define IDB_LED_OFF                     2091
 #define IDB_LED_ON                      2092
 #define IDG_LED                         2093
@@ -152,6 +150,17 @@
 #define IDS_TEXT_0                      2102
 #define IDC_SHOW_SUM                    2103
 #define IDB_RESET_GAINS                 2104
+#define IDT_IMAGE_INFO                  2105
+#define IDR_TRIG_FREERUN                2106
+#define IDR_TRIG_SOFTWARE               2107
+#define IDR_TRIG_EXTERNAL               2108
+#define IDR_TRIG_BURST                  2109
+#define IDT_TRIG_COUNT                  2110
+#define IDR_IMAGE_BMP                   2111
+#define IDR_IMAGE_RAW                   2112
+#define IDR_IMAGE_JPG                   2113
+#define IDR_IMAGE_PNG                   2114
+#define IDC_ARM                         2115
 #define IDC_GPIB                        2401
 #define IDC_STATIC                      -1
 
@@ -162,7 +171,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        143
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2105
+#define _APS_NEXT_CONTROL_VALUE         2116
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

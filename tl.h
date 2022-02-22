@@ -9,6 +9,43 @@
 
 #define	TL_CAMERA_MAGIC	0x8A46
 
+#pragma pack(4)
+typedef struct _TL_IMAGE {
+	BOOL valid;											/* Is data in buffer valid			*/
+	int imageID;										/* Unique ID of image (# since start) */
+	unsigned short *raw;								/* Buffer with the raw data		*/
+	double camera_time;								/* Camera pixel clock timestamp	*/
+	time_t timestamp;									/* time() value						*/
+	SYSTEMTIME system_time;							/* Include millisecond time		*/
+	double dB_gain;									/* Master gain in dB					*/
+	double ms_expose;									/* ms exposure (also us_expose)	*/
+} TL_IMAGE;
+#pragma pack()
+
+#pragma pack(4)
+#define	TL_RAW_FILE_MAGIC		(0x4A7B92CF)
+typedef struct _TL_RAW_FILE_HEADER {
+	int magic;									/* ID indicating this is my file (check endien)			*/
+	int header_size;							/* Size in bytes of this header (n-8 more)				*/
+	int major_version, minor_version;	/* Header version (currently 1.0)							*/
+	double ms_expose;							/* Exposure time in ms											*/
+	double dB_gain;							/* Gain in dB for camera (RGB don't matter)				*/
+	time_t timestamp;							/* time() of image capture (relative Jan 1, 1970)		*/
+	double camera_time;						/* Image time based on pixel clock (arbitrary zero)	*/
+	int year, month, day;					/* Date of capture (human readable, 2024.02.29)			*/
+	int hour, min, sec, ms;					/* Time of capture (human readable, 18:00:59.372)		*/
+	char camera_model[16];					/* Camera model													*/
+	char camera_serial[16];					/* Serial number of camera										*/
+	int sensor_type;							/* enum (TL_CAMERA_SENSOR_TYPE) of sensor type			*/
+	int color_filter;							/* enum (TL_COLOR_FILTER_ARRAY_PHASE) of color filter	*/
+	int width, height;						/* height and width of image									*/
+	int bit_depth;								/* Bits resolution in each pixel								*/
+	int pixel_bytes, image_bytes;			/* Bytes per pixel and bytes total in image				*/
+	double pixel_width, pixel_height;	/* Physical dimensions of pixel (in um)					*/
+} TL_RAW_FILE_HEADER;
+#pragma pack()
+
+
 /* Structure use for communicating ring size information in client/server */
 #ifndef INCLUDE_TL_DETAIL_INFO
 	typedef struct _TL_CAMERA TL_CAMERA;
@@ -22,9 +59,9 @@
 	typedef struct _TL_CAMERA {
 		int magic;												/* Magic value to indicate valid */
 		char ID[32];											/* String ID for the camera		*/
-		char name[64];
-		char model[64];										/* Model									*/
-		char serial[64];										/* Serial number						*/
+		char name[64];											/* Registered name of camera		*/
+		char model[16];										/* Model									*/
+		char serial[16];										/* Serial number						*/
 		char firmware[1024];									/* Firmware revisions				*/
 		FILE *handle;											/* Handle to the camera itself	*/
 		enum TL_CAMERA_SENSOR_TYPE sensor_type;		/* Sensor type (must be BAYER)	*/
@@ -38,7 +75,7 @@
 		double red_dflt, green_dflt, blue_dflt;		/* Default (original) RGB gains	*/
 		
 		long long us_expose_min, us_expose_max;		/* Min and max exposure times		*/
-		long long us_expose;									/* Exposure time in us				*/
+		long long us_expose;									/* us exposure time (ms_expose)	*/
 		
 		BOOL bFrameRateControl;								/* Is framerate control possible	*/
 		double fps_min, fps_max;							/* Min and max frame rate			*/
@@ -55,8 +92,12 @@
 		
 		HANDLE image_mutex;									/* Access to modify/use data		*/
 		
-		TRIG_MODE TrigMode;									/* Trigger mode						*/
+		TRIGGER_INFO trigger;								/* Trigger details					*/
 
+		/* Current capture conditions */
+		double dB_gain;										/* Master gain in dB					*/
+		double ms_expose;										/* ms exposure (also us_expose)	*/
+		
 		/* Ring information */
 		int frame_count;										/* Total number of frames read	*/
 		int nBuffers,											/* Number of frames in the ring	*/
@@ -64,17 +105,16 @@
 			 iLast,												/* index of last camera frame		*/
 			 iShow;												/* index of frame in rgb/seps		*/
 
+		/* Image memory buffers */
+		TL_IMAGE *images;										/* Image raw data and metadata	*/
 		int npixels;											/* Number of pixels in a frame	*/
 		int nbytes_raw;										/* Number of bytes in each frame */
-		unsigned short **raw;								/* nsize array of raw sensor data buffers */
-		double *timestamp;									/* Array of timestamps on images	*/
-		BOOL valid_raw;										/* Raw data is again valid since any reset */
 
-		double rgb24_timestamp;								/* Timestamp of rgb24 data			*/
-		int nbytes_rgb24;										/* Number of bytes in rgb24 data	*/
+		int rgb24_imageID;									/* ImageID of current rgb24 data	*/
+		int rgb24_nbytes;										/* Number of bytes in rgb24 data	*/
 		unsigned char *rgb24;								/* rgb32 image RGBQUAD (4xh*2)	*/
 		
-		double separations_timestamp;						/* Timestamp of separation data	*/
+		int separations_imageID;							/* ImageID of current separation data	*/
 		int nbytes_red, nbytes_green, nbytes_blue;	/* Number of bytes in sub-chans	*/
 		unsigned short *red, *green, *blue;				/* Inidividual channels */
 		
@@ -103,7 +143,7 @@ int TL_Shutdown(void);
 /* Open  opens the handle and initializes buffers */
 /* Close releases buffers associated witht he camera */
 /* Free  deletes the camera from the list */
-TL_CAMERA *TL_FindCamera(char *ID, int *rc);
+TL_CAMERA *TL_FindCamera(char *ID, int *rcode);
 int TL_ForgetCamera(TL_CAMERA *tl);
 int TL_OpenCamera(TL_CAMERA *tl, int nBuf);
 int TL_CloseCamera(TL_CAMERA *tl);
@@ -111,7 +151,7 @@ int TL_CloseCamera(TL_CAMERA *tl);
 int TL_GetCameraName(TL_CAMERA *tl, char *name, size_t length);
 int TL_SetCameraName(TL_CAMERA *tl, char *name);
 
-int TL_GetRingInfo(TL_CAMERA *tl, int *nSize, int *nValid, int *iLast, int *iShow);
+int TL_GetRingInfo(TL_CAMERA *tl, int *nBuffers, int *nValid, int *iLast, int *iShow);
 int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf);
 
 int TL_FindAllCameras(TL_CAMERA **list[]);
@@ -122,6 +162,8 @@ TL_CAMERA *TL_FindCameraByIndex(int index);
 TL_CAMERA *TL_FindCameraByID(char *ID);
 TL_CAMERA *TL_FindCameraByHandle(void *handle);
 
+int TL_EnumCameraList(int *pcount, TL_CAMERA **pinfo[]);
+
 BOOL TL_IsValidCamera(TL_CAMERA *tl);
 
 int TL_AddImageSignal(TL_CAMERA *tl, HANDLE signal);
@@ -131,9 +173,15 @@ int TL_ProcessRGB(TL_CAMERA *tl, int frame);				/* No ties to TL_ProcessRawSepar
 int TL_ProcessRawSeparation(TL_CAMERA *tl, int frame);	/* No ties to TL_ProcessRGB */
 
 BITMAPINFOHEADER *TL_CreateDIB(TL_CAMERA *tl, int frame, int *rc);
-int TL_SaveBMPFile(TL_CAMERA *tl, char *path, int frame);
 
-int TL_RenderImage(TL_CAMERA *tl, int frame, HWND hwnd);
+int TL_GetSaveFormatFlag(TL_CAMERA *tl);
+int TL_GetSaveName(char *path, size_t length, int *format);
+int TL_SaveImage(TL_CAMERA *tl, char *path, int frame, int format);
+int TL_SaveBMPImage(TL_CAMERA *tl, char *path, int frame);
+int TL_SaveRawImage(TL_CAMERA *tl, char *path, int frame);
+int TL_SaveBurstImages(TL_CAMERA *tl, char *pattern, int format);
+
+int TL_RenderFrame(TL_CAMERA *tl, int frame, HWND hwnd);
 
 int    TL_GetExposureParms(TL_CAMERA *tl, double *ms_min, double *ms_max);
 double TL_SetExposure(TL_CAMERA *tl, double ms_expose);
@@ -153,8 +201,12 @@ int TL_SetRGBGains(TL_CAMERA *tl, double  red, double  green, double  blue);
 int TL_GetDfltRGBGains(TL_CAMERA *tl, double *red, double *green, double *blue);
 
 /* Triggering controls (freerun especially) */
-int TL_Trigger(TL_CAMERA *tl, int msWait);
-TRIG_MODE TL_SetTrigMode(TL_CAMERA *tl, TRIG_MODE mode, int msWait);
-TRIG_MODE TL_GetTrigMode(TL_CAMERA *tl);
+int TL_Arm(TL_CAMERA *tl);
+int TL_Disarm(TL_CAMERA *tl);
+int TL_Trigger(TL_CAMERA *tl);
+int TL_SetFramesPerTrigger(TL_CAMERA *tl, int frames);
+int TL_GetFramesPerTrigger(TL_CAMERA *tl);
+TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *info);
+TRIGGER_MODE TL_GetTriggerMode(TL_CAMERA *tl, TRIGGER_INFO *info);
 
 #endif			/* tl_loaded */

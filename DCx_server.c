@@ -1,4 +1,4 @@
-/* DCx_server.c */
+/* ZooCam_server.c */
 
 /* ------------------------------ */
 /* Feature test macros            */
@@ -72,17 +72,17 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block);
 --            1 ==> Unable to create mutex
 --            2 ==> Unable to spawn the server thread
 =========================================================================== */
-static BOOL DCx_Msg_Server_Up = FALSE;				/* Server has been started */
-static HANDLE DCx_Server_Mutex = NULL;				/* access to the client/server communication */
+static BOOL ZooCam_Msg_Server_Up = FALSE;				/* Server has been started */
+static HANDLE ZooCam_Server_Mutex = NULL;				/* access to the client/server communication */
 
-int Init_DCx_Server(void) {
-	static char *rname = "Init_DCx_Server";
+int Init_ZooCam_Server(void) {
+	static char *rname = "Init_ZooCam_Server";
 
 	/* Don't start multiple times :-) */
-	if (DCx_Msg_Server_Up) return 0;
+	if (ZooCam_Msg_Server_Up) return 0;
 
 /* Create mutex for work */
-	if (DCx_Server_Mutex == NULL && (DCx_Server_Mutex = CreateMutex(NULL, FALSE, NULL)) == NULL) {
+	if (ZooCam_Server_Mutex == NULL && (ZooCam_Server_Mutex = CreateMutex(NULL, FALSE, NULL)) == NULL) {
 		fprintf(stderr, "ERROR[%s]: Unable to create the server access semaphores\n", rname); fflush(stderr);
 		return 1;
 	}
@@ -91,7 +91,7 @@ int Init_DCx_Server(void) {
 	DebugSockets(2);									/* All warnings and errors */
 
 /* Bring up the message based server */
-	if ( ! (DCx_Msg_Server_Up = (RunServerThread("DCx", DCX_ACCESS_PORT, server_msg_handler, NULL) == 0)) ) {
+	if ( ! (ZooCam_Msg_Server_Up = (RunServerThread("DCx", DCX_ACCESS_PORT, server_msg_handler, NULL) == 0)) ) {
 		fprintf(stderr, "ERROR[%s]: Unable to start the DCx message based remote server\n", rname); fflush(stderr);
 		return 2;
 	}
@@ -102,7 +102,7 @@ int Init_DCx_Server(void) {
 /* ===========================================================================
 -- Routine to shutdown high level DCx remote socket server
 --
--- Usage: void Shutdown_DCx_Server(void)
+-- Usage: void Shutdown_ZooCam_Server(void)
 --
 -- Inputs: none
 --
@@ -111,7 +111,7 @@ int Init_DCx_Server(void) {
 --
 -- Return:  0 if successful, !0 otherwise
 =========================================================================== */
-int Shutdown_DCx_Server(void) {
+int Shutdown_ZooCam_Server(void) {
 
 	return 0;
 }
@@ -160,7 +160,7 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 
 		/* Be very careful ... only allow one socket message to be in process at any time */
 		/* The code should already protect, but not sure how interleaved messages may impact operations */
-		if (WaitForSingleObject(DCx_Server_Mutex, DCX_SERVER_WAIT) != WAIT_OBJECT_0) {
+		if (WaitForSingleObject(ZooCam_Server_Mutex, ZOOCAM_SERVER_WAIT) != WAIT_OBJECT_0) {
 			fprintf(stderr, "ERROR[%s]: Timeout waiting for the DCx semaphore\n", rname); fflush(stderr);
 			reply.msg = -1; reply.rc = -1;
 
@@ -242,44 +242,44 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				
 			case DCX_RING_GET_INFO:
 				fprintf(stderr, "  DCx msg server: DCX_RING_GET_INFO()\n");	fflush(stderr);
-				reply.rc = DCx_Ring_Actions(RING_GET_INFO, 0, &ring_info);
+				reply.rc = Ring_Actions(RING_GET_INFO, 0, &ring_info);
 				reply.data_len   = sizeof(ring_info);
 				reply_data = (void *) &ring_info;
 				break;
 				
 			case DCX_RING_GET_SIZE:
 				fprintf(stderr, "  DCx msg server: DCX_RING_GET_SIZE()\n");	fflush(stderr);
-				reply.rc = DCx_Ring_Actions(RING_GET_SIZE, 0, NULL);
+				reply.rc = Ring_Actions(RING_GET_SIZE, 0, NULL);
 				break;
 
 			case DCX_RING_SET_SIZE:
 				fprintf(stderr, "  DCx msg server: DCX_RING_SET_SIZE(%d)\n", request.option);	fflush(stderr);
-				reply.rc = DCx_Ring_Actions(RING_SET_SIZE, request.option, NULL);
+				reply.rc = Ring_Actions(RING_SET_SIZE, request.option, NULL);
 				break;
 
 			case DCX_RING_GET_FRAME_CNT:
 				fprintf(stderr, "  DCx msg server: DCX_RING_GET_FRAME_CNT()\n");	fflush(stderr);
-				reply.rc = DCx_Ring_Actions(RING_GET_ACTIVE_CNT, 0, NULL);
+				reply.rc = Ring_Actions(RING_GET_ACTIVE_CNT, 0, NULL);
 				break;
 
 			case DCX_BURST_ARM:
 				fprintf(stderr, "  DCx msg server: DCX_BURST_ARM()\n");	fflush(stderr);
-				DCx_Burst_Actions(BURST_ARM, 0, &reply.rc);			/* Arm the burst */
+				Burst_Actions(BURST_ARM, 0, &reply.rc);			/* Arm the burst */
 				break;
 
 			case DCX_BURST_ABORT:
 				fprintf(stderr, "  DCx msg server: DCX_BURST_ABORT()\n");	fflush(stderr);
-				DCx_Burst_Actions(BURST_ABORT, 0, &reply.rc);		/* Abort existing request */
+				Burst_Actions(BURST_ABORT, 0, &reply.rc);		/* Abort existing request */
 				break;
 
 			case DCX_BURST_STATUS:
 				fprintf(stderr, "  DCx msg server: DCX_BURST_STATUS()\n");	fflush(stderr);
-				DCx_Burst_Actions(BURST_STATUS, 0, &reply.rc);		/* Query the status */
+				Burst_Actions(BURST_STATUS, 0, &reply.rc);		/* Query the status */
 				break;
 				
 			case DCX_BURST_WAIT:
 				fprintf(stderr, "  DCx msg server: DCX_BURST_WAIT()\n");	fflush(stderr);
-				DCx_Burst_Actions(BURST_WAIT, request.option, &reply.rc);	/* Wait for stripe to occur */
+				Burst_Actions(BURST_WAIT, request.option, &reply.rc);	/* Wait for stripe to occur */
 				break;
 				
 			/* 0 => off, 1 => on, otherwise no change; returns current on/off BOOL state */
@@ -301,7 +301,7 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				reply.rc = -1;
 				break;
 		}
-		ReleaseMutex(DCx_Server_Mutex);
+		ReleaseMutex(ZooCam_Server_Mutex);
 		if (received_data != NULL) { free(received_data); received_data = NULL; }
 
 		/* Send the standard response and any associated data */

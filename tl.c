@@ -64,6 +64,8 @@ static void camera_connect_callback(char* camera_ID, enum TL_CAMERA_USB_PORT_TYP
 static void camera_disconnect_callback(char* camera_ID, void* context);
 static void frame_available_callback(void* sender, unsigned short* image_buffer, int frame_count, unsigned char* metadata, int metadata_size_in_bytes, void* context);
 
+static int TL_CameraErrMsg(int rc, char *msg, char *routine);
+
 /* ------------------------------- */
 /* My usage of other external fncs */
 /* ------------------------------- */
@@ -83,6 +85,7 @@ static BOOL is_camera_sdk_open        = FALSE,		/* Have we opened the SDK */
 				is_camera_dll_open        = FALSE,		/* Have we linked to the DLLs */
 				is_mono_to_color_sdk_open = FALSE;		/* Has the color processing sdk been opened */
 			   
+
 /* ===========================================================================
 -- Routine to initialize the TL interface (load SDK, initialize)
 -- Should be followed up with a TL_Release() call at end of program
@@ -101,7 +104,7 @@ static BOOL is_camera_sdk_open        = FALSE,		/* Have we opened the SDK */
 int TL_Initialize(void) {
 	static char *rname = "TL_Initilize";
 
-	int rc;											/* return code */
+	int rc, rcode;											/* return code */
 
 	/* Allow multiple calls as NOP */
 	if (TL_is_initialized) return 0;
@@ -111,36 +114,36 @@ int TL_Initialize(void) {
 	tl_camera_count = 0;
 
 	/* Assume success */
-	rc = 0;
+	rcode = 0;
 
 	/* Build the DLL link points for the sdk (painful) */
 	is_camera_dll_open = tl_camera_sdk_dll_initialize() == 0;
 	if (! is_camera_dll_open) { 
-		fprintf(stderr, "%s: Failed to initialize the TL camera DLLs\n", rname); fflush(stderr);
-		rc |= 0x01;
+		fprintf(stderr, "[%s] Failed to initialize the TL camera DLLs\n", rname); fflush(stderr);
+		rcode |= 0x01;
 	}
 
 	/* Open the SDK */
 	is_camera_sdk_open = tl_camera_open_sdk() == 0;
 	if (! is_camera_sdk_open) { 
-		fprintf(stderr, "%s: Failed to open the tl camera SDK\n", rname); fflush(stderr);
-		rc |= 0x02;
+		fprintf(stderr, "[%s] Failed to open the tl camera SDK\n", rname); fflush(stderr);
+		rcode |= 0x02;
 	}
 
 	/* Open the SDK for the mono to color processing (painful) */
 	is_mono_to_color_sdk_open = tl_mono_to_color_processing_initialize() == 0;
 	if (! is_mono_to_color_sdk_open) { 
-		fprintf(stderr, "%s: Failed to initialize mono to color processing sdk\n", rname); fflush(stderr);
-		rc |= 0x04;
+		fprintf(stderr, "[%s] Failed to initialize mono to color processing sdk\n", rname); fflush(stderr);
+		rcode |= 0x04;
 	}
 
 	/* Register the camera connect/disconnect event callbacks. */
-	if (tl_camera_set_camera_connect_callback(camera_connect_callback, 0) != 0)       { fprintf(stderr, "%s: Unable to register camera connect callback: %s\n", rname, tl_camera_get_last_error()); fflush(stderr); }
-	if (tl_camera_set_camera_disconnect_callback(camera_disconnect_callback, 0) != 0) { fprintf(stderr, "%s: Unable to register camera disconnect callback: %s\n", rname, tl_camera_get_last_error()); fflush(stderr); }
+	if ( (rc = tl_camera_set_camera_connect_callback(camera_connect_callback, 0)) != 0)       TL_CameraErrMsg(rc, "Unable to register camera connect callback", rname);
+	if ( (rc = tl_camera_set_camera_disconnect_callback(camera_disconnect_callback, 0)) != 0) TL_CameraErrMsg(rc, "Unable to register camera disconnect callback", rname);
 
 	/* Mark that we have initialized and are open for business */
 	TL_is_initialized = TRUE;
-	return rc;
+	return rcode;
 }
 
 /* ===========================================================================
@@ -257,27 +260,27 @@ int TL_FindAllCameras(TL_CAMERA **plist[]) {
 
 	/* Initialize now if not done before */
 	if ( TL_Initialize() != 0) {
-		fprintf(stderr, "[%s:] TL not (and cannot be) initialized\n", rname); fflush(stderr);
+		fprintf(stderr, "[%s] TL not (and cannot be) initialized\n", rname); fflush(stderr);
 		return -1;
 	}
 
 	/* Query the list of known camera ID's */
 	*szBuf = 0;
-	if (tl_camera_discover_available_cameras(szBuf, sizeof(szBuf)) != 0) { 
-		fprintf(stderr, "[%s:] Call to discover cameras failed\n", rname); fflush(stderr);
+	if ( (rc = tl_camera_discover_available_cameras(szBuf, sizeof(szBuf))) != 0) { 
+		TL_CameraErrMsg(rc, "Call to discover cameras failed", rname);
 		return 0;
 	} else if (*szBuf == '\0') {
-		fprintf(stderr, "[%s:] No cameras identified\n", rname); fflush(stderr);
+		fprintf(stderr, "[%s] No cameras identified\n", rname); fflush(stderr);
 		return 0;
 	} 
-	fprintf(stderr, "[%s:] TL Cameras (full list): %s\n", rname, szBuf);  fflush(stderr);
+	fprintf(stderr, "[%s] TL Cameras (full list): %s\n", rname, szBuf);  fflush(stderr);
 	szBuf[strlen(szBuf)] = '\0';				/* Double NULL terminate */
 
 	/* Code maintains list of open cameras and will not double open */
 	for (aptr=szBuf; *aptr!='\0'; aptr+=strlen(aptr)) {
 		if ( (bptr = strchr(aptr, ' ')) != NULL) *bptr = '\0';
 		if ( (tl = TL_FindCamera(aptr, &rc)) == NULL) {
-			fprintf(stderr, "[%s:] Failed to open camera with ID %s (rc = %d)\n", rname, aptr, rc);
+			fprintf(stderr, "[%s] Failed to open camera with ID %s (rc = %d)\n", rname, aptr, rc);
 			fflush(stderr);
 		} else {
 			fprintf(stderr, "Camera %s:   handle: 0x%p\n", tl->ID, tl->handle);
@@ -305,13 +308,13 @@ int TL_FindAllCameras(TL_CAMERA **plist[]) {
 /* ===========================================================================
 -- Routine to find a camera associated with a given ID
 --
--- Usage: TL_CAMERA *TL_FindCamera(char *ID, int *rc);
+-- Usage: TL_CAMERA *TL_FindCamera(char *ID, int *rcode);
 --
 -- Inputs: ID - character string ID of camera (serial number) - generally from camera enumeration
 --         rc - pointer to variable receive error codes (or NULL if unneeded)
 --
 -- Output: Creates basic structures and parameters for a TL camera
---         *rc - if rc != NULL, error code with 0 if successful
+--         *rcode - if rcode != NULL, error code with 0 if successful
 --            1 - too many cameras already found
 --            2 - camera failed to be identified
 --
@@ -329,33 +332,35 @@ int TL_FindAllCameras(TL_CAMERA **plist[]) {
 --				tl->image_mutex
 --				tl->raw,red,green,blue,rgb24
 =========================================================================== */
-TL_CAMERA *TL_FindCamera(char *ID, int *rc) {
+TL_CAMERA *TL_FindCamera(char *ID, int *rcode) {
 	static char *rname = "TL_FindCamera";
 
 	TL_CAMERA *tl;
 	FILE *handle;
-	int myrc, ilow, ihigh;
+ 	int rc, myrcode, ilow, ihigh;
 
 	/* Just have something where *rc works */
-	if (rc == NULL) rc = &myrc;
+	if (rcode == NULL) rcode = &myrcode;
 
 	/* Assume we will be successful */
-	*rc = 0;										
+	*rcode = 0;										
 
 	/* First make sure we don't already have it opened */
 	if ( (tl = TL_FindCameraByID(ID)) != NULL) return tl;
 
 	/* Make sure there is an open slot for the camera */
 	if (tl_camera_count >= TL_MAX_CAMERAS) {
-		fprintf(stderr, "Error opening camera %s: Too many cameras already open\n", ID); fflush(stderr);
-		*rc = 1;
+		fprintf(stderr, "[%s] Error opening camera %s: Too many cameras already open\n", rname, ID); fflush(stderr);
+		*rcode = 1;
 		return NULL;
 	}
 
 	/* Open the camera, get handle, and make sure all seems okay */
-	if (tl_camera_open_camera(ID, &handle) != 0) {
-		fprintf(stderr, "Error opening camera %s: %s\n", ID, tl_camera_get_last_error()); fflush(stderr);
-		*rc = 2;
+	if ( (rc = tl_camera_open_camera(ID, &handle)) != 0) {
+		char szBuf[64];
+		sprintf_s(szBuf, sizeof(szBuf), "Error opening camera %s", ID);
+		TL_CameraErrMsg(rc, szBuf, rname);
+		*rcode = 2;
 		return NULL;
 	}
 
@@ -366,46 +371,51 @@ TL_CAMERA *TL_FindCamera(char *ID, int *rc) {
 	tl->handle = handle;
 
 	/* And get lots of information about the camera */
-	if (tl_camera_get_model                       (handle,  tl->model, sizeof(tl->model))       != 0) { fprintf(stderr, "Error determining model for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
-	if (tl_camera_get_serial_number               (handle,  tl->serial, sizeof(tl->serial))     != 0) { fprintf(stderr, "Error determining serial number for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
-	if (tl_camera_get_name								 (handle,  tl->name, sizeof(tl->name))         != 0) { fprintf(stderr, "Error determining name for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
-	if (tl_camera_get_firmware_version				 (handle,  tl->firmware, sizeof(tl->firmware)) != 0) { fprintf(stderr, "Error determining firmware for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
+	if ( (rc = tl_camera_get_model                       (handle,  tl->model, sizeof(tl->model)))       != 0) TL_CameraErrMsg(rc, "Error determining model for camera", rname);
+	if ( (rc = tl_camera_get_serial_number               (handle,  tl->serial, sizeof(tl->serial)))     != 0) TL_CameraErrMsg(rc, "Error determining serial number for camera", rname);
+	if ( (rc = tl_camera_get_name								  (handle,  tl->name, sizeof(tl->name)))         != 0) TL_CameraErrMsg(rc, "Error determining name for camera", rname);
+	if ( (rc = tl_camera_get_firmware_version				  (handle,  tl->firmware, sizeof(tl->firmware))) != 0) TL_CameraErrMsg(rc, "Error determining firmware for camera", rname);
 
-	if (tl_camera_get_camera_sensor_type          (handle, &tl->sensor_type)      != 0) { fprintf(stderr, "Error determining sensor type for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
-	if (tl_camera_get_color_filter_array_phase    (handle, &tl->color_filter)     != 0) { fprintf(stderr, "Error determining color filter array for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
-	if (tl_camera_get_color_correction_matrix     (handle,  tl->color_correction) != 0) { fprintf(stderr, "Error determining color correction for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
-	if (tl_camera_get_default_white_balance_matrix(handle,  tl->white_balance)    != 0) { fprintf(stderr, "Error determining white balance for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
+	if ( (rc = tl_camera_get_camera_sensor_type          (handle, &tl->sensor_type))      != 0) TL_CameraErrMsg(rc, "Error determining sensor type for camera", rname);
+	if ( (rc = tl_camera_get_color_filter_array_phase    (handle, &tl->color_filter))     != 0) TL_CameraErrMsg(rc, "Error determining color filter array for camera", rname);
+	if ( (rc = tl_camera_get_color_correction_matrix     (handle,  tl->color_correction)) != 0) TL_CameraErrMsg(rc, "Error determining color correction for camera", rname);
+	if ( (rc = tl_camera_get_default_white_balance_matrix(handle,  tl->white_balance))    != 0) TL_CameraErrMsg(rc, "Error determining white balance for camera", rname);
 
-	if (tl_camera_get_image_width                 (handle, &tl->width)            != 0) { fprintf(stderr, "Unable to get image width: %s\n", tl_camera_get_last_error()); }
-	if (tl_camera_get_image_height                (handle, &tl->height)           != 0) { fprintf(stderr, "Unable to get image height: %s\n", tl_camera_get_last_error()); }
-	if (tl_camera_get_bit_depth                   (handle, &tl->bit_depth)        != 0) { fprintf(stderr, "Error determining bit depth for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
+	if ( (rc = tl_camera_get_image_width                 (handle, &tl->width))            != 0) TL_CameraErrMsg(rc, "Unable to get image width", rname);
+	if ( (rc = tl_camera_get_image_height                (handle, &tl->height))           != 0) TL_CameraErrMsg(rc, "Unable to get image height", rname);
+	if ( (rc = tl_camera_get_bit_depth                   (handle, &tl->bit_depth))        != 0) TL_CameraErrMsg(rc, "Error determining bit depth for camera", rname);
 
-	if (tl_camera_get_sensor_pixel_height         (handle, &tl->pixel_height_um)  != 0) { fprintf(stderr, "Error determining pixel height for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
-	if (tl_camera_get_sensor_pixel_width          (handle, &tl->pixel_width_um)   != 0) { fprintf(stderr, "Error determining pixel width for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
-	if (tl_camera_get_sensor_pixel_size_bytes     (handle, &tl->pixel_bytes)      != 0) { fprintf(stderr, "Error determining pixel bytes for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
+	if ( (rc = tl_camera_get_sensor_pixel_height         (handle, &tl->pixel_height_um))  != 0) TL_CameraErrMsg(rc, "Error determining pixel height for camera", rname);
+	if ( (rc = tl_camera_get_sensor_pixel_width          (handle, &tl->pixel_width_um))   != 0) TL_CameraErrMsg(rc, "Error determining pixel width for camera", rname);
+	if ( (rc = tl_camera_get_sensor_pixel_size_bytes     (handle, &tl->pixel_bytes))      != 0) TL_CameraErrMsg(rc, "Error determining pixel bytes for camera", rname);
 
-	if (tl_camera_get_exposure_time_range         (handle, &tl->us_expose_min, &tl->us_expose_max) != 0) { fprintf(stderr, "Error determining min/max exposure time for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
-	if (tl_camera_get_exposure_time               (handle, &tl->us_expose)      != 0) { fprintf(stderr, "Unable to set exposure time for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
+	if ( (rc = tl_camera_get_exposure_time_range         (handle, &tl->us_expose_min, &tl->us_expose_max)) != 0) TL_CameraErrMsg(rc, "Error determining min/max exposure time for camera", rname);
+	if ( (rc = tl_camera_get_exposure_time               (handle, &tl->us_expose))        != 0) TL_CameraErrMsg(rc, "Unable to set exposure time for camera", rname);
 
-	if (tl_camera_get_timestamp_clock_frequency	 (handle, &tl->clock_Hz)         != 0) { fprintf(stderr, "Unable to get camera clock frequency: %s\n", tl_camera_get_last_error()); }
+	if ( (rc = tl_camera_get_timestamp_clock_frequency	  (handle, &tl->clock_Hz))         != 0) TL_CameraErrMsg(rc, "Unable to get camera clock frequency", rname);
 
-	if (tl_camera_get_gain_range (handle, &ilow, &ihigh) != 0) { fprintf(stderr, "Unable to get gain range for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); }
+	if ( (rc = tl_camera_get_gain_range                  (handle, &ilow, &ihigh))         != 0) TL_CameraErrMsg(rc, "Unable to get gain range for camera", rname);
 	tl->bGainControl = ihigh > 0;		
 	tl->db_min = 0.1*ilow; tl->db_max = 0.1*ihigh;
 
-	if (tl_camera_get_frame_rate_control_value_range(handle, &tl->fps_min, &tl->fps_max) != 0) { fprintf(stderr, "Error determining min/max frame rate for camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr); }
-	tl->bFrameRateControl = tl->fps_max > 0.0;
+	/* Try to enable framerate control */
+	tl->bFrameRateControl = FALSE;					/* Default unless everything succeeds */
+	tl->fps_min = 1; tl->fps_max = 40;
+	if ( (rc = tl_camera_set_is_frame_rate_control_enabled(handle, TRUE)) != 0) {
+		TL_CameraErrMsg(rc, "Unable to enable frame rate control", rname);
+	} else if ( (rc = tl_camera_get_is_frame_rate_control_enabled(handle, &tl->bFrameRateControl)) != 0)  {
+		TL_CameraErrMsg(rc, "Enabled frame rate, but then failed to verify", rname);
+	} else if ( (rc = tl_camera_get_frame_rate_control_value_range(handle, &tl->fps_min, &tl->fps_max)) != 0) {
+		TL_CameraErrMsg(rc, "Error determining min/max frame rate for camera", rname);
+	} 
 
-	if (tl_camera_close_camera(tl->handle) != 0) {
-		fprintf(stderr, "Failed to close camera %s: (%s)\n", tl->ID, tl_camera_get_last_error()); 
-		fflush(stderr);
-	}
+	if ( (rc = tl_camera_close_camera(tl->handle)) != 0) TL_CameraErrMsg(rc, "Failed to close camera", rname);
 	tl->handle = NULL;
 
 	/* Register in my list of known cameras and return with no error */
 	tl_camera_list[tl_camera_count++] = tl;
 
-	/* And return camera (*rc already set at start) */
+	/* And return camera (*rcode already set at start) */
 	return tl;
 }
 
@@ -429,12 +439,15 @@ TL_CAMERA *TL_FindCamera(char *ID, int *rc) {
 --            0x02   - Unable to open a handle to the camera (fatal)
 --            0x04   - Unable to allocate the color processor
 --            0x10   - Unable to register the frame handling callback
+--
+-- Additional calls that might be used for more information
+--      TL_CAMERA_GET_IS_OPERATION_MODE_SUPPORTED
 =========================================================================== */
 int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 	static char *rname = "TL_OpenCamera";
 
 	FILE *handle;
-	int i, rc;
+	int i, rc, rcode;
 
 	/* Verify that the structure is valid and hasn't already been closed */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 0x8001;
@@ -443,8 +456,8 @@ int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 	if (tl->handle != NULL) return 0;	
 
 	/* Open the camera first and make sure it exists */
-	if (tl_camera_open_camera(tl->ID, &tl->handle) != 0) {
-		fprintf(stderr, "Error opening camera %s: %s\n", tl->ID, tl_camera_get_last_error()); fflush(stderr);
+	if ( (rc = tl_camera_open_camera(tl->ID, &tl->handle)) != 0) {
+		TL_CameraErrMsg(rc, "Error opening camera", rname);
 		tl->handle = NULL;
 		return 0x8002;
 	}
@@ -454,19 +467,17 @@ int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 	tl_camera_set_is_led_on(handle, FALSE); Sleep(100); tl_camera_set_is_led_on(handle, TRUE); 
 
 	/* Open the color image processor if camera is a color ... and set default linear RGB */
-	rc = 0;
+	rcode = 0;
 	if (tl->sensor_type == TL_CAMERA_SENSOR_TYPE_BAYER) {
-		if (tl_mono_to_color_create_mono_to_color_processor(tl->sensor_type, tl->color_filter, tl->color_correction, tl->white_balance, tl->bit_depth, &tl->color_processor) != 0) {
-			fprintf(stderr, "Failed to create a color to mono processor for camera %s: %s\n", tl->ID, tl_mono_to_color_get_last_error());
-			fflush(stderr);
+		if ( (rc = tl_mono_to_color_create_mono_to_color_processor(tl->sensor_type, tl->color_filter, tl->color_correction, tl->white_balance, tl->bit_depth, &tl->color_processor)) != 0) {
+			TL_CameraErrMsg(rc, "Failed to create a color to mono processor for camera", rname);
 			tl->color_processor = NULL;
-			rc |= 0x04;
+			rcode |= 0x04;
 		} else {
 			/* Use TL_MONO_TO_COLOR_SPACE_SRGB if really interested in photographs */
-			if (tl_mono_to_color_set_color_space(tl->color_processor, TL_MONO_TO_COLOR_SPACE_LINEAR_SRGB) != 0) { 
-				fprintf(stderr, "Failed to set linear RGB: %s\n", tl_mono_to_color_get_last_error());
-				fflush(stderr);
-				rc |= 0x08;			/* Failed to set linear RGB model */
+			if ( (rc = tl_mono_to_color_set_color_space(tl->color_processor, TL_MONO_TO_COLOR_SPACE_LINEAR_SRGB)) != 0) { 
+				TL_CameraErrMsg(rc, "Failed to set linear RGB", rname);
+				rcode |= 0x08;			/* Failed to set linear RGB model */
 			}
 		}
 	}
@@ -474,22 +485,20 @@ int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 	/* Simple flag to indicate if we are color or B/W */
 	tl->IsSensorColor = tl->sensor_type == TL_CAMERA_SENSOR_TYPE_BAYER;
 
-	/* Allocate the buffers within the raw structure (just offset) */
-	tl->nBuffers = max(1, min(TL_MAX_RING_SIZE, nBuf));
-	tl->nValid = tl->iLast = tl->iShow = 0;
-
 	/* Create a semaphore for access to the data itself */
 	tl->image_mutex = CreateMutex(NULL, FALSE, NULL);
 
+	/* Allocate buffers using common code (same as change) */
+	TL_SetRingBufferSize(tl, nBuf);			/* mutex has to be defined first */
+	
 	/* Allocate space for the raw data and, if color, for the rgb24 image */
 	/* Note that this may need to change for B/W cameras */
 	tl->npixels = tl->width * tl->height;
 	tl->nbytes_raw = sizeof(unsigned short) * tl->npixels;
-	tl->raw = calloc(tl->nBuffers, sizeof(*tl->raw));
-	tl->timestamp = calloc(tl->nBuffers, sizeof(*tl->timestamp));
+	tl->images = calloc(tl->nBuffers, sizeof(*tl->images));
 	for (i=0; i<tl->nBuffers; i++) {
-		if ( (tl->raw[i] = malloc(tl->nbytes_raw)) == NULL) {
-			fprintf(stderr, "[%s:] Only able to allocate %d buffers, resetting value\n", rname, i); fflush(stderr);
+		if ( (tl->images[i].raw = malloc(tl->nbytes_raw)) == NULL) {
+			fprintf(stderr, "[%s] Only able to allocate %d buffers, resetting value\n", rname, i); fflush(stderr);
 			tl->nBuffers = i;
 			break;
 		}
@@ -500,14 +509,14 @@ int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 		tl->nbytes_red   = tl->nbytes_raw / 4;
 		tl->nbytes_green = tl->nbytes_raw / 2;
 		tl->nbytes_blue  = tl->nbytes_raw / 4;
-		tl->red   = malloc(tl->nbytes_red);
-		tl->green = malloc(tl->nbytes_green);
-		tl->blue  = malloc(tl->nbytes_blue);
+		tl->red   = realloc(tl->red,   tl->nbytes_red);
+		tl->green = realloc(tl->green, tl->nbytes_green);
+		tl->blue  = realloc(tl->blue,  tl->nbytes_blue);
 	}
 	/* If color sensor, create RGB combined buffer */
 	if (tl->IsSensorColor) {
-		tl->nbytes_rgb24 = 3 * tl->width * tl->height;
-		tl->rgb24 = malloc(tl->nbytes_rgb24);
+		tl->rgb24_nbytes = 3 * tl->width * tl->height;
+		tl->rgb24 = realloc(tl->rgb24, tl->rgb24_nbytes);
 	}
 
 	/* Query the initial gains so could be reset later */
@@ -515,14 +524,16 @@ int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 	TL_GetRGBGains(tl, &tl->red_dflt, &tl->green_dflt, &tl->blue_dflt);
 
 	/* Register the routine that will process images */
-	if (tl_camera_set_frame_available_callback(handle, frame_available_callback, 0) != 0) { 
-		fprintf(stderr, "Unable to set frame_available_callback: %s\n", tl_camera_get_last_error());
-		fflush(stderr);
-		rc |= 0x10;
+	if ( (rc = tl_camera_set_frame_available_callback(handle, frame_available_callback, 0)) != 0) { 
+		TL_CameraErrMsg(rc, "Unable to set frame_available_callback", rname);
+		rcode |= 0x10;
 	}
 
+	/* Clear the timestamps on separations just in case */
+	tl->rgb24_imageID = tl->separations_imageID = -1;
+
 	/* Return either 0 or one/more of errors 0x04 and/or 0x08 */
-	return rc;
+	return rcode;
 }
 
 /* ===========================================================================
@@ -548,29 +559,34 @@ int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf) {
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC || tl->handle == NULL) return 0;
 
 	/* Get access to the memory structures */
-	if (WAIT_OBJECT_0 == WaitForSingleObject(tl->image_mutex, 5*TL_IMAGE_ACCESS_TIMEOUT)) {
-		nBuf = max(1, min(TL_MAX_RING_SIZE, nBuf));
-		if (nBuf < tl->nBuffers) {								/* Need to release buffers */
-			for (i=nBuf; i<tl->nBuffers; i++) free(tl->raw[i]);
-			tl->raw       = realloc(tl->raw, nBuf*sizeof(*tl->raw));
-			tl->timestamp = realloc(tl->timestamp, nBuf*sizeof(*tl->timestamp));
-			tl->nBuffers  = nBuf;
-		} else if (nBuf > tl->nBuffers) {						/* Need to increase number of buffers */
-			tl->raw = realloc(tl->raw, nBuf*sizeof(*tl->raw));
-			for (i=tl->nValid; i<=nBuf; i++) {
-				if ( (tl->raw[i] = malloc(tl->nbytes_raw)) == NULL) {
-					fprintf(stderr, "[%s:] Only able to increase buffer size to %d\n", rname, i); fflush(stderr);
-					nBuf = i;
-					break;
-				}
-			}
-			tl->timestamp = realloc(tl->timestamp, nBuf*sizeof(*tl->timestamp));
-			tl->nBuffers  = nBuf;
-		}
-		tl->nValid = tl->iLast = tl->iShow = 0;
-		ReleaseMutex(tl->image_mutex);
+	if (WAIT_OBJECT_0 != WaitForSingleObject(tl->image_mutex, 5*TL_IMAGE_ACCESS_TIMEOUT)) {
+		fprintf(stderr, "[%s] Unable to get image memory semaphore to modify ring buffer structures\n", rname); fflush(stderr);
+		return 0;
 	}
 
+	/* Have the semaphore, proceed to change size */
+	nBuf = max(1, min(TL_MAX_RING_SIZE, nBuf));
+
+	/* If shrinking, release image memory but TL_IMAGE too small to bother releasing unused image[]	*/
+	/* If expanding, assume getting nBuf but may end up having unneeded space in tl->images[] also	*/
+	if (nBuf < tl->nBuffers) {
+		for (i=nBuf; i<tl->nBuffers; i++) free(tl->images[i].raw);							/* Release image buffer (big)	*/
+
+	} else if (nBuf > tl->nBuffers) {																/* Increase number of buffers	*/
+		tl->images = realloc(tl->images, nBuf*sizeof(*tl->images));							/* Space for full request		*/
+		memset(tl->images+tl->nBuffers, 0, (nBuf-tl->nBuffers)*sizeof(*tl->images));	/* Clear new TL_IMAGE blocks	*/
+		for (i=tl->nBuffers; i<nBuf; i++) {															/* Start adding image buffers	*/
+			if ( (tl->images[i].raw = malloc(tl->nbytes_raw)) == NULL) {
+				fprintf(stderr, "[%s] Only able to increase buffer size to %d\n", rname, i); fflush(stderr);
+				nBuf = i;
+				break;
+			}
+		}
+	}
+	tl->nBuffers  = nBuf;
+	tl->nValid = tl->iLast = tl->iShow = 0;
+
+	ReleaseMutex(tl->image_mutex);
 	return tl->nBuffers;
 }
 
@@ -594,45 +610,43 @@ int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf) {
 int TL_CloseCamera(TL_CAMERA *tl) {
 	static char *rname = "TL_CloseCamera";
 
-	int rc;
+	int rc, rcode;
 	
 	/* Assume successful return */
-	rc = 0;
+	rcode = 0;
 
 	/* Verify that the structure is valid and hasn't already been closed */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
 	if (tl->handle == NULL) return 0;						/* Already closed ... can call multiple */
 	
 	/* Disarm the camera */
-	if (tl_camera_disarm(tl->handle) != 0) {
-		fprintf(stderr, "[%s:] Unable to disarm camera: %s\n", rname, tl_camera_get_last_error()); fflush(stderr);
-		rc |= 0x02;
+	if ( (rc = tl_camera_disarm(tl->handle)) != 0) {
+		TL_CameraErrMsg(rc, "Unable to disarm camera", rname);
+		rcode |= 0x02;
 	}
 
 	/* Close the camera handle */
-	if (tl_camera_close_camera(tl->handle) != 0) {
-		fprintf(stderr, "Failed to close camera %s: (%s)\n", tl->ID, tl_camera_get_last_error()); fflush(stderr);
-		rc |= 0x04;
+	if ( (rc = tl_camera_close_camera(tl->handle)) != 0) {
+		TL_CameraErrMsg(rc, "Failed to close camera", rname);
+		rcode |= 0x04;
 	}
 	tl->handle = NULL;
 
 	/* Destroy the color processor */
 	if (tl->color_processor != NULL) {
-		if (tl_mono_to_color_destroy_mono_to_color_processor(tl->color_processor) != 0) {
-			fprintf(stderr, "Failed to destory color processor for camera %s: (%s)\n", tl->ID, tl_mono_to_color_get_last_error()); 
-			fflush(stderr);
-			rc |= 0x08;
+		if ( (rc = tl_mono_to_color_destroy_mono_to_color_processor(tl->color_processor)) != 0) {
+			TL_CameraErrMsg(rc, "Failed to destory color processor for camera", rname);
+			rcode |= 0x08;
 		}
 		tl->color_processor = NULL;
 	}
 
 	/* Release allocated memory for the image */
-	if (tl->raw != NULL) {
+	if (tl->images != NULL) {
 		int i;
-		for (i=0; i<tl->nBuffers; i++) free(tl->raw[i]);
-		free(tl->raw); tl->raw = NULL;
+		for (i=0; i<tl->nBuffers; i++) free(tl->images[i].raw);
+		free(tl->images); tl->images = NULL;
 	}
-	if (tl->timestamp != NULL) { free(tl->timestamp); tl->timestamp = NULL; }
 	if (tl->red       != NULL) { free(tl->red);       tl->red       = NULL; }
 	if (tl->green     != NULL) { free(tl->green);     tl->green     = NULL; }
 	if (tl->blue      != NULL) { free(tl->blue);      tl->blue      = NULL; }
@@ -641,7 +655,7 @@ int TL_CloseCamera(TL_CAMERA *tl) {
 	/* Release semaphores */
 	CloseHandle(tl->image_mutex);
 
-	return rc;
+	return rcode;
 }
 
 
@@ -768,6 +782,51 @@ TL_CAMERA *TL_FindCameraByHandle(void *handle) {
 
 
 /* ===========================================================================
+-- Enumerate list of available cameras into an array structure for use with the
+-- combobox dialog controls and OpenCamera control
+--
+-- Usage: int TL_EnumCameraList(int *pcount, TL_CAMERA_INFO **pinfo) {
+--
+-- Inputs: pcount - pointer to a variable to receive # of available cameras
+--         pinfo  - pointer to array of structures with camera information
+--
+-- Output: *pcount - filled with number of cameras enumerate (some maybe in use)
+--         *pinfo  - pointer to an array of entries for each camera
+--                   if there are no cameras, *pinfo will be NULL
+--
+-- Return: # of cameras available if successful, or error code
+--           -1 => failed to query the number of cameras
+--           -2 => failed to enumerate the information on the cameras
+=========================================================================== */
+int TL_EnumCameraList(int *pcount, TL_CAMERA **pinfo[]) {
+	static char *rname = "TL_EnumCameraList";
+
+	int i, count;
+	TL_CAMERA **camera_list;
+
+	/* Initial return values */
+	if (pcount != NULL) *pcount = 0;
+	if (pinfo  != NULL) *pinfo = NULL;
+
+	/* Determine how many cameras are connected and build the combo box with the information */
+	if ( (count = TL_FindAllCameras(&camera_list)) < 0) {
+		fprintf(stderr, "TL_FindAllCameras() returned error (%d)\n", count);
+		fflush(stderr);
+		count = 0;
+	}
+	fprintf(stderr, "Number of TL cameras reported: %d\n", count); fflush(stderr);
+
+	/* Make a local copy that the calling routine will free */
+	if (count > 0 && pinfo != NULL) {
+		*pinfo = calloc(count, sizeof(**pinfo));
+		for (i=0; i<count; i++) (*pinfo)[i] = camera_list[i];
+	} 
+	if (pcount != NULL) *pcount = count;
+	return count;
+}
+
+
+/* ===========================================================================
 -- Test if a given camera pointer is active and live
 --
 -- Usage: BOOL TL_IsValidCamera(TL_CAMERA *tl);
@@ -882,37 +941,6 @@ static void camera_disconnect_callback(char *camera_ID, void* context) {
 }
 
 /* ===========================================================================
--- Routine to determine the buffer number within the ring corresponding to a 
--- requested frame relative to current.  0 => current, 1 => back one, ...
---
--- Usage: int ibuf_from_frame(TL_CAMERA *tl, int frame);
---
--- Inputs: camera - valid camera
---         frame  - requested frame number
---
--- Output: none
---
--- Return: best guess of index of this frame within the buffers
-=========================================================================== */
-static int ibuf_from_frame(TL_CAMERA *tl, int frame) {
-
-	int ibuf;
-
-	/* Hopefully don't get called when the camera is not initialized, but be safe */
-	if (tl->nBuffers < 1 || tl->nValid < 1) return 0;
-
-	/* Limit the frame to [0, nBuffers-1] */
-	frame = max(0, min(tl->nValid-1, frame));
-
-	/* Count backwards from the last used buffer (iLast) */
-	ibuf = tl->iLast - frame;
-	if (ibuf < 0) ibuf += tl->nBuffers;
-
-	return ibuf;
-}
-
-
-/* ===========================================================================
 -- Routine invoked when there is a new image to process from some camera.
 -- Determines the appropriate camera and processes the image before signalling 
 -- threads that are waiting for new images.
@@ -947,6 +975,10 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 	TL_CAMERA *tl;
 	int i;
 
+	/* As there may be other cameras, have global common image counter */
+	int imageID;									/* ID for this invokation */
+	static sig_atomic_t image_count = 0;	/* Every call increments */
+
 	/* Variables to process the metadata */
 	UINT32 dval;									/* 4-byte integer */
 	union {
@@ -957,6 +989,10 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 
 	static HIRES_TIMER *timer = NULL;
 
+/* Immediately increment to have this call's image ID */
+	imageID = image_count++;
+	
+/* Now start rest of the process */
 	if (timer == NULL) timer = HiResTimerCreate();
 
 	timestamp.value = 0;
@@ -987,26 +1023,30 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 	/* Take control of the memory buffers */
 	if (WAIT_OBJECT_0 == WaitForSingleObject(tl->image_mutex, TL_IMAGE_ACCESS_TIMEOUT)) {
 		int ibuf;							/* Which buffer gets the data */
-		unsigned short *raw;				/* Pointer to actual data */
 
 		/* Put into the next available position */
 		ibuf = (tl->nValid == 0) ? 0 : tl->iLast+1;
 		if (ibuf >= tl->nBuffers) ibuf = 0;
-		raw = tl->raw[ibuf];				/* Point to the requested buffer */
 
 		/* Save where we are and increment the number of valid (up to nBuffers) */
 		tl->iLast = ibuf;
 		if (tl->nValid < tl->nBuffers) tl->nValid++;
 
-		/* Copy raw data from sensor (<0.45 ms) */
-		memcpy(raw, image_buffer, tl->nbytes_raw);
+		/* Copy raw data from sensor (<0.45 ms) and generate metadata */
+		/* Image timestamp documentation (page 42) incorrect ... clock seems to be exactly 99 MHz, not reported value */
+		tl->images[ibuf].imageID = imageID;
+		GetLocalTime(&tl->images[ibuf].system_time);
+		tl->images[ibuf].timestamp = time(NULL);
+		tl->images[ibuf].camera_time = timestamp.value/99000000.0;
+		memcpy(tl->images[ibuf].raw, image_buffer, tl->nbytes_raw);
 
-		/* Save image timestamp .. documentation (page 42) incorrect ... clock seems to be exactly 99 MHz, not reported value */
-		tl->timestamp[ibuf] = timestamp.value/99000000.0;
+		/* Copy imaging conditions now */
+		tl->images[ibuf].dB_gain   = tl->dB_gain;
+		tl->images[ibuf].ms_expose = tl->ms_expose;
+		tl->images[ibuf].valid = TRUE;
 
 		/* Copy framecount and mark raw data valid, other datas "not done" */
 		tl->frame_count = frame_count;
-		tl->valid_raw = TRUE;
 
 		/* These are optional ... no reason to do unless they are used later */
 //		TL_ProcessRawSeparation(camera);
@@ -1033,7 +1073,7 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 -- Usage: int TL_ProcessRawSeparation(TL_CAMERA *tl, int frame);
 --
 -- Inputs: camera - pointer to valid TL_CAMERA
---         frame  - frame to process from buffers (0 = most recent)
+--         frame  - frame to process from buffers (-1 ==> for most recent)
 --
 -- Output: fills in the ->red, ->green, ->blue buffers in camera
 --
@@ -1048,29 +1088,29 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 int TL_ProcessRawSeparation(TL_CAMERA *tl, int frame) {
 	static char *rname = "TL_ProcessRawSeparation";
 
-	int rc, row,col,ibuf;
+	int rc, row,col;
 	unsigned short *red, *green, *blue, *raw;
 
 	/* Must be valid structure */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
 
-	/* Make sure we have valid data */
-	if (! tl->valid_raw) return 2;
+	/* If frame <0, implies want most recent image */
+	if (frame < 0) frame = tl->iLast;
 
-	/* What is the internal buffer that is being requested (0 = current) */
-	ibuf = ibuf_from_frame(tl, frame);
+	/* Make sure we have valid data */
+	if (! tl->images[frame].valid) return 2;
 
 	/* Once done for a raw image, don't ever need to repeat */
-	if (tl->separations_timestamp == tl->timestamp[ibuf]) return 0;		/* Already done */
+	if (tl->separations_imageID == tl->images[frame].imageID) return 0;		/* Already done */
 
 	/* And must have the structures defined */
-	if (tl->raw == NULL || tl->red == NULL || tl->green == NULL || tl->blue == NULL) return 3;
+	if (tl->images == NULL || tl->red == NULL || tl->green == NULL || tl->blue == NULL) return 3;
 
 	/* Get control of the memory buffers */
 	if (WAIT_OBJECT_0 == WaitForSingleObject(tl->image_mutex, TL_IMAGE_ACCESS_TIMEOUT)) {
 
 		/* Separate the raw signal into raw red/green/blue buffers */
-		raw = tl->raw[ibuf];			/* Point to the requested buffer */
+		raw = tl->images[frame].raw;			/* Point to the requested buffer */
 		red = tl->red; green = tl->green; blue = tl->blue;
 		for (row=0; row<tl->height; row++) {
 			for (col=0; col<tl->width; col+=2) {
@@ -1081,7 +1121,7 @@ int TL_ProcessRawSeparation(TL_CAMERA *tl, int frame) {
 				}
 			}
 		}
-		tl->separations_timestamp = tl->timestamp[ibuf];
+		tl->separations_imageID = tl->images[frame].imageID;
 		ReleaseMutex(tl->image_mutex);												/* Done with the mutex */
 		rc = 0;
 
@@ -1098,7 +1138,7 @@ int TL_ProcessRawSeparation(TL_CAMERA *tl, int frame) {
 -- Usage: int TL_ProcessRGB(TL_CAMERA *tl, int frame);
 --
 -- Inputs: camera - pointer to valid TL_CAMERA
---         frame  - frame to process from buffers (0 = most recent)
+--         frame  - frame to process from buffers (-1 ==> for most recent)
 --
 -- Output: fills in the ->rgb24 buffer in camera
 --
@@ -1114,32 +1154,33 @@ int TL_ProcessRawSeparation(TL_CAMERA *tl, int frame) {
 int TL_ProcessRGB(TL_CAMERA *tl, int frame) {
 	static char *rname = "TL_ProcessRGB";
 
-	int rc, ibuf;
+	int rc;
 	unsigned short *raw;
 	
 	/* Must be valid structure */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
 
 	/* Make sure we have valid data */
-	if (! tl->valid_raw) return 2;
+	if (tl->images == NULL) return 2;
 
-	/* What is the internal buffer that is being requested (0 = current) */
-	ibuf = ibuf_from_frame(tl, frame);
+	/* If frame <0, implies want most recent image */
+	if (frame < 0) frame = tl->iLast;
 
 	/* Once done for a raw image, don't ever need to repeat */
-	if (tl->rgb24_timestamp == tl->timestamp[ibuf]) return 0;
+	if (tl->rgb24_imageID == tl->images[frame].imageID) return 0;
 
 	/* And must have the structures defined */
 	if (tl->rgb24 == NULL) return 3;
 	if (tl->color_processor == NULL) return 4;
 
 	/* Get control of the memory buffers */
-	if (WAIT_OBJECT_0 == WaitForSingleObject(tl->image_mutex, TL_IMAGE_ACCESS_TIMEOUT)) {
-
+	if (WAIT_OBJECT_0 != WaitForSingleObject(tl->image_mutex, TL_IMAGE_ACCESS_TIMEOUT)) {
+		rc = 5;										/* Failed to get the semaphore error */
+	} else {
 		/* Convert to true RGB format */
-		raw = tl->raw[ibuf];			/* Point to the requested buffer */
-		if (tl_mono_to_color_transform_to_24(tl->color_processor, raw, tl->width, tl->height, tl->rgb24) != 0) {
-			fprintf(stderr, "Unable to transform to rgb24: %s\n", tl_mono_to_color_get_last_error()); fflush(stderr);
+		raw = tl->images[frame].raw;			/* Point to the requested buffer */
+		if ( (rc = tl_mono_to_color_transform_to_24(tl->color_processor, raw, tl->width, tl->height, tl->rgb24)) != 0) {
+			TL_CameraErrMsg(rc, "Unable to transform to rgb24", rname);
 		} else {
 			int i, itmp;
 			for (i=0; i<3*tl->width*tl->height; i+=3) {					/* Reverse order or rgb to bgr to match DCX pattern */
@@ -1147,19 +1188,15 @@ int TL_ProcessRGB(TL_CAMERA *tl, int frame) {
 				tl->rgb24[i+0] = tl->rgb24[i+2];
 				tl->rgb24[i+2] = itmp;
 			}
-			tl->rgb24_timestamp = tl->timestamp[ibuf];
+			tl->rgb24_imageID = tl->images[frame].imageID;
+			rc = 0;
 		}
 		ReleaseMutex(tl->image_mutex);												/* Done with the mutex */
-
-		rc = 0;
-
-	/* Unable to get the semaphore error */
-	} else {
-		rc = 5;
 	}
 
 	return rc;
 }
+
 
 /* ===========================================================================
 -- Convert from internal structure to device independent bitmap (DIB) for display
@@ -1167,7 +1204,7 @@ int TL_ProcessRGB(TL_CAMERA *tl, int frame) {
 -- Usage: BITMAPINFOHEADER *TL_GenerateDIB(TL_CAMERA *tl, int frame, int *rc);
 --
 -- Inputs: camera - an opened TL camera
---         frame  - frame to process from buffers (0 = most recent)
+--         frame  - frame to process from buffers (-1 ==> for most recent)
 --         rc     - optional pointer to variable to retrieve specific error codes
 --
 -- Output: if rc != NULL, *rc has error code (or 0 if successful)
@@ -1246,13 +1283,103 @@ BITMAPINFOHEADER *TL_CreateDIB(TL_CAMERA *tl, int frame, int *rc) {
 }
 
 /* ===========================================================================
+-- Determine formats that camera supports for writing
+--
+-- Usage: int TL_GetSaveFormatFlag(TL_CAMERA *tl);
+--
+-- Inputs: tl - an opened TL camera
+--
+-- Output: none
+--
+-- Return: Bit-wise flags giving camera capabilities
+--				 FL_BMP | FL_JPEG | FL_RAW | FL_BURST (unique)
+--         0 on errors (no capabilities)
+=========================================================================== */
+int TL_GetSaveFormatFlag(TL_CAMERA *tl) {
+	static char *rname = "TL_GetSaveFormatFlag";
+
+	return FL_BMP | FL_RAW | FL_BURST ;
+}
+
+
+/* ===========================================================================
+-- Get a reasoanble filename for save if one isn't passed in the call (NULL)
+--
+-- Usage: int TL_GetSaveName(char *path, size_t length, int *format);
+--
+-- Inputs: path    - pointer to character string buffer for returned filename
+--         length  - length of the path buffer
+--         format  - pointer to get "format" implied by file extension
+--
+-- Output: *path   - filled with selected filename
+--         *format - one of the flags FL_BMP, FL_RAW, ... from file extension
+--
+-- Return: 0 if successful, !0 on cancel of the file open dialog
+=========================================================================== */
+int TL_GetSaveName(char *path, size_t length, int *format) {
+	static char *rname = "TL_GetSaveName";
+
+	int i;
+	char *aptr;
+	static struct {
+		char *ext;
+		int flag;
+	} exts[] = { {".bmp", FL_BMP}, {".raw", FL_RAW}, {".png", FL_PNG}, {".jpg", FL_JPG}, {".jpeg", FL_JPG} };
+
+	/* parameters for querying a pathname */
+	static char local_dir[PATH_MAX]="";		/* Directory -- keep for multiple calls */
+	OPENFILENAME ofn;
+
+	/* Get a save-as filename */
+	strcpy_s(path, length, "image");					/* Pathname must be initialized with a value (even if just '\0) */
+	ofn.lStructSize       = sizeof(OPENFILENAME);
+	ofn.hwndOwner         = HWND_DESKTOP;
+	ofn.lpstrTitle        = "Save image";
+	ofn.lpstrFilter       = "Bitmap format (*.bmp)\0*.bmp\0Raw camera format (*.raw)\0*.raw\0All files (*.*)\0*.*\0\0";
+	ofn.lpstrCustomFilter = NULL;
+	ofn.nMaxCustFilter    = 0;
+	ofn.nFilterIndex      = 1;
+	ofn.lpstrFile         = path;						/* Full path */
+	ofn.nMaxFile          = (DWORD) length;
+	ofn.lpstrFileTitle    = NULL;						/* Partial path */
+	ofn.nMaxFileTitle     = 0;
+	ofn.lpstrDefExt       = "bmp";
+	ofn.lpstrInitialDir   = (*local_dir=='\0' ? "." : local_dir);
+	ofn.Flags = OFN_LONGNAMES | OFN_NOCHANGEDIR | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
+
+	/* Query a filename ... if abandoned, just return now with no complaints */
+	if (! GetSaveFileName(&ofn)) return 1;
+
+	/* Save directory for subsequent calls */
+	strcpy_s(local_dir, sizeof(local_dir), path);
+	local_dir[ofn.nFileOffset-1] = '\0';
+
+	/* Determine the file format from extension */
+	if (format != NULL) {
+		*format = FL_BMP;												/* Default format is bitmap */
+		aptr = path+strlen(path)-1;
+		while (*aptr != '.' && aptr != path) aptr--;
+		if (*aptr == '.') {											/* Modify to actual file type */
+			for (i=0; i<sizeof(exts)/sizeof(exts[0]); i++) {
+				if (_stricmp(aptr, exts[i].ext) == 0) *format = exts[i].flag;
+			}
+		}
+	}
+
+	return 0;
+}
+
+
+/* ===========================================================================
 -- Save data from TL camera as a bitmap (.bmp) file
 -- 
--- Usage: int TL_SaveBMPFile(TL_CAMERA *tl, char *path, int frame);
+-- Usage: int TL_SaveImage(TL_CAMERA *tl, char *path, int frame);
 --
--- Inputs: camera - an opened TL camera
---         path   - pointer to name of a file to save data (or NULL for query)
---         frame  - which frame to output (0 => most recent)
+-- Inputs: tl    - an opened TL camera
+--         path  - pointer to name of a file to save data (or NULL for query)
+--         frame - frame to process from buffers (-1 ==> for most recent)
+--         format - One of the FL_XXX file formats (from camera.h)
+--                  defaults to FL_BMP if invalid format
 --
 -- Output: saves the data as an RGB uncompressed bitmap
 --
@@ -1264,13 +1391,42 @@ BITMAPINFOHEADER *TL_CreateDIB(TL_CAMERA *tl, int frame, int *rc) {
 --           5 ==> unable to get the mutex semaphore
 --           6 ==> file failed to open
 =========================================================================== */
-int TL_SaveBMPFile(TL_CAMERA *tl, char *path, int frame) {
-	static char *rname = "TL_SaveBMPFile";
+int TL_SaveImage(TL_CAMERA *tl, char *path, int frame, int format) {
+	static char *rname = "TL_SaveImage";
+
+	int rc;
+	char pathname[MAX_PATH];
+	
+	/* If no name is given, then get one ourselves */
+	if (path == NULL) {
+		if ( (rc = TL_GetSaveName(pathname, sizeof(pathname), &format)) != 0) return rc;
+		path = pathname;
+	}
+	
+	/* Have a filename, now just save the data */
+	switch (format) {
+		case FL_RAW:
+			rc = TL_SaveRawImage(tl, path, frame);
+			break;
+		case FL_BMP:
+		default:
+			rc = TL_SaveBMPImage(tl, path, frame);
+			break;
+	}
+	return rc;
+}
+		
+
+int TL_SaveBMPImage(TL_CAMERA *tl, char *path, int frame) {
+	static char *rname = "TL_SaveBMPImage";
 
 	BITMAPINFOHEADER *bmih=NULL;
 	BITMAPFILEHEADER  bmfh;
 	int rc, isize;
 	FILE *funit;
+
+	/* If frame <0, implies want most recent image */
+	if (frame < 0) frame = tl->iLast;
 
 	/* Verify all is okay and get a bitmap corresponding to current image */
 	/* CreateDIB locks the semaphore while creating the DIB, but once
@@ -1285,7 +1441,7 @@ int TL_SaveBMPFile(TL_CAMERA *tl, char *path, int frame) {
 	bmfh.bfOffBits = sizeof(bmfh)+sizeof(*bmih);
 
 	if ( (fopen_s(&funit, path, "wb")) != 0) {
-		fprintf(stderr, "TL_SaveBMPFile: Failed to open \"%s\"\n", path); fflush(stderr);
+		fprintf(stderr, "[%s] Failed to open \"%s\"\n", rname, path); fflush(stderr);
 		rc = 5;
 	} else {
 		fwrite(&bmfh, 1, sizeof(bmfh), funit);
@@ -1299,14 +1455,167 @@ int TL_SaveBMPFile(TL_CAMERA *tl, char *path, int frame) {
 	return rc;
 }
 
+/* ===========================================================================
+-- Save data from TL camera as a raw (.raw) file
+-- 
+-- Usage: int TL_SaveRawImage(TL_CAMERA *tl, char *path, int frame);
+--
+-- Inputs: camera - an opened TL camera
+--         path   - pointer to name of a file to save data (or NULL for query)
+--         frame  - frame to process from buffers (-1 ==> for most recent)
+--
+-- Output: saves the data in binary raw data format
+--
+-- Return: 0 if successful, otherwise an error code
+--           1 ==> camera pointer not valid
+--           2 ==> path invalid
+--           3 ==> no RGB24 image data in camera structure
+--           4 ==> unable to allocate memory for new RGB data
+--           5 ==> unable to get the mutex semaphore
+--           6 ==> file failed to open
+=========================================================================== */
+int TL_SaveRawImage(TL_CAMERA *tl, char *path, int frame) {
+	static char *rname = "TL_SaveRawImage";
+
+	FILE *funit;
+	TL_RAW_FILE_HEADER header;
+	TL_IMAGE *image;
+	int dummy_zeros = 0;
+
+	/* If frame <0, implies want most recent image */
+	if (frame < 0) frame = tl->iLast;
+	image = tl->images+frame;
+
+	/* Create the file header */
+	memset(&header, 0, sizeof(header));
+	header.magic  = TL_RAW_FILE_MAGIC;
+	header.header_size = sizeof(TL_RAW_FILE_HEADER);
+	header.major_version = 1;		header.minor_version = 0;
+
+	header.ms_expose = image->ms_expose;
+	header.dB_gain   = image->dB_gain;			
+
+	header.timestamp = image->timestamp;
+	header.camera_time = image->camera_time;
+	header.year = image->system_time.wYear; header.month = image->system_time.wMonth;	header.day = image->system_time.wDay;
+	header.hour = image->system_time.wHour; header.min   = image->system_time.wMinute;	header.sec = image->system_time.wSecond;
+	header.ms   = image->system_time.wMilliseconds;
+
+	strcpy_s(header.camera_model,  sizeof(header.camera_model),  tl->model);
+	strcpy_s(header.camera_serial, sizeof(header.camera_serial), tl->serial);
+	header.sensor_type  = tl->sensor_type;		header.color_filter = tl->color_filter;
+
+	header.width		  = tl->width;				header.height		  = tl->height;
+	header.bit_depth    = tl->bit_depth;
+	header.pixel_bytes  = tl->pixel_bytes;		header.image_bytes  = tl->image_bytes;
+	header.pixel_width  = tl->pixel_width_um;	header.pixel_height = tl->pixel_height_um;
+
+	if ( (fopen_s(&funit, path, "wb")) != 0) {
+		fprintf(stderr, "[%s] Failed to open \"%s\"\n", rname, path); fflush(stderr);
+		return 1;
+	}
+
+	/* Write out the header, followed immediately by the data */
+	fwrite(&header, 1, sizeof(header), funit);
+	fwrite(image->raw, 1, tl->nbytes_raw, funit);
+	if (tl->nbytes_raw%4 != 0) fwrite(&dummy_zeros, 1, 4-tl->nbytes_raw%4, funit);
+	fclose(funit);
+
+	return 0;
+}
+
+/* ===========================================================================
+-- Save all valid images that would have been collected in burst run
+--
+-- Usage: TL_SaveBurstImages(TL_CAMERA *tl, char *pattern, int format);
+--
+-- Inputs: tl      - pointer to active camera
+--         pattern - root of name for files
+--							  <pattern>.csv - logfile 
+--                     <pattern>_ddd.bmp - individual images
+--         format  - format to save images (FL_BMP or FL_RAW - default FL_BMP)
+--
+-- Output: Saves stored images as a series of bitmaps
+--
+-- Return: 0 ==> successful
+--         1 ==> rings are not enabled in the code
+--         2 ==> buffers not yet allocated or no data
+--         3 ==> save abandoned by choice in FileOpen dialog
+=========================================================================== */
+int TL_SaveBurstImages(TL_CAMERA *tl, char *pattern, int format) {
+	static char *rname = "TL_SaveBurstImages";
+
+	char pathname[PATH_MAX], *extension;
+	int i, istart, icount, inow;
+	double tstart;
+	FILE *funit;
+
+	/* Have we cycled through the rings, or still on first cycle? */
+	if (tl->nValid < tl->nBuffers) {
+		istart = 0;											/* Haven't wrapped yet, so first image in slot 0 */
+		icount = tl->nValid;
+	} else {
+		istart = (tl->iLast+1) % tl->nBuffers;		/* Points now to first one saved (next to be overwritten) */
+		icount = tl->nBuffers;
+	}
+
+	/* Open a .csv log file with information on each image */
+	sprintf_s(pathname, sizeof(pathname), "%s.csv", pattern);
+RetryFileOpen:
+	fopen_s(&funit, pathname, "w");
+	if (funit == NULL) {
+		char szTmp[1024];
+		int rc;
+		sprintf_s(szTmp, sizeof(szTmp),
+					 "Failed to open the logfile for information about the burst bitmaps.\n"
+					 "   %s\n"
+					 "Check that the file is not currently open and try again.\n", pathname);
+		rc = MessageBox(NULL, szTmp, "File open failed", MB_ICONERROR | MB_RETRYCANCEL | MB_DEFBUTTON2);
+		if (rc == IDRETRY) goto RetryFileOpen;
+		return 3;
+	}
+
+	/* Generate the appropriate extension for the files - default is bmp */
+	extension = (format == FL_RAW) ? "raw" : "bmp";
+
+	/* Header line for the csv file */
+	fprintf(funit, "/* Index,filename,t_relative,t_time,t_clock\n");
+
+	inow = istart;								/* Frame to start with */
+	tstart = -999;								/* Flag to copy first available value */
+	for (i=0; i<icount; i++) {
+		if (! tl->images[inow].valid) continue;
+		if (tstart == -999) tstart = tl->images[inow].camera_time;
+
+		/* Create the image pathname */
+		sprintf_s(pathname, sizeof(pathname), "%s_%3.3d.%s", pattern, i, extension);
+
+		/* Put an entry in the logfile */
+		fprintf(funit, "%d,%s,%.4f,%lld,%4.4d.%2.2d.%2.2d %2.2d:%2.2d:%2.2d.%3.3d\n", 
+				  i, pathname, tl->images[inow].camera_time-tstart, tl->images[inow].timestamp,
+				  tl->images[inow].system_time.wYear, tl->images[inow].system_time.wMonth, tl->images[inow].system_time.wDay, 
+				  tl->images[inow].system_time.wHour, tl->images[inow].system_time.wMinute, tl->images[inow].system_time.wSecond, 
+				  tl->images[inow].system_time.wMilliseconds);
+		
+		/* Generate the bitmap file */
+		TL_SaveImage(tl, pathname, inow, format);
+		inow = (inow+1) % tl->nBuffers;
+	}
+
+	/* Close the logfile now */
+	if (funit != NULL) fclose(funit);
+
+	return 0;
+}
+
 
 /* ===========================================================================
 -- Render an image in a specified window
 -- 
--- Usage: int TL_RenderImage(TL_CAMERA *tl, int frame, HWND hwnd);
+-- Usage: int TL_RenderFrame(TL_CAMERA *tl, int frame, HWND hwnd);
 --
 -- Inputs: camera - an opened TL camera
---         frame  - frame to process from buffers (0 = most recent)
+--         frame  - frame to process from buffers (-1 ==> for most recent)
 --         hwnd   - window to render the bitmap to
 --
 -- Output: converts image to RGB, generates bitmap, and displays in window
@@ -1318,8 +1627,8 @@ int TL_SaveBMPFile(TL_CAMERA *tl, char *path, int frame) {
 --           4 ==> unable to allocate memory for new RGB data
 --           5 ==> unable to get the mutex semaphore
 =========================================================================== */
-int TL_RenderImage(TL_CAMERA *tl, int frame, HWND hwnd) {
-	static char *rname = "TL_RenderImage";
+int TL_RenderFrame(TL_CAMERA *tl, int frame, HWND hwnd) {
+	static char *rname = "TL_RenderFrame";
 
 	HDC hdc;
 	BITMAPINFOHEADER *bmih;
@@ -1332,6 +1641,9 @@ int TL_RenderImage(TL_CAMERA *tl, int frame, HWND hwnd) {
 
 	if (active != 0 || tl == NULL || ! IsWindow(hwnd)) return 1;							/* Don't even bother trying */
 	active++;
+
+	/* If frame <0, implies want most recent image */
+	if (frame < 0) frame = tl->iLast;
 
 	/* Get the bitmap to render (will deal with processing to RGB and all semaphores) */
 	if ( NULL == (bmih = TL_CreateDIB(tl, frame, NULL))) { active--; return 2; }		/* Unable to create the bitmap */
@@ -1376,6 +1688,7 @@ int TL_RenderImage(TL_CAMERA *tl, int frame, HWND hwnd) {
 double TL_GetExposure(TL_CAMERA *tl, BOOL bForceQuery) {
 	static char *rname = "TL_GetExposure";
 
+	int rc;
 	long long us_expose;
 
 	/* Must be valid structure */
@@ -1383,15 +1696,15 @@ double TL_GetExposure(TL_CAMERA *tl, BOOL bForceQuery) {
 
 	/* If bForceQuery, update directly from camera */
 	if (bForceQuery) {
-		if (tl_camera_get_exposure_time(tl->handle, &us_expose) != 0) {
-			fprintf(stderr, "[%s:] Failed to get exposure time: %s)\n", rname, tl_camera_get_last_error());
-			fflush(stderr);
+		if ( (rc = tl_camera_get_exposure_time(tl->handle, &us_expose)) != 0) {
+			TL_CameraErrMsg(rc, "Failed to get exposure time", rname);
 		} else {
 			tl->us_expose = us_expose;
+			tl->ms_expose = 0.001*us_expose;
 		}
 	}
 
-	return 0.001*tl->us_expose;
+	return tl->ms_expose;
 }
 
 /* ===========================================================================
@@ -1439,6 +1752,7 @@ int TL_GetExposureParms(TL_CAMERA *tl, double *ms_min, double *ms_max) {
 double TL_SetExposure(TL_CAMERA *tl, double ms_expose) {
 	static char *rname = "TL_SetExposure";
 
+	int rc;
 	long long us_expose;
 
 	/* Make sure we are alive and the camera is connected (open) */
@@ -1446,23 +1760,23 @@ double TL_SetExposure(TL_CAMERA *tl, double ms_expose) {
 
 	if (ms_expose > 0.0) {
 		us_expose = (int) (1000*ms_expose + 0.5);
-		if (tl_camera_set_exposure_time(tl->handle, us_expose) != 0) { 
-			fprintf(stderr, "[%s:] Unable to set exposure time: %s\n", rname, tl_camera_get_last_error()); 
-			fflush(stderr);
+		if ( (rc = tl_camera_set_exposure_time(tl->handle, us_expose)) != 0) { 
+			TL_CameraErrMsg(rc, "Unable to set exposure time", rname);
 		} else {
 			tl->us_expose = us_expose;
+			tl->ms_expose = 0.001 * us_expose;
 		}
 	}
 
 	/* Try to verify the value */
-	if (tl_camera_get_exposure_time(tl->handle, &us_expose) != 0) {
-		fprintf(stderr, "[%s:] Failed to get exposure time: %s)\n", rname, tl_camera_get_last_error());
-		fflush(stderr);
+	if ( (rc = tl_camera_get_exposure_time(tl->handle, &us_expose)) != 0) {
+		TL_CameraErrMsg(rc, "Failed to get exposure time", rname);
 	} else {
 		tl->us_expose = us_expose;
+		tl->ms_expose = 0.001 * us_expose;
 	}
 
-	return 0.001*tl->us_expose;
+	return tl->ms_expose;
 }
 
 /* ===========================================================================
@@ -1479,7 +1793,8 @@ double TL_SetExposure(TL_CAMERA *tl, double ms_expose) {
 =========================================================================== */
 double TL_SetFPSControl(TL_CAMERA *tl, double fps) {
 	static char *rname = "TL_SetFPSControl";
-
+	int rc;
+	
 	/* Make sure we are alive and the camera is connected (open) */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 0.0;
 
@@ -1487,15 +1802,13 @@ double TL_SetFPSControl(TL_CAMERA *tl, double fps) {
 	if (! tl->bFrameRateControl) return 0.0;
 
 	/* Try to set */
-	if (tl_camera_set_frame_rate_control_value(tl->handle, fps) != 0) {
-		fprintf(stderr, "[%s:] Failed to get frame rate control: %s)\n", rname, tl_camera_get_last_error());
-		fflush(stderr);
+	if ( (rc = tl_camera_set_frame_rate_control_value(tl->handle, fps)) != 0) {
+		TL_CameraErrMsg(rc, "Failed to get frame rate control", rname);
 	} 
 
 	/* And try to read back value for return, even if unsuccessful */
-	if (tl_camera_get_frame_rate_control_value(tl->handle, &fps) != 0) {
-		fprintf(stderr, "[%s:] Failed to get frame rate control: %s)\n", rname, tl_camera_get_last_error());
-		fflush(stderr);
+	if ( (rc = tl_camera_get_frame_rate_control_value(tl->handle, &fps)) != 0) {
+		TL_CameraErrMsg(rc, "Failed to get frame rate control", rname);
 		fps = 0.0;
 	}
 
@@ -1518,6 +1831,7 @@ double TL_SetFPSControl(TL_CAMERA *tl, double fps) {
 double TL_GetFPSControl(TL_CAMERA *tl) {
 	static char *rname = "TL_GetFPSControl";
 
+	int rc;
 	double rval;
 
 	/* Make sure we are alive and the camera is connected (open) */
@@ -1526,9 +1840,8 @@ double TL_GetFPSControl(TL_CAMERA *tl) {
 	/* Query will fail if camera does not support frame rate control */
 	if (! tl->bFrameRateControl) {
 		rval = -1.0;
-	} else if (tl_camera_get_frame_rate_control_value(tl->handle, &rval) != 0) {
-		fprintf(stderr, "[%s:] Failed to get frame rate control: %s)\n", rname, tl_camera_get_last_error());
-		fflush(stderr);
+	} else if ( (rc = tl_camera_get_frame_rate_control_value(tl->handle, &rval)) != 0) {
+		TL_CameraErrMsg(rc, "Failed to get frame rate control", rname);
 		rval = -1.0;
 	}
 	return rval;
@@ -1548,14 +1861,14 @@ double TL_GetFPSControl(TL_CAMERA *tl) {
 double TL_GetFPSActual(TL_CAMERA *tl) {
 	static char *rname = "TL_GetFPSActual";
 
+	int rc;
 	double rval;
 
 	/* Make sure we are alive and the camera is connected (open) */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 0.0;
 
-	if (tl_camera_get_measured_frame_rate(tl->handle, &rval) != 0) {
-		fprintf(stderr, "[%s:] Failed to get frame rate: %s)\n", rname, tl_camera_get_last_error());
-		fflush(stderr);
+	if ( (rc = tl_camera_get_measured_frame_rate(tl->handle, &rval)) != 0) {
+		TL_CameraErrMsg(rc, "Failed to get frame rate", rname);
 		rval = -1.0;
 	}
 
@@ -1580,7 +1893,7 @@ double TL_GetFPSActual(TL_CAMERA *tl) {
 int TL_SetMasterGain(TL_CAMERA *tl, double dB_gain) {
 	static char *rname = "TL_SetMasterGain";
 
-	int gain_index;
+	int rc, gain_index;
 	
 	/* Must be valid structure */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
@@ -1591,14 +1904,21 @@ int TL_SetMasterGain(TL_CAMERA *tl, double dB_gain) {
 	if (dB_gain < tl->db_min) dB_gain = tl->db_min;
 	if (dB_gain > tl->db_max) dB_gain = tl->db_max;
 
-	if (tl_camera_convert_decibels_to_gain(tl->handle, dB_gain, &gain_index) != 0) { 
-		fprintf(stderr, "[%s:] Unable to convert gain dB: %s\n", rname, tl_camera_get_last_error());
-		fflush(stderr);
+	if ( (rc = tl_camera_convert_decibels_to_gain(tl->handle, dB_gain, &gain_index)) != 0) { 
+		TL_CameraErrMsg(rc, "Unable to convert gain dB", rname);
 		return 3;
-	} else if (tl_camera_set_gain(tl->handle, gain_index) != 0) {
-		fprintf(stderr, "[%s:] Unable to set gain to index determined: %s\n", rname, tl_camera_get_last_error());
-		fflush(stderr);
+	} else if ( (rc = tl_camera_set_gain(tl->handle, gain_index)) != 0) {
+		TL_CameraErrMsg(rc, "Unable to set gain to index determined", rname);
 		return 3;
+	}
+
+	/* Try to verify that we were successful */
+	if ( (rc = tl_camera_get_gain(tl->handle, &gain_index)) != 0) {
+		TL_CameraErrMsg(rc, "Unable to read gain", rname);
+	} else if ( (rc = tl_camera_convert_gain_to_decibels(tl->handle, gain_index, &dB_gain)) != 0) {
+		TL_CameraErrMsg(rc, "Unable to convert gain index to dB", rname);
+	} else {
+		tl->dB_gain = dB_gain;									/* Only when fully successful */
 	}
 
 	return 0;
@@ -1620,7 +1940,7 @@ int TL_SetMasterGain(TL_CAMERA *tl, double dB_gain) {
 int TL_GetMasterGain(TL_CAMERA *tl, double *db) {
 	static char *rname = "TL_GetMasterGain";
 
-	int gain_index;
+	int rc, gain_index;
 	double dB_gain;
 
 	/* Default return values */
@@ -1630,15 +1950,17 @@ int TL_GetMasterGain(TL_CAMERA *tl, double *db) {
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
 	if (! tl->bGainControl) return 2;
 
-	if (tl_camera_get_gain(tl->handle, &gain_index) != 0) {
-		fprintf(stderr, "[%s:] Unable to read gain: %s\n", rname, tl_camera_get_last_error());
+	if ( (rc = tl_camera_get_gain(tl->handle, &gain_index)) != 0) {
+		TL_CameraErrMsg(rc, "Unable to read gain", rname);
 		return 3;
-	} else if (tl_camera_convert_gain_to_decibels(tl->handle, gain_index, &dB_gain) != 0) {
-		fprintf(stderr, "[%s:] Unable to convert gain index to dB: %s\n", rname, tl_camera_get_last_error());
+	} else if ( (rc = tl_camera_convert_gain_to_decibels(tl->handle, gain_index, &dB_gain)) != 0) {
+		TL_CameraErrMsg(rc, "Unable to convert gain index to dB", rname);
 		return 3;
+	} else {
+		tl->dB_gain = dB_gain;											/* Only when fully successful */
 	}
 
-	if (db != NULL) *db = dB_gain;
+	if (db != NULL) *db = dB_gain;									/* Return value */
 	return 0;
 }
 
@@ -1702,7 +2024,7 @@ int TL_GetMasterGainInfo(TL_CAMERA *tl, BOOL *bGain, double *db_dflt, double *db
 int TL_GetRGBGains(TL_CAMERA *tl, double *red, double *green, double *blue) {
 	static char *rname = "TL_GetRGBGains";
 
-	int rc;
+	int rc, rcode;
 	float R, G, B;
 
 	/* Default return values */
@@ -1713,26 +2035,27 @@ int TL_GetRGBGains(TL_CAMERA *tl, double *red, double *green, double *blue) {
 	/* Must be valid structure */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
 
-	rc = 0;
-	if (tl_mono_to_color_get_red_gain(tl->color_processor, &R) != 0) {
-		fprintf(stderr, "[%s:] Unable to query red gain: %s\n", rname, tl_mono_to_color_get_last_error()); 
-		rc |= 0x02;
+	rcode = 0;
+	if ( (rc = tl_mono_to_color_get_red_gain(tl->color_processor, &R)) != 0) {
+		TL_CameraErrMsg(rc, "Unable to query red gain", rname);
+		rcode |= 0x02;
 	}
-	if (tl_mono_to_color_get_green_gain(tl->color_processor, &G) != 0) {
-		fprintf(stderr, "[%s:] Unable to query green gain: %s\n", rname, tl_mono_to_color_get_last_error()); 
-		rc |= 0x04;
+
+	if ( (rc = tl_mono_to_color_get_green_gain(tl->color_processor, &G)) != 0) {
+		TL_CameraErrMsg(rc, "Unable to query green gain", rname);
+		rcode |= 0x04;
 	}
-	if (tl_mono_to_color_get_blue_gain(tl->color_processor, &B) != 0) {
-		fprintf(stderr, "[%s:] Unable to query blue gain: %s\n", rname, tl_mono_to_color_get_last_error()); 
-		rc |= 0x08;
+
+	if ( (rc = tl_mono_to_color_get_blue_gain(tl->color_processor, &B)) != 0) {
+		TL_CameraErrMsg(rc, "Unable to query blue gain", rname);
+		rcode |= 0x08;
 	}
-	if (rc != 0) fflush(stderr);
 
 	if (red   != NULL) *red   = R;
 	if (green != NULL) *green = G;
 	if (blue  != NULL) *blue  = B;
 
-	return rc;
+	return rcode;
 }
 
 /* ===========================================================================
@@ -1781,186 +2104,316 @@ int TL_GetDfltRGBGains(TL_CAMERA *tl, double *red, double *green, double *blue) 
 -- Output: sets gains within the mono_to_color_processor
 --
 -- Return: 0 if successful, otherwise
---           1 ==> bad camera structure
+--           -1 ==> bad camera structure
+--           !0 ==> bitwise collection of which sets failed
 =========================================================================== */
 int TL_SetRGBGains(TL_CAMERA *tl, double red, double green, double blue) {
 	static char *rname = "TL_SetRGBGains";
 
-	int rc;
+	int rc, rcode;
 	
 	/* Must be valid structure */
-	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return -1;
 
-	rc = 0;
+	rcode = 0;
 	if (red != TL_IGNORE_GAIN) {
-		if (tl_mono_to_color_set_red_gain(tl->color_processor, (float) red) != 0) {
-			fprintf(stderr, "[%s:] Unable to set red gain: %s\n", rname, tl_mono_to_color_get_last_error());
-			fflush(stderr);
-			rc |= 0x02;
+		if ( (rc = tl_mono_to_color_set_red_gain(tl->color_processor, (float) red)) != 0) {
+			TL_CameraErrMsg(rc, "Unable to set red gain", rname);
+			rcode |= 0x02;
 		}
 	}
 
 	if (green != TL_IGNORE_GAIN) {
-		if (tl_mono_to_color_set_green_gain(tl->color_processor, (float) green) != 0) {
-			fprintf(stderr, "[%s:] Unable to set green gain: %s\n", rname, tl_mono_to_color_get_last_error()); 
-			fflush(stderr);
-			rc |= 0x04;
+		if ( (rc = tl_mono_to_color_set_green_gain(tl->color_processor, (float) green)) != 0) {
+			TL_CameraErrMsg(rc, "Unable to set green gain", rname);
+			rcode |= 0x04;
 		}
 	}
 
 	if (blue != TL_IGNORE_GAIN) {
-		if (tl_mono_to_color_set_blue_gain(tl->color_processor, (float) blue) != 0) {
-			fprintf(stderr, "[%s:] Unable to set blue gain: %s\n", rname, tl_mono_to_color_get_last_error()); 
-			fflush(stderr);
-			rc |= 0x02;
+		if ( (rc = tl_mono_to_color_set_blue_gain(tl->color_processor, (float) blue)) != 0) {
+			TL_CameraErrMsg(rc, "Unable to set blue gain", rname);
+			rcode |= 0x02;
 		}
 	}
 
-	return 0;
+	return rcode;
 }
 
 /* ===========================================================================
--- Software trigger of camera (single frame)
+-- Software arm/disarm camera (pending triggers)
 --
--- Usage: int TL_Trigger(TL_CAMERA *tl, int msWait);
+-- Usage: int TL_Arm(TL_CAMERA *tl);
+--        int TL_Disarm(TL_CAMERA *tl);
+--
+-- Inputs: tl - structure associated with a camera
+--
+-- Output: Arms or disarms camera (with expectation of pending trigger)
+--
+-- Return: 0 if successful
+--           1 ==> tl invalid or closed
+--           other ==> return from camera call that failed
+--
+-- Notes: While valid for all triggers, intended primarily for TRIG_BURST
+--        In TRIG_FREERUN, after disarm, must arm AND trigger to restart
+=========================================================================== */
+int TL_Arm(TL_CAMERA *tl) {
+	static char *rname = "TL_Arm";
+	int rc;
+
+	/* Verify structure and arm */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) {
+		rc = 1;
+	} else if ( (rc = tl_camera_arm(tl->handle, 2)) == 0) {
+		tl->trigger.bArmed = TRUE;
+	} else {
+		TL_CameraErrMsg(rc, "Arm failed", rname);
+	}
+
+	return rc;
+}
+
+int TL_Disarm(TL_CAMERA *tl) {
+	static char *rname = "TL_Disarm";
+	int rc;
+
+	/* Verify structure and disarm */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) {
+		rc = 1;
+	} else if ( (rc = tl_camera_disarm(tl->handle)) == 0) {
+		tl->trigger.bArmed = FALSE;
+	} else {
+		TL_CameraErrMsg(rc, "Disarm failed", rname);
+	}
+
+	return rc;
+}
+
+/* ===========================================================================
+-- Software trigger of camera
+--
+-- Usage: int TL_Trigger(TL_CAMERA *tl);
 --
 -- Inputs: camera - structure associated with a camera
---         msWait - time to wait before forcing change
---                  <0 ==> wait indefinitely (IS_WAIT)
---                   0 ==> stop immediately (IS_DONT_WAIT)
---                  >0 ==> timeout; 10 ms resolution from 40 ms to 1193 hrs
 --
--- Output: Triggers camera immediately (last time if FREERUN)
+-- Output: Triggers camera immediately if in an armed state
 --
 -- Return: 0 if successful
 --           1 ==> dcx or dcx->hCam invalid
---           2 ==> not in SOFTWARE or EXTERNAL triggering modes
+--           other ==> return from tl_camera_issue_software_trigger() command
 --
--- Notes: msWait < 0 will wait until there is an image captured
---               = 0 returns immediately but still triggers the capture
---        If trigger mode was FREERUN, will be set to SOFTWARE after call
+-- Notes: While valid for all trigger modes, primarily intended for TRIG_BURST 
+--        and TRIG_SOFTWARE.  In TRIG_FREERUN, applies if images were
+--        halted via Trigger_Disarm(), and then rearmed via Trigger_Arm().
 =========================================================================== */
-int TL_Trigger(TL_CAMERA *tl, int msWait) {
+int TL_Trigger(TL_CAMERA *tl) {
 	static char *rname = "TL_Trigger";
+	int rc;
 
-	/* Must be valid structure */
-	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
+	/* Verify structure and disarm */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) {
+		rc = 1;
+	} else if ( (rc = tl_camera_issue_software_trigger(tl->handle)) != 0) {
+		TL_CameraErrMsg(rc, "Software trigger failed", rname);
+	}
 
-	if (tl_camera_issue_software_trigger(tl->handle) != 0)
-		fprintf(stderr, "[%s] Software trigger failed (%s)\n", rname, tl_camera_get_last_error());
-
-	return 0;
+	return rc;
 }
+
 
 /* ===========================================================================
 -- Set/Query the triggering mode for the camera
 --
--- Usage: TRIG_MODE TL_SetTrigMode(TL_CAMERA *tl, TRIG_MODE mode, int msWait);
---        TRIG_MODE TL_GetTrigMode(TL_CAMERA *tl);
+-- Usage: TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *info);
+--        TRIGGER_MODE TL_GetTriggerMode(TL_CAMERA *tl, TRIGGER_INFO *info);
 --
 -- Inputs: tl     - structure associated with a camera
 --         mode   - one of the allowed triggering modes
 --                  TRIG_SOFTWARE, TRIG_FREERUN, TRIG_EXTERNAL
---         msWait - time to wait before forcing change
---                  <0 ==> wait indefinitely (IS_WAIT)
---                   0 ==> stop immediately (IS_DONT_WAIT)
---                  >0 ==> timeout; 10 ms resolution from 40 ms to 1193 hrs
+--         info   - if !NULL, details on triggering; if NULL, will use defaults 
+--                  what is used and valid depends on the mode ... look at code 
 --
 -- Output: Sets camera triggering mode
 --
 -- Return: Mode in camera or -1 on error
 =========================================================================== */
-TRIG_MODE TL_GetTrigMode(TL_CAMERA *tl) {
-	static char *rname = "TL_GetTrigMode";
+TRIGGER_MODE TL_GetTriggerMode(TL_CAMERA *tl, TRIGGER_INFO *info) {
+	static char *rname = "TL_GetTriggerMode";
 
-	return tl->TrigMode;
+	if (info != NULL) *info = tl->trigger;
+
+	return tl->trigger.mode;
 }
 
-TRIG_MODE TL_SetTrigMode(TL_CAMERA *tl, TRIG_MODE mode, int msWait) {
-	static char *rname = "TL_SetTrigMode";
+TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *info) {
+	static char *rname = "TL_SetTriggerMode";
+
+	int rc;
 
 	/* Must be valid structure */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
-	if (mode != TRIG_SOFTWARE && mode != TRIG_FREERUN && mode != TRIG_EXTERNAL) mode = TRIG_SOFTWARE;
 
-	if (tl->TrigMode != mode) {						/* Do we need to change? */
+	/* Handle potential changes to parameters in the new info first */
+	if (info != NULL) {
 
-		/* Disarm so can change modes */
-		if (tl_camera_disarm(tl->handle) != 0)
-			fprintf(stderr, "[%s] Unable to disarm camera (%s)\n", rname, tl_camera_get_last_error());
-
-		switch (mode) {
-			/* Infinite frames, arm, software trigger */
-			case TRIG_FREERUN:
-				if (tl_camera_set_operation_mode(tl->handle, TL_CAMERA_OPERATION_MODE_SOFTWARE_TRIGGERED) != 0)
-					fprintf(stderr, "[%s:] Failed to set software triggering mode (%s)\n", rname, tl_mono_to_color_get_last_error());
-				if (tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, 0) != 0) 
-					fprintf(stderr, "[%s:] Unable to set unlimited triggering (%s)\n", rname, tl_mono_to_color_get_last_error());
-				if (tl_camera_arm(tl->handle, 2) != 0)
-					fprintf(stderr, "[%s] Unable to arm camera (%s)\n", rname, tl_camera_get_last_error());
-				if (tl_camera_issue_software_trigger(tl->handle) != 0)
-					fprintf(stderr, "[%s] Software trigger failed (%s)\n", rname, tl_camera_get_last_error());
-				break;
-				
-			case TRIG_EXTERNAL:
-				if (tl_camera_set_operation_mode(tl->handle, TL_CAMERA_OPERATION_MODE_HARDWARE_TRIGGERED) != 0)
-					fprintf(stderr, "[%s:] Failed to set hardware triggering mode (%s)\n", rname, tl_mono_to_color_get_last_error());
-				if (tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, 1) != 0) 
-					fprintf(stderr, "[%s:] Unable to set single triggering (%s)\n", rname, tl_mono_to_color_get_last_error());
-				if (tl_camera_set_trigger_polarity(tl->handle, TL_CAMERA_TRIGGER_POLARITY_ACTIVE_HIGH) != 0)
-					fprintf(stderr, "[%s:] Failed to set positive edge triggering (%s)\n", rname, tl_mono_to_color_get_last_error());
-				if (tl_camera_arm(tl->handle, 2) != 0)
-					fprintf(stderr, "[%s] Unable to arm camera (%s)\n", rname, tl_camera_get_last_error());
-				break;
-
-				/* Set to single frame, arm */
-			case TRIG_SOFTWARE:
-			default:
-				mode = TRIG_SOFTWARE;
-				fprintf(stderr, "Now in software trigger mode\n"); fflush(stderr);
-				if (tl_camera_set_operation_mode(tl->handle, TL_CAMERA_OPERATION_MODE_SOFTWARE_TRIGGERED) != 0)
-					fprintf(stderr, "[%s:] Failed to set software triggering mode (%s)\n", rname, tl_mono_to_color_get_last_error());
-				if (tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, 1) != 0) 
-					fprintf(stderr, "[%s:] Unable to set single triggering (%s)\n", rname, tl_mono_to_color_get_last_error());
-				if (tl_camera_arm(tl->handle, 2) != 0)
-					fprintf(stderr, "[%s] Unable to arm camera (%s)\n", rname, tl_camera_get_last_error());
-				break;
+		/* Change to number of frames per trigger ... because of structure, 0 can't be set here */
+		if (info->frames_per_trigger > 0 && info->frames_per_trigger != tl->trigger.frames_per_trigger) {
+			tl->trigger.frames_per_trigger = info->frames_per_trigger;
+			if ( (mode == tl->trigger.mode) && (mode == TRIG_EXTERNAL || mode == TRIG_SOFTWARE)) {
+				if (tl->trigger.bArmed && (rc = tl_camera_disarm(tl->handle)) != 0) TL_CameraErrMsg(rc, "Failed to disarm", rname);
+				if ( (rc = tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, tl->trigger.frames_per_trigger)) != 0) 
+					TL_CameraErrMsg(rc, "Failed to set frames per trigger", rname);
+				if (tl->trigger.bArmed && (rc = tl_camera_arm(tl->handle, 2)) != 0) TL_CameraErrMsg(rc, "Failed to re-arm", rname);
+			}
 		}
 
-		/* Record the settings and reset all counters */
-		tl->TrigMode = mode;
+		/* Change to external trigger slope */
+		if ( (info->ext_slope == TRIG_EXT_POS || info->ext_slope == TRIG_EXT_NEG) && (info->ext_slope != tl->trigger.ext_slope)) {
+			tl->trigger.ext_slope = info->ext_slope;
+			if (mode == tl->trigger.mode && mode == TRIG_EXTERNAL) {
+				if (tl->trigger.bArmed && (rc = tl_camera_disarm(tl->handle)) != 0) TL_CameraErrMsg(rc, "Failed to disarm", rname);
+				if ( (rc = tl_camera_set_trigger_polarity(tl->handle, (tl->trigger.ext_slope == TRIG_EXT_POS) ? TL_CAMERA_TRIGGER_POLARITY_ACTIVE_HIGH : TL_CAMERA_TRIGGER_POLARITY_ACTIVE_LOW)) != 0)
+					TL_CameraErrMsg(rc, "Failed to set edge triggering mode", rname);
+				if (tl->trigger.bArmed && (rc = tl_camera_arm(tl->handle, 2)) != 0) TL_CameraErrMsg(rc, "Failed to re-arm", rname);
+			}
+		}
 	}
 
+	/* At this point, if mode hasn't changed there nothing left to do */
+	if (mode == tl->trigger.mode) return mode;
+
+
+	/* Step 1 ... disarm camera so can change mode */
+	if ( (rc = tl_camera_disarm(tl->handle)) != 0) TL_CameraErrMsg(rc, "Failed to disarm", rname);
+	tl->trigger.bArmed = FALSE;
+
+	/* We may need to modify parameters so can't assume no-operation for same mode */
+	switch (mode) {
+		/* Infinite frames, arm, software trigger */
+		case TRIG_FREERUN:
+		case TRIG_BURST:										/* Almost identical */
+			if ( (rc = tl_camera_set_operation_mode(tl->handle, TL_CAMERA_OPERATION_MODE_SOFTWARE_TRIGGERED)) != 0) 
+				TL_CameraErrMsg(rc, "Failed to set TRIG_SOFTWARE", rname);
+			if ( (rc = tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, 0)) != 0) 
+				TL_CameraErrMsg(rc, "Failed to set frames per trigger", rname);
+			if (mode == TRIG_FREERUN) {
+				if (tl_camera_arm(tl->handle, 2) != 0)						 TL_CameraErrMsg(rc, "Failed to arm camera", rname);
+				if (tl_camera_issue_software_trigger(tl->handle) != 0) TL_CameraErrMsg(rc, "Failed to trigger camera", rname);
+				tl->trigger.bArmed = TRUE;
+			}
+			break;
+
+		case TRIG_EXTERNAL:
+			if (tl->trigger.ext_slope != TRIG_EXT_POS || tl->trigger.ext_slope != TRIG_EXT_NEG) tl->trigger.ext_slope = TRIG_EXT_POS;
+			if (tl->trigger.frames_per_trigger <= 0) tl->trigger.frames_per_trigger = 1;
+
+			if ( (rc = tl_camera_set_operation_mode(tl->handle, TL_CAMERA_OPERATION_MODE_HARDWARE_TRIGGERED)) != 0)
+				TL_CameraErrMsg(rc, "Failed to set hardware triggering mode", rname);
+			if ( (rc = tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, tl->trigger.frames_per_trigger)) != 0) 
+				TL_CameraErrMsg(rc, "Failed to set frames per trigger", rname);
+			if ( (rc = tl_camera_set_trigger_polarity(tl->handle, (tl->trigger.ext_slope == TRIG_EXT_POS) ? TL_CAMERA_TRIGGER_POLARITY_ACTIVE_HIGH : TL_CAMERA_TRIGGER_POLARITY_ACTIVE_LOW)) != 0)
+				TL_CameraErrMsg(rc, "Failed to set edge triggering mode", rname);
+			if ( (rc = tl_camera_arm(tl->handle, 2)) != 0)
+				TL_CameraErrMsg(rc, "Unable to arm camera", rname);
+			tl->trigger.bArmed = TRUE;
+			break;
+
+		/* Set to single frame via software trigger and arm (also default) */
+		case TRIG_SOFTWARE:
+		default:
+			mode = TRIG_SOFTWARE;
+			if (tl->trigger.frames_per_trigger <= 0) tl->trigger.frames_per_trigger = 1;
+
+			if ( (rc = tl_camera_set_operation_mode(tl->handle, TL_CAMERA_OPERATION_MODE_SOFTWARE_TRIGGERED)) != 0)
+				TL_CameraErrMsg(rc, "Failed to set software triggering mode", rname);
+			if ( (rc = tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, tl->trigger.frames_per_trigger)) != 0) 
+				TL_CameraErrMsg(rc, "Failed to set frames per trigger", rname);
+			if ( (rc = tl_camera_arm(tl->handle, 2)) != 0)
+				TL_CameraErrMsg(rc, "Unable to arm camera", rname);
+			tl->trigger.bArmed = TRUE;
+			break;
+	}
+
+	/* Record the settings and reset all counters */
+	tl->trigger.mode = mode;
+
 	/* Return current mode */
-	return tl->TrigMode;
+	return tl->trigger.mode;
 }
+
+/* ===========================================================================
+-- Set number of frames per trigger (allow 0 for infinite)
+--
+-- Usage: int TL_SetFramesPerTrigger(TL_CAMERA *tl, int frames);
+--        int TL_GetFramesPerTrigger(TL_CAMERA *tl);
+--
+-- Inputs: tl     - structure associated with a camera
+--         frames - # of frames per trigger, or 0 for infinite
+--
+-- Output: Sets camera triggering count
+--
+-- Return: 0 if successful, error from calls otherwise
+--
+-- Note: The value will only be set if in TRIG_SOFTWARE or TRIG_EXTERNAL
+--       modes.  But value will be stored in the internal info in any case
+=========================================================================== */
+int TL_GetFramesPerTrigger(TL_CAMERA *tl) {
+
+	/* Validate call */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return -1;
+
+	return tl->trigger.frames_per_trigger;
+}
+
+int TL_SetFramesPerTrigger(TL_CAMERA *tl, int frames) {
+	static char *rname = "TL_SetFramesPerTrigger";
+	int rc;
+
+	/* Validate call */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return -1;
+
+	/* Validate the parameter and save */
+	if (frames < 0) frames = 0;
+	tl->trigger.frames_per_trigger = frames;
+
+	/* Only actually send if in EXT or SOFTWARE modes ... need to deal with potentially armed */
+	/* Disable first if armed, and then re-enable after change to the parameter */
+	if (tl->trigger.mode == TRIG_EXTERNAL || tl->trigger.mode == TRIG_SOFTWARE) {
+		if (tl->trigger.bArmed && (rc = tl_camera_disarm(tl->handle)) != 0) TL_CameraErrMsg(rc, "Failed to disarm", rname);
+		if ( (rc = tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, frames)) != 0) TL_CameraErrMsg(rc, "Failed to set frames per trigger", rname);
+		if (tl->trigger.bArmed && (rc = tl_camera_arm(tl->handle, 2)) != 0) TL_CameraErrMsg(rc, "Failed to re-arm", rname);
+	}
+
+	return 0;
+}
+
 
 /* ===========================================================================
 -- Query the current ring buffer values
 --
--- Usage: int TL_GetRingInfo(TL_CAMERA *tl, int *nSize, int *nValid, int *iLast, int *iShow);
+-- Usage: int TL_GetRingInfo(TL_CAMERA *tl, int *nBuffers, int *nValid, int *iLast, int *iShow);
 --
--- Inputs: tl     - structure associated with a camera
---         nSize  - pointer for # of buffers in the ring
---			  nValid - pointer for # of buffers in the ring current with valid images
---			  iLast  - pointer for index of buffer with last image from the camera
---			  iShow  - pointer for index of buffer currently being shown (rgb values)
+-- Inputs: tl       - structure associated with a camera
+--         nBuffers - pointer for # of buffers in the ring
+--			  nValid   - pointer for # of buffers in the ring current with valid images
+--			  iLast    - pointer for index of buffer with last image from the camera
+--			  iShow    - pointer for index of buffer currently being shown (rgb values)
 --
 -- Output: For all parameter !NULL, copies appropriate value from internals
 --
 -- Return: 0 if successful, 1 if tl invalid
 =========================================================================== */
-int TL_GetRingInfo(TL_CAMERA *tl, int *nSize, int *nValid, int *iLast, int *iShow) {
+int TL_GetRingInfo(TL_CAMERA *tl, int *nBuffers, int *nValid, int *iLast, int *iShow) {
 	static char *rname = "TL_GetRingInfo";
 	BOOL valid;
 
 	/* Is structure valid ... return default values or values from the structure */
 	valid = tl != NULL && tl->magic == TL_CAMERA_MAGIC;
 
-	if (nSize  != NULL) *nSize  = valid ? tl->nBuffers : 1 ;
-	if (nValid != NULL) *nValid = valid ? tl->nValid   : 0 ;
-	if (iLast  != NULL) *iLast  = valid ? tl->iLast    : 0 ;
-	if (iShow  != NULL) *iShow  = valid ? tl->iShow    : 0 ;
+	if (nBuffers != NULL) *nBuffers = valid ? tl->nBuffers : 1 ;
+	if (nValid   != NULL) *nValid   = valid ? tl->nValid   : 0 ;
+	if (iLast    != NULL) *iLast    = valid ? tl->iLast    : 0 ;
+	if (iShow    != NULL) *iShow    = valid ? tl->iShow    : 0 ;
 
 	return valid ? 0 : 1 ;
 }
@@ -1985,7 +2438,7 @@ int TL_GetCameraName(TL_CAMERA *tl, char *name, size_t length) {
 	/* Must be valid structure */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
 
-	return tl_camera_get_name(tl->handle, name, length);
+	return tl_camera_get_name(tl->handle, name, (int) length);
 }
 
 
@@ -1997,3 +2450,111 @@ int TL_SetCameraName(TL_CAMERA *tl, char *name) {
 
 	return tl_camera_set_name(tl->handle, name);
 }
+
+
+/* ===========================================================================
+-- Print standard error message for tl_camera error message
+--
+-- Usage: int TL_CameraErrMsg(int rc, char *msg, char *rname);
+--
+-- Inputs: rc    - return code from call ... only print message if rc != 0
+--         msg   - brief text to be included with the error message
+--         rname - name of the function calling this message
+--
+-- Output: Sends message to stderr and flushes the buffer.  Includes the
+--         API standard message from tl_camera_get_last_error()
+--
+-- Return: rc value passed to the routing
+=========================================================================== */
+static int TL_CameraErrMsg(int rc, char *msg, char *rname) {
+	if (rc != 0) {
+		fprintf(stderr, "[%s] %s [rc:%d %s]\n", rname, msg, rc, tl_camera_get_last_error());
+		fflush(stderr);
+	}
+
+	return rc;
+}
+
+
+
+
+#if 0
+/* ===========================================================================
+-- Save data from TL camera (tests)
+-- 
+-- Usage: SaveData(TL_CAMERA *camera);
+--
+-- Inputs: camera - an opened TL camera
+--
+-- Output: varies
+--
+-- Return: none
+=========================================================================== */
+void SaveData(TL_CAMERA *camera) {
+	static HIRES_TIMER *timer = NULL;
+	double start;
+
+	if (timer == NULL) timer = HiResTimerCreate();
+
+	TL_ProcessRawSeparation(camera, -1);			/* Make sure these are valid */
+	TL_ProcessRGB(camera, -1);
+
+	if (camera->frame_count < 0) {
+		start = HiResTimerDelta(timer);
+
+#if 0
+		funit = fopen("raw.dat",   "w"); fwrite(camera->raw,   1, camera->nbytes_raw,   funit); fclose(funit);
+		funit = fopen("red.dat",   "w"); fwrite(camera->red,   1, camera->nbytes_red,   funit); fclose(funit);
+		funit = fopen("green.dat", "w"); fwrite(camera->green, 1, camera->nbytes_green, funit); fclose(funit);
+		funit = fopen("red.dat",   "w"); fwrite(camera->red,   1, camera->nbytes_blue,  funit); fclose(funit);
+#endif
+
+#if 0
+		funit = fopen("red.dat", "w");
+		for (i=0; i<camera->height/2; i++) {
+			for (j=0; j<camera->width/2; j++) fprintf(funit, " %d", camera->red[(i*camera->width/2+j)]);
+			fprintf(funit, "\n");
+		}
+		fclose(funit);
+
+		funit = fopen("blue.dat", "w");
+		for (i=0; i<camera->height/2; i++) {
+			for (j=0; j<camera->width/2; j++) fprintf(funit, " %d", camera->blue[(i*camera->width/2+j)]);
+			fprintf(funit, "\n");
+		}
+		fclose(funit);
+
+		funit = fopen("green.dat", "w");
+		for (i=0; i<camera->height; i++) {
+			for (j=0; j<camera->width/2; j++) fprintf(funit, " %d", camera->green[(i*camera->width/2+j)]);
+			fprintf(funit, "\n");
+		}
+		fclose(funit);
+#endif
+//		fprintf(stderr, "\n Write time required %.2f ms\n", 1000.0*(HiResTimerDelta(timer)-start)); fflush(stderr);
+
+#if 0
+		funit = fopen("red_rgb.dat", "w");
+		for (i=0; i<camera->height; i++) {
+			for (j=0; j<camera->width; j++) fprintf(funit, " %d", camera->rgb32[4*(i*camera->width+j)+0]);
+			fprintf(funit, "\n");
+		}
+		fclose(funit);
+		funit = fopen("green_rgb.dat", "w");
+		for (i=0; i<camera->height; i++) {
+			for (j=0; j<camera->width; j++) fprintf(funit, " %d", camera->rgb32[4*(i*camera->width+j)+1]);
+			fprintf(funit, "\n");
+		}
+		fclose(funit);
+		funit = fopen("blue_rgb.dat", "w");
+		for (i=0; i<camera->height; i++) {
+			for (j=0; j<camera->width; j++) fprintf(funit, " %d", camera->rgb32[4*(i*camera->width+j)+2]);
+			fprintf(funit, "\n");
+		}
+		fclose(funit);
+#endif
+	}
+	return;
+}
+
+#endif

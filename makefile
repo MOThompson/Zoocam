@@ -27,50 +27,37 @@ CLEAN:
 	rm focus_client.c focus_client.h
 	rm tl_camera_sdk_load.c tl_mono_to_color_processing_load.c tl_mono_to_color_processing_load.h
 
+# Distribution for the lab use
+z:\lab\exes\ZooCam.exe : ZooCam.exe
+	copy $** $@
+
+# Primary routines
 client.exe : DCx_client.c DCx_client.h ZooCam.h server_support.obj server_support.h
 	cl -Feclient.exe -DLOCAL_CLIENT_TEST $(CFLAGS) DCx_client.c server_support.obj $(SYSLIBS)
 
 server.exe : server_test.c DCx_server.obj server_support.obj server_support.h DCx_server.h DCx_client.h 
 	cl -Feserver.exe $(CFLAGS) server_test.c DCx_server.obj server_support.obj $(SYSLIBS)
 
-ZooCam.obj : ZooCam.c ZooCam.h dcx.h tl.h DCx_client.h uc480.h resource.h win32ex.h graph.h
+ZooCam.obj : ZooCam.c DCx_client.h uc480.h
 	cl -c  $(TL_SDK_INCLUDE) -DSTANDALONE $(CFLAGS) ZooCam.c
 
-camera.obj : camera.c camera.h ZooCam.h dcx.h tl.h 
+camera.obj : camera.c 
 	cl -c $(CFLAGS) camera.c
 
-dcx.obj : dcx.c dcx.h tl.h win32ex.h
+dcx.obj : dcx.c 
 	cl -c $(TL_SDK_INCLUDE) $(CFLAGS) dcx.c
 
-tl.obj : tl.c tl.h timer.h
+tl.obj : tl.c 
 	cl -c $(TL_SDK_INCLUDE) $(CFLAGS) tl.c
-
-win32ex.obj : win32ex.c win32ex.h
-	cl -c $(CFLAGS) win32ex.c
-
-graph.obj : graph.c graph.h
-	cl -c $(CFLAGS) graph.c
 
 dcx_server.obj : dcx_server.c
 	cl -c $(TL_SDK_INCLUDE) $(CFLAGS) dcx_server.c
 
-server_support.obj : server_support.c server_support.h
-	cl -c $(CFLAGS) server_support.c
-
-numato_dio.obj : numato_dio.c numato_dio.h
+numato_dio.obj : numato_dio.c
 	cl -c $(CFLAGS) numato_dio.c
 
-ki224.obj : ki224.c ki224.h
+ki224.obj : ki224.c
 	cl -I\code\NI488.nt -c $(CFLAGS) ki224.c
-
-tl_camera_sdk_load.obj : tl_camera_sdk_load.c
-	cl -I..\tl_sdk\include -c $(CFLAGS) tl_camera_sdk_load.c
-
-tl_mono_to_color_processing_load.obj : tl_mono_to_color_processing_load.c
-	cl -I..\tl_sdk\include -c $(CFLAGS) tl_mono_to_color_processing_load.c
-
-timer.obj : timer.h
-	cl -c $(CFLAGS) timer.c
 
 ZooCam.exe : $(OBJS) ZooCam.res
 	cl $(CFLAGS) -FeZooCam.exe $(OBJS) ZooCam.res $(DCx_LIB) $(NI488_LIB) $(SYSLIBS)
@@ -78,18 +65,17 @@ ZooCam.exe : $(OBJS) ZooCam.res
 ZooCam.res : ZooCam.rc resource.h
 	rc $(RFLAGS) ZooCam.rc
 
-# Distribution for the lab use
-z:\lab\exes\ZooCam.exe : ZooCam.exe
-	copy $** $@
-
 # ---------------------------------------------------------------------------
 # Support modules 
+# Explicit compile is unnecessary as will use $(CFLAGS) since that is default
 # ---------------------------------------------------------------------------
-timer.h : \code\lab\TimeFncs\timer.h
+win32ex.h : \code\Window_Classes\win32ex\win32ex.h
 	copy $** $@
 
-timer.c : \code\lab\TimeFncs\timer.c
+win32ex.c : \code\Window_Classes\win32ex\win32ex.c
 	copy $** $@
+
+win32ex.obj : win32ex.c win32ex.h
 
 graph.h : \code\Window_Classes\graph\graph.h
 	copy $** $@
@@ -97,11 +83,15 @@ graph.h : \code\Window_Classes\graph\graph.h
 graph.c : \code\Window_Classes\graph\graph.c
 	copy $** $@
 
-win32ex.h : \code\Window_Classes\win32ex\win32ex.h
+graph.obj : graph.c graph.h
+
+timer.h : \code\lab\TimeFncs\timer.h
 	copy $** $@
 
-win32ex.c : \code\Window_Classes\win32ex\win32ex.c
+timer.c : \code\lab\TimeFncs\timer.c
 	copy $** $@
+
+timer.obj : timer.c timer.h
 
 server_support.c : \code\lab\Server_Support\server_support.c
 	copy $** $@
@@ -109,12 +99,19 @@ server_support.c : \code\lab\Server_Support\server_support.c
 server_support.h : \code\lab\Server_Support\server_support.h
 	copy $** $@
 
+server_support.obj : server_support.c server_support.h
+
 focus_client.c : \code\lab\sara\focus_client.c
 	copy $** $@
 
 focus_client.h : \code\lab\sara\focus_client.h
 	copy $** $@
 
+focus_client.obj : focus_client.c focus_client.h
+
+# ---------------------------------------------------------------------------
+# TL API support modules 
+# ---------------------------------------------------------------------------
 tl_camera_sdk_load.c : ..\TL_SDK\load_dll_helpers\tl_camera_sdk_load.c
 	copy $** $@
 
@@ -124,18 +121,24 @@ tl_mono_to_color_processing_load.c : ..\TL_SDK\load_dll_helpers\tl_mono_to_color
 tl_mono_to_color_processing_load.h : ..\TL_SDK\load_dll_helpers\tl_mono_to_color_processing_load.h
 	copy $** $@
 
+tl_camera_sdk_load.obj : tl_camera_sdk_load.c
+	cl -I..\tl_sdk\include -c $(CFLAGS) tl_camera_sdk_load.c
+
+tl_mono_to_color_processing_load.obj : tl_mono_to_color_processing_load.c tl_mono_to_color_processing_load.h
+	cl -I..\tl_sdk\include -c $(CFLAGS) tl_mono_to_color_processing_load.c
+
 # ---------------------------------------------------------------------------
 # .h dependencies
 # ---------------------------------------------------------------------------
-tl_mono_to_color_processing_load.obj : tl_mono_to_color_processing_load.h
-
-win32ex.obj : win32ex.h
-
 ki224.obj : ki224.h win32ex.h
 
-tl.obj : tl.h
+camera.obj : win32ex.h graph.h resource.h camera.h dcx.h tl.h ZooCam.h
 
-ZooCam.obj : win32ex.h graph.h resource.h timer.h numato_DIO.h ki224.h uc480.h ZooCam.h dcx_server.h tl.h focus_client.h
+dcx.obj : win32ex.h camera.h dcx.h
+
+tl.obj : timer.h camera.h tl.h
+
+ZooCam.obj : win32ex.h graph.h resource.h timer.h numato_DIO.h ki224.h camera.h dcx.h tl.h ZooCam.h dcx_server.h focus_client.h
 
 DCX_client.obj : server_support.h ZooCam.h DCX_client.h
 
@@ -147,5 +150,3 @@ ki224.obj : resource.h win32ex.h ki224.h
 numato_DIO.obj : numato_DIO.h
 
 server_test.obj : server_support.h ZooCam.h DCx_server.h DCx_client.h
-
-tl.obj : timer.h tl.h

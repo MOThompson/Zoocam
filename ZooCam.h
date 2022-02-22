@@ -10,15 +10,16 @@ HWND ZooCam_main_hdlg;
 WND_INFO *main_wnd;
 
 /* Special calls to the display thread */
-#define	WMP_SHOW_FRAMERATE		(WM_APP+3)
-#define	WMP_SHOW_EXPOSURE			(WM_APP+4)
-#define	WMP_SHOW_GAMMA				(WM_APP+6)
-#define	WMP_SHOW_COLOR_CORRECT	(WM_APP+7)
-#define	WMP_SHOW_GAINS				(WM_APP+8)
-#define	WMP_SHOW_CURSOR_POSN		(WM_APP+9)
-#define	WMP_BURST_ARM				(WM_APP+10)
-#define	WMP_BURST_ABORT			(WM_APP+11)
-#define	WMP_BURST_TRIG_COMPLETE	(WM_APP+12)
+#define	WMP_SHOW_FRAMERATE			(WM_APP+3)
+#define	WMP_SHOW_EXPOSURE				(WM_APP+4)
+#define	WMP_SHOW_GAMMA					(WM_APP+6)
+#define	WMP_SHOW_COLOR_CORRECT		(WM_APP+7)
+#define	WMP_SHOW_GAINS					(WM_APP+8)
+#define	WMP_UPDATE_IMAGE_W_CURSOR	(WM_APP+9)
+#define	WMP_SHOW_CURSOR_POSN			(WM_APP+9)
+#define	WMP_BURST_ARM					(WM_APP+10)
+#define	WMP_BURST_COMPLETE			(WM_APP+11)
+#define	WMP_UPDATE_TRIGGER_BUTTONS	(WM_APP+12)
 
 /* Support routines that are now safe and simple */
 int GenerateCrosshair(WND_INFO *wnd, HWND hwnd);
@@ -77,7 +78,7 @@ int DCx_Set_Exposure(WND_INFO *wnd, double exposure, BOOL maximize_framerate, HW
 /* ===========================================================================
 -- Interface to the BURST functions
 --
--- Usage: int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
+-- Usage: int Burst_Actions(BURST_ACTION request, int msTimeout, int *response);
 --
 -- Inputs: request - what to do
 --           (0) BURST_STATUS ==> return status
@@ -95,14 +96,14 @@ int DCx_Set_Exposure(WND_INFO *wnd, double exposure, BOOL maximize_framerate, HW
 -- *response codes
 --     ACTION = 0 (STATUS)
 =========================================================================== */
-typedef enum _DCX_BURST_ACTION {BURST_STATUS=0, BURST_ARM=1, BURST_ABORT=2, BURST_WAIT=3} DCX_BURST_ACTION;
+typedef enum _BURST_ACTION {BURST_STATUS=0, BURST_ARM=1, BURST_ABORT=2, BURST_WAIT=3} BURST_ACTION;
 
-int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
+int Burst_Actions(BURST_ACTION request, int msTimeout, int *response);
 
 /* ===========================================================================
 -- Interface to the RING functions
 --
--- Usage: int DCX_Ring_Actions(RING_ACTION request, int option, RING_INFO *response);
+-- Usage: int Ring_Actions(RING_ACTION request, int option, RING_INFO *response);
 --
 -- Inputs: request - what to do
 --           (0) RING_GET_INFO        ==> return structure ... also # of frames
@@ -122,7 +123,7 @@ int DCx_Burst_Actions(DCX_BURST_ACTION request, int msTimeout, int *response);
 =========================================================================== */
 typedef enum _RING_ACTION {RING_GET_INFO=0, RING_GET_SIZE=1, RING_SET_SIZE=2, RING_GET_ACTIVE_CNT=3} RING_ACTION;
 
-int DCx_Ring_Actions(RING_ACTION request, int option, struct _RING_INFO *response);
+int Ring_Actions(RING_ACTION request, int option, struct _RING_INFO *response);
 
 /* ===========================================================================
 -- Interface to the BURST functions
@@ -176,14 +177,6 @@ typedef struct _CAMERA_INFO {
 typedef struct _WND_INFO {
 	HWND main_hdlg;							/* Handle to primary dialog box */
 
-	HANDLE FrameEvent;						/* Event for new frame valid in memory buffer */
-	BOOL ProcessNewImageThreadActive;
-
-#ifdef USE_RINGS
-	HANDLE SequenceEvent;					/* Event for completion of a sequence (last buffer element) */
-	BOOL SequenceThreadActive;
-#endif
-
 	BOOL LiveVideo;							/* Are we in free-run mode? */
 	BOOL PauseImageRendering;				/* Critical sections where buffers maybe changing ... disable access */
 	BOOL BurstModeActive;					/* Are we in an active mode with burst (wait, collecting, etc.) */
@@ -198,7 +191,6 @@ typedef struct _WND_INFO {
 	} BurstModeStatus;						/* Internal status */
 
 	/* Camera initialized */
-	BOOL bCamera;								/* Is there a camera connected */
 	CAMERA_INFO Camera;						/* Pointer to primary info on the camera (DCX or TL) */
 
 	/* Common camera information */

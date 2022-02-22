@@ -15,7 +15,6 @@
 #define	DCX_MAX_RING_SIZE		(999)		/* Maximum number ring buffers */
 #define	DCX_DFLT_RING_SIZE	(10)		/* Default number of frames in ring */
 
-typedef enum _DCX_IMAGE_FORMAT { IMAGE_BMP=0, IMAGE_JPG=1, IMAGE_PNG=2 } DCX_IMAGE_FORMAT;
 typedef enum _DCX_IMAGE_TYPE   { IMAGE_MONOCHROME=0, IMAGE_COLOR=1 } DCX_IMAGE_TYPE;
 
 /* Structure associated with an image information message in client/server */
@@ -90,7 +89,7 @@ typedef struct _DCX_CAMERA {
 	IMAGE_FORMAT_INFO *ImageFormatInfo;
 
 #ifdef USE_RINGS
-	int  nSize;									/* Number of buffers in the ring */
+	int  nBuffers;								/* Number of buffers in the ring */
 	int  nValid;								/* Number of frames valid since last reset */
 	int  iLast;									/* index of last buffer used (from events) */
 	int  iShow;									/* index of currently displayed frame */
@@ -102,7 +101,15 @@ typedef struct _DCX_CAMERA {
 #endif
 	BOOL Image_Mem_Allocated;				/* Have we allocated (vis IS_AllocImageMem) the bufers */
 
-	TRIG_MODE Trig_Mode;						/* Triggering mode (DCX_TRIG_FREERUN, SOFTWARE, EXTERNAL */
+	HANDLE FrameEvent;						/* Event for new frame valid in memory buffer */
+	BOOL ProcessNewImageThreadActive;
+
+#ifdef USE_RINGS
+	HANDLE SequenceEvent;					/* Event for completion of a sequence (last buffer element) */
+	BOOL SequenceThreadActive;
+#endif
+
+	TRIGGER_INFO trigger;					/* Trigger details */
 
 } DCX_CAMERA;
 
@@ -112,13 +119,13 @@ int	 DCx_SetDebug(BOOL debug);
 int    DCx_Shutdown(void);
 int    DCx_Status(DCX_CAMERA *dcx, DCX_STATUS *status);
 
-int    DCx_Enum_Camera_List(int *pcount, UC480_CAMERA_INFO **pinfo);
+int    DCx_EnumCameraList(int *pcount, UC480_CAMERA_INFO **pinfo);
 int    DCx_Select_Camera(DCX_CAMERA *dcx, int CameraID, int *nBestFormat);
 int    DCx_Initialize_Resolution(DCX_CAMERA *dcx, int ImageFormatID);
 
 int    DCx_CloseCamera(DCX_CAMERA *dcx);
 
-int    DCx_RenderImage(DCX_CAMERA *dcx, int frame, HWND hwnd);
+int    DCx_RenderFrame(DCX_CAMERA *dcx, int frame, HWND hwnd);
 
 int    DCx_GetExposureParms(DCX_CAMERA *dcx, double *ms_min, double *ms_max, double *ms_inc);
 double DCx_SetExposure(DCX_CAMERA *dcx, double ms_expose);
@@ -143,12 +150,16 @@ int DCx_LoadParameterFile(DCX_CAMERA *dcx, char *path);
 int DCx_SaveParameterFile(DCX_CAMERA *dcx, char *path);
 
 /* Triggering controls (freerun especially) */
-int DCx_Trigger(DCX_CAMERA *dcx, int msWait);
-TRIG_MODE DCx_SetTrigMode(DCX_CAMERA *dcx, TRIG_MODE mode, int msWait);
-TRIG_MODE DCx_GetTrigMode(DCX_CAMERA *dcx);
+int DCx_Arm(DCX_CAMERA *dcx);
+int DCx_Disarm(DCX_CAMERA *dcx);
+int DCx_Trigger(DCX_CAMERA *dcx);
+int DCx_SetFramesPerTrigger(DCX_CAMERA *dcx, int frames);
+int DCx_GetFramesPerTrigger(DCX_CAMERA *dcx);
+TRIGGER_MODE DCx_SetTriggerMode(DCX_CAMERA *dcx, TRIGGER_MODE mode, TRIGGER_INFO *info);
+TRIGGER_MODE DCx_GetTriggerMode(DCX_CAMERA *dcx, TRIGGER_INFO *info);
 
 /* Ring buffer control */
-int DCx_GetRingInfo(DCX_CAMERA *dcx, int *nSize, int *nValid, int *iLast, int *iShow);
+int DCx_GetRingInfo(DCX_CAMERA *dcx, int *nBuffers, int *nValid, int *iLast, int *iShow);
 int DCx_SetRingBufferSize(DCX_CAMERA *dcx, int nBuf);
 int DCx_ReleaseRingBuffers(DCX_CAMERA *dcx);
 
@@ -161,7 +172,10 @@ int FindImageIndexFrompMem(DCX_CAMERA *dcx, char *pMem);
 unsigned char *FindImagepMemFromPID(DCX_CAMERA *dcx, int PID, int *index);
 int FindImagePIDFrompMem(DCX_CAMERA *dcx, unsigned char *pMem, int *index);
 
-int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int format);
-int DCx_CaptureImage(DCX_CAMERA *dcx, char *fname, DCX_IMAGE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
+/* Image saving */
+int DCx_GetSaveFormatFlag(DCX_CAMERA *dcx);
+int DCx_SaveBurstImages(DCX_CAMERA *dcx, char *pattern, int format);
+int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int frame, int format);
+int DCx_CaptureImage(DCX_CAMERA *dcx, char *fname, int format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
 
 #endif			/* dcx_loaded */

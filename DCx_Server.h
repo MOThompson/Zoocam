@@ -1,5 +1,5 @@
-int Init_DCx_Server(void);
-int Shutdown_DCx_Server(void);
+int Init_ZooCam_Server(void);
+int Shutdown_ZooCam_Server(void);
 
-#define	DCX_SERVER_WAIT	(30000)		/* 30 second time-out */
+#define	ZOOCAM_SERVER_WAIT	(30000)		/* 30 second time-out */
 
