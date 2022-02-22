@@ -2166,6 +2166,7 @@ int TL_Arm(TL_CAMERA *tl) {
 		rc = 1;
 	} else if ( (rc = tl_camera_arm(tl->handle, 2)) == 0) {
 		tl->trigger.bArmed = TRUE;
+		tl->nValid = tl->iLast = tl->iShow = 0;			/* Always start from zero again */
 	} else {
 		TL_CameraErrMsg(rc, "Arm failed", rname);
 	}
