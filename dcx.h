@@ -32,6 +32,7 @@ typedef struct _DCX_IMAGE_INFO {
 } DCX_IMAGE_INFO;
 #pragma pack()
 
+#if 0
 /* Structure associated with an camera status message in client/server */
 #pragma pack(4)
 typedef struct _DCX_STATUS {
@@ -52,26 +53,7 @@ typedef struct _DCX_STATUS {
 	double color_correction_factor;
 } DCX_STATUS;
 #pragma pack()
-
-/* Structure used by DCX_CLIENT to allow changes to exposure */
-#pragma pack(4)
-/* Or'd bit-flags in option to control setting parameters */
-/* Exposure always has priority over FPS, but FPS will be maximized if not modified with exposure */
-#define	DCXF_MODIFY_EXPOSURE		(0x01)	/* Modify exposure (value in ms) */
-#define	DCXF_MODIFY_FPS			(0x02)	/* Modify frames per second */
-#define	DCXF_MODIFY_GAMMA			(0x04)	/* Modify gamma */
-#define	DCXF_MODIFY_MASTER_GAIN	(0x08)	/* Modify master gain */
-#define	DCXF_MODIFY_RED_GAIN		(0x10)	/* Red channel gain */
-#define	DCXF_MODIFY_GREEN_GAIN	(0x20)	/* Green channel gain */
-#define	DCXF_MODIFY_BLUE_GAIN	(0x40)	/* Blue channel gain */
-typedef struct _DCX_EXPOSURE_PARMS {
-	double exposure;									/* Exposure time in ms				*/
-	double fps;											/* Frame rate (per second)			*/
-	uint32_t gamma;									/* Gamma value (0 < gamma < 100)	*/
-	uint32_t master_gain;							/* Master gain (0 < gain < 100)	*/
-	uint32_t red_gain, green_gain, blue_gain;	/* Individual channel gains		*/
-} DCX_EXPOSURE_PARMS;
-#pragma pack()
+#endif
 
 /* DCX type camera information */
 typedef struct _DCX_CAMERA {
@@ -117,13 +99,14 @@ typedef struct _DCX_CAMERA {
 int    DCx_Initialize(void);
 int	 DCx_SetDebug(BOOL debug);
 int    DCx_Shutdown(void);
-int    DCx_Status(DCX_CAMERA *dcx, DCX_STATUS *status);
 
 int    DCx_EnumCameraList(int *pcount, UC480_CAMERA_INFO **pinfo);
 int    DCx_Select_Camera(DCX_CAMERA *dcx, int CameraID, int *nBestFormat);
 int    DCx_Initialize_Resolution(DCX_CAMERA *dcx, int ImageFormatID);
 
 int    DCx_CloseCamera(DCX_CAMERA *dcx);
+
+int    DCx_GetCameraInfo(DCX_CAMERA *dcx, CAMERA_INFO *info);
 
 int    DCx_RenderFrame(DCX_CAMERA *dcx, int frame, HWND hwnd);
 
@@ -150,8 +133,7 @@ int DCx_LoadParameterFile(DCX_CAMERA *dcx, char *path);
 int DCx_SaveParameterFile(DCX_CAMERA *dcx, char *path);
 
 /* Triggering controls (freerun especially) */
-int DCx_Arm(DCX_CAMERA *dcx);
-int DCx_Disarm(DCX_CAMERA *dcx);
+TRIG_ARM_ACTION DCx_Arm(DCX_CAMERA *dcx, TRIG_ARM_ACTION action);
 int DCx_Trigger(DCX_CAMERA *dcx);
 int DCx_SetFramesPerTrigger(DCX_CAMERA *dcx, int frames);
 int DCx_GetFramesPerTrigger(DCX_CAMERA *dcx);
@@ -163,19 +145,24 @@ int DCx_GetRingInfo(DCX_CAMERA *dcx, int *nBuffers, int *nValid, int *iLast, int
 int DCx_SetRingBufferSize(DCX_CAMERA *dcx, int nBuf);
 int DCx_ReleaseRingBuffers(DCX_CAMERA *dcx);
 
-/* Linked to server */
-int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual);
-int DCx_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer);
-
 int FindImageIndexFromPID(DCX_CAMERA *dcx, int PID);
 int FindImageIndexFrompMem(DCX_CAMERA *dcx, char *pMem);
 unsigned char *FindImagepMemFromPID(DCX_CAMERA *dcx, int PID, int *index);
 int FindImagePIDFrompMem(DCX_CAMERA *dcx, unsigned char *pMem, int *index);
 
 /* Image saving */
+int DCx_GetImageInfo(DCX_CAMERA *dcx, int frame, IMAGE_INFO *info);
+int DCx_GetImageData(DCX_CAMERA *dcx, int frame, void **image_data, size_t *length);
+
 int DCx_GetSaveFormatFlag(DCX_CAMERA *dcx);
-int DCx_SaveBurstImages(DCX_CAMERA *dcx, char *pattern, int format);
-int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int frame, int format);
-int DCx_CaptureImage(DCX_CAMERA *dcx, char *fname, int format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
+int DCx_SaveBurstImages(DCX_CAMERA *dcx, char *pattern, FILE_FORMAT format);
+int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int frame, FILE_FORMAT format);
+int DCx_CaptureImage(DCX_CAMERA *dcx, char *fname, FILE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
+
+/* Linked to server */
+int DCx_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer);
+
+/* Likely obsoleted routines */
+// int    DCx_Status(DCX_CAMERA *dcx, DCX_STATUS *status);
 
 #endif			/* dcx_loaded */

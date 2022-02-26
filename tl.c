@@ -40,6 +40,7 @@
 /* Local include files            */
 /* ------------------------------ */
 #include "timer.h"
+#include "win32ex.h"
 #include "camera.h"
 #define INCLUDE_TL_DETAIL_INFO
 #include "tl.h"
@@ -447,7 +448,7 @@ int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 	static char *rname = "TL_OpenCamera";
 
 	FILE *handle;
-	int i, rc, rcode;
+	int rc, rcode;
 
 	/* Verify that the structure is valid and hasn't already been closed */
 	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 0x8001;
@@ -488,22 +489,13 @@ int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 	/* Create a semaphore for access to the data itself */
 	tl->image_mutex = CreateMutex(NULL, FALSE, NULL);
 
+	/* Figure out how big image buffer needs to be (assume 16-bit values) */
+	tl->npixels = tl->width * tl->height;
+	tl->nbytes_raw = sizeof(unsigned short) * tl->npixels;
+
 	/* Allocate buffers using common code (same as change) */
 	TL_SetRingBufferSize(tl, nBuf);			/* mutex has to be defined first */
 	
-	/* Allocate space for the raw data and, if color, for the rgb24 image */
-	/* Note that this may need to change for B/W cameras */
-	tl->npixels = tl->width * tl->height;
-	tl->nbytes_raw = sizeof(unsigned short) * tl->npixels;
-	tl->images = calloc(tl->nBuffers, sizeof(*tl->images));
-	for (i=0; i<tl->nBuffers; i++) {
-		if ( (tl->images[i].raw = malloc(tl->nbytes_raw)) == NULL) {
-			fprintf(stderr, "[%s] Only able to allocate %d buffers, resetting value\n", rname, i); fflush(stderr);
-			tl->nBuffers = i;
-			break;
-		}
-	}
-
 	/* If color sensor, create RGB channels for a separation of a raw frame */
 	if (tl->IsSensorColor) {
 		tl->nbytes_red   = tl->nbytes_raw / 4;
@@ -534,6 +526,47 @@ int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 
 	/* Return either 0 or one/more of errors 0x04 and/or 0x08 */
 	return rcode;
+}
+
+/* ===========================================================================
+-- Get information about the camera
+--
+-- Usage: int TL_GetCameraInfo(TL_CAMERA *tl, CAMERA_INFO *info);
+--
+-- Inputs: tl   - pointer to camera structure
+--         info - pointer to structure to receive camera information
+--
+-- Output: *info (if not NULL)
+--
+-- Return: 0 if successful, 1 if no camera initialized
+=========================================================================== */
+int TL_GetCameraInfo(TL_CAMERA *tl, CAMERA_INFO *info) {
+	static char *rname = "TL_GetCameraInfo";
+
+	/* Must be valid structure */
+	if (info != NULL) { memset(info, 0, sizeof(*info)); info->type = CAMERA_TL; }
+
+	/* Validate structure and camera active */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC || tl->handle == NULL) return 1;
+
+	/* If info NULL, just state we are alive and return */
+	if (info == NULL) return 0;
+
+	/* Return sensor and camera information from DCX_CAMERA structure */
+	strcpy_m(info->name,				sizeof(info->name),			 tl->name);
+	strcpy_m(info->model,			sizeof(info->model),			 tl->model);
+	strcpy_m(info->serial,			sizeof(info->serial),		 tl->serial);
+	strcpy_m(info->manufacturer,	sizeof(info->manufacturer), "ThorLabs");
+	strcpy_m(info->version,			sizeof(info->version),		 "<unknown>");
+	strcpy_m(info->date,				sizeof(info->date),			 "<unknown>");
+
+	info->x_pixel_um = tl->pixel_height_um;
+	info->y_pixel_um = tl->pixel_width_um;
+	info->bColor     = tl->IsSensorColor;
+	info->height     = tl->height;
+	info->width      = tl->width;
+
+	return 0;
 }
 
 /* ===========================================================================
@@ -576,6 +609,8 @@ int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf) {
 		tl->images = realloc(tl->images, nBuf*sizeof(*tl->images));							/* Space for full request		*/
 		memset(tl->images+tl->nBuffers, 0, (nBuf-tl->nBuffers)*sizeof(*tl->images));	/* Clear new TL_IMAGE blocks	*/
 		for (i=tl->nBuffers; i<nBuf; i++) {															/* Start adding image buffers	*/
+			tl->images[i].tl    = tl;																	/* Access to other info			*/
+			tl->images[i].index = i;																	/* Immediately index				*/
 			if ( (tl->images[i].raw = malloc(tl->nbytes_raw)) == NULL) {
 				fprintf(stderr, "[%s] Only able to increase buffer size to %d\n", rname, i); fflush(stderr);
 				nBuf = i;
@@ -997,7 +1032,7 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 
 	timestamp.value = 0;
 	for (i=0; i<metadata_size_in_bytes; i+=8) {
-		memcpy(&dval, metadata+i+4, 4);							/* Make a dval so can handle */
+		memcpy(&dval, metadata+i+4, 4);					/* Make a dval so can handle */
 		memcpy(&tag,  metadata+i, 4); tag[4] = '\0';
 		if (strcmp(tag, "TSI") == 0) {					/* Start of metadata tags*/
 		} else if (strcmp(tag, "FCNT") == 0) {			/* Frame count */
@@ -1025,12 +1060,16 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 		int ibuf;							/* Which buffer gets the data */
 
 		/* Put into the next available position */
-		ibuf = (tl->nValid == 0) ? 0 : tl->iLast+1;
-		if (ibuf >= tl->nBuffers) ibuf = 0;
+		ibuf = (tl->nValid == 0) ? 0 : (tl->iLast+1) % tl->nBuffers;
+		while (tl->images[ibuf].locks != 0) {				/* Find one that is unlocked */
+			if (ibuf == tl->iLast) break;						/* Continuously use the last one if all locked */
+			tl->nValid = max(tl->nValid, ibuf+1);			/* Increment valid for locked images */
+			ibuf = (ibuf+1) % tl->nBuffers;
+		}
 
 		/* Save where we are and increment the number of valid (up to nBuffers) */
 		tl->iLast = ibuf;
-		if (tl->nValid < tl->nBuffers) tl->nValid++;
+		tl->nValid = max(tl->nValid, ibuf);					/* Number now valid */
 
 		/* Copy raw data from sensor (<0.45 ms) and generate metadata */
 		/* Image timestamp documentation (page 42) incorrect ... clock seems to be exactly 99 MHz, not reported value */
@@ -1283,6 +1322,105 @@ BITMAPINFOHEADER *TL_CreateDIB(TL_CAMERA *tl, int frame, int *rc) {
 }
 
 /* ===========================================================================
+-- Get information about a specific image
+--
+-- Usage: int TL_GetImageInfo(TL_CAMERA *tl, int frame, IMAGE_INFO *info);
+--
+-- Inputs: tl    - an opened TL camera
+--         frame - index of frame to image (-1 = current)
+--                    invalid frame return error (rc = 2)
+--         info  - pointer to structure to receive image information
+--
+-- Output: *info (if not NULL)
+--
+-- Return: 0 if successful, 
+--           1 => no camera initialized
+--           2 => frame invalid
+=========================================================================== */
+int TL_GetImageInfo(TL_CAMERA *tl, int frame, IMAGE_INFO *info) {
+	static char *rname = "TL_GetImageInfo";
+
+	TL_IMAGE *image;
+	float R,G,B;
+
+/* Must be valid structure */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
+	
+	if (frame == -1) frame = tl->iLast;								/* Last image */
+	if (frame < 0 || frame > tl->nValid) return 2;
+	if (info == NULL) return 0;
+	memset(info, 0, sizeof(*info));
+
+	/* Point to the appropriate image */
+	image = &tl->images[frame];
+	image->locks++;														/* Lock (or more lock) iamge */
+
+	info->type         = CAMERA_TL;
+	info->frame        = frame;
+	info->timestamp    = image->timestamp;							/* When image acquired */
+	info->camera_time  = image->camera_time;						/* Higher resolution time */
+	info->width        = tl->width;
+	info->height       = tl->height;
+	info->memory_pitch = 2*tl->height;								/* 2 bytes, and no padding */
+	info->exposure     = image->ms_expose;
+	info->gamma        = 1.0;
+	info->master_gain  = image->dB_gain;
+
+	tl_mono_to_color_get_red_gain(tl->color_processor, &R);
+	tl_mono_to_color_get_green_gain(tl->color_processor, &G);
+	tl_mono_to_color_get_blue_gain(tl->color_processor, &B);
+	info->red_gain = R;	info->green_gain = G;	info->blue_gain = B;
+
+	info->color_correct_mode     = 0;
+	info->color_correct_strength = 1.0;
+
+	image->locks--;
+	return 0;
+}
+
+/* ===========================================================================
+-- Get pointer to raw data for a specific image, and length of that data
+--
+-- Usage: int TL_GetImageData(TL_CAMERA *tl, int frame, void **image_data, int *length);
+--
+-- Inputs: tl         - an opened TL camera
+--         frame      - index of frame to image (-1 = current)
+--                        invalid frame return error (rc = 2)
+--         image_data - pointer to get a pointer to actual memory location (shared)
+--         length     - pointer to get count to # of bytes in the image data
+--
+-- Output: *image_data - a pointer (UNSIGNED SHORT *) to actual data
+--         *length     - number of bytes in the memory buffer
+--
+-- Return: 0 if successful, 
+--           1 => no camera initialized
+--           2 => frame invalid
+=========================================================================== */
+int TL_GetImageData(TL_CAMERA *tl, int frame, void **image_data, size_t *length) {
+	static char *rname = "TL_GetImageData";
+
+	TL_IMAGE *image;
+
+	/* Default returns */
+	if (image_data != NULL) *image_data = NULL;
+	if (length     != NULL) *length = 0;
+
+	/* Must be valid structure */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
+	
+	if (frame == -1) frame = tl->iLast;								/* Last image */
+	if (frame < 0 || frame > tl->nValid) return 2;
+
+	/* Point to the appropriate image and copy pointers / length */
+	image = &tl->images[frame];
+	if (image_data != NULL) *image_data = (void *) image->raw;
+	if (length     != NULL) *length = image->tl->image_bytes;
+
+	return 0;
+}
+
+
+/* ===========================================================================
 -- Determine formats that camera supports for writing
 --
 -- Usage: int TL_GetSaveFormatFlag(TL_CAMERA *tl);
@@ -1292,31 +1430,31 @@ BITMAPINFOHEADER *TL_CreateDIB(TL_CAMERA *tl, int frame, int *rc) {
 -- Output: none
 --
 -- Return: Bit-wise flags giving camera capabilities
---				 FL_BMP | FL_JPEG | FL_RAW | FL_BURST (unique)
+--				 FL_BMP | FL_JPEG | FL_RAW
 --         0 on errors (no capabilities)
 =========================================================================== */
 int TL_GetSaveFormatFlag(TL_CAMERA *tl) {
 	static char *rname = "TL_GetSaveFormatFlag";
 
-	return FL_BMP | FL_RAW | FL_BURST ;
+	return FL_BMP | FL_RAW ;
 }
 
 
 /* ===========================================================================
 -- Get a reasoanble filename for save if one isn't passed in the call (NULL)
 --
--- Usage: int TL_GetSaveName(char *path, size_t length, int *format);
+-- Usage: int TL_GetSaveName(char *path, size_t length, FILE_FORMAT *format);
 --
 -- Inputs: path    - pointer to character string buffer for returned filename
 --         length  - length of the path buffer
 --         format  - pointer to get "format" implied by file extension
 --
 -- Output: *path   - filled with selected filename
---         *format - one of the flags FL_BMP, FL_RAW, ... from file extension
+--         *format - one of the flags FILE_BMP, FILE_RAW, ... from file extension
 --
 -- Return: 0 if successful, !0 on cancel of the file open dialog
 =========================================================================== */
-int TL_GetSaveName(char *path, size_t length, int *format) {
+int TL_GetSaveName(char *path, size_t length, FILE_FORMAT *format) {
 	static char *rname = "TL_GetSaveName";
 
 	int i;
@@ -1324,7 +1462,7 @@ int TL_GetSaveName(char *path, size_t length, int *format) {
 	static struct {
 		char *ext;
 		int flag;
-	} exts[] = { {".bmp", FL_BMP}, {".raw", FL_RAW}, {".png", FL_PNG}, {".jpg", FL_JPG}, {".jpeg", FL_JPG} };
+	} exts[] = { {".bmp", FILE_BMP}, {".raw", FILE_RAW}, {".png", FILE_PNG}, {".jpg", FILE_JPG}, {".jpeg", FILE_JPG} };
 
 	/* parameters for querying a pathname */
 	static char local_dir[PATH_MAX]="";		/* Directory -- keep for multiple calls */
@@ -1356,7 +1494,7 @@ int TL_GetSaveName(char *path, size_t length, int *format) {
 
 	/* Determine the file format from extension */
 	if (format != NULL) {
-		*format = FL_BMP;												/* Default format is bitmap */
+		*format = FILE_BMP;												/* Default format is bitmap */
 		aptr = path+strlen(path)-1;
 		while (*aptr != '.' && aptr != path) aptr--;
 		if (*aptr == '.') {											/* Modify to actual file type */
@@ -1373,13 +1511,13 @@ int TL_GetSaveName(char *path, size_t length, int *format) {
 /* ===========================================================================
 -- Save data from TL camera as a bitmap (.bmp) file
 -- 
--- Usage: int TL_SaveImage(TL_CAMERA *tl, char *path, int frame);
+-- Usage: int TL_SaveImage(TL_CAMERA *tl, char *path, int frame, FILE_FORMAT format);
 --
 -- Inputs: tl    - an opened TL camera
 --         path  - pointer to name of a file to save data (or NULL for query)
 --         frame - frame to process from buffers (-1 ==> for most recent)
---         format - One of the FL_XXX file formats (from camera.h)
---                  defaults to FL_BMP if invalid format
+--         format - One of the FILE_XXX file formats (from camera.h)
+--                  defaults to FILE_BMP if invalid format
 --
 -- Output: saves the data as an RGB uncompressed bitmap
 --
@@ -1391,7 +1529,7 @@ int TL_GetSaveName(char *path, size_t length, int *format) {
 --           5 ==> unable to get the mutex semaphore
 --           6 ==> file failed to open
 =========================================================================== */
-int TL_SaveImage(TL_CAMERA *tl, char *path, int frame, int format) {
+int TL_SaveImage(TL_CAMERA *tl, char *path, int frame, FILE_FORMAT format) {
 	static char *rname = "TL_SaveImage";
 
 	int rc;
@@ -1405,17 +1543,17 @@ int TL_SaveImage(TL_CAMERA *tl, char *path, int frame, int format) {
 	
 	/* Have a filename, now just save the data */
 	switch (format) {
-		case FL_RAW:
+		case FILE_RAW:
 			rc = TL_SaveRawImage(tl, path, frame);
 			break;
-		case FL_BMP:
+		case FILE_BMP:
 		default:
 			rc = TL_SaveBMPImage(tl, path, frame);
 			break;
 	}
 	return rc;
 }
-		
+
 
 int TL_SaveBMPImage(TL_CAMERA *tl, char *path, int frame) {
 	static char *rname = "TL_SaveBMPImage";
@@ -1527,13 +1665,13 @@ int TL_SaveRawImage(TL_CAMERA *tl, char *path, int frame) {
 /* ===========================================================================
 -- Save all valid images that would have been collected in burst run
 --
--- Usage: TL_SaveBurstImages(TL_CAMERA *tl, char *pattern, int format);
+-- Usage: TL_SaveBurstImages(TL_CAMERA *tl, char *pattern, FILE_FORMAT format);
 --
 -- Inputs: tl      - pointer to active camera
 --         pattern - root of name for files
 --							  <pattern>.csv - logfile 
 --                     <pattern>_ddd.bmp - individual images
---         format  - format to save images (FL_BMP or FL_RAW - default FL_BMP)
+--         format  - format to save images (FILE_BMP or FILE_RAW - default FILE_BMP)
 --
 -- Output: Saves stored images as a series of bitmaps
 --
@@ -1542,7 +1680,7 @@ int TL_SaveRawImage(TL_CAMERA *tl, char *path, int frame) {
 --         2 ==> buffers not yet allocated or no data
 --         3 ==> save abandoned by choice in FileOpen dialog
 =========================================================================== */
-int TL_SaveBurstImages(TL_CAMERA *tl, char *pattern, int format) {
+int TL_SaveBurstImages(TL_CAMERA *tl, char *pattern, FILE_FORMAT format) {
 	static char *rname = "TL_SaveBurstImages";
 
 	char pathname[PATH_MAX], *extension;
@@ -1576,7 +1714,7 @@ RetryFileOpen:
 	}
 
 	/* Generate the appropriate extension for the files - default is bmp */
-	extension = (format == FL_RAW) ? "raw" : "bmp";
+	extension = (format == FILE_RAW) ? "raw" : "bmp";
 
 	/* Header line for the csv file */
 	fprintf(funit, "/* Index,filename,t_relative,t_time,t_clock\n");
@@ -2143,52 +2281,50 @@ int TL_SetRGBGains(TL_CAMERA *tl, double red, double green, double blue) {
 /* ===========================================================================
 -- Software arm/disarm camera (pending triggers)
 --
--- Usage: int TL_Arm(TL_CAMERA *tl);
---        int TL_Disarm(TL_CAMERA *tl);
+-- Usage: TRIG_ARM_ACTION TL_Arm(TL_CAMERA *tl, TRIG_ARM_ACTION action);
 --
 -- Inputs: tl - structure associated with a camera
+--         action - one of TRIG_ARM_QUERY, TRIG_ARM, TRIG_DISARM (dflt=query)
 --
 -- Output: Arms or disarms camera (with expectation of pending trigger)
 --
--- Return: 0 if successful
---           1 ==> tl invalid or closed
---           other ==> return from camera call that failed
+-- Return: Trigger arm state
+--				 TRIG_ARM_UNKNOWN on error 
+--				   otherwise TRiG_ARM or TRIG_DISARM
 --
 -- Notes: While valid for all triggers, intended primarily for TRIG_BURST
 --        In TRIG_FREERUN, after disarm, must arm AND trigger to restart
 =========================================================================== */
-int TL_Arm(TL_CAMERA *tl) {
+TRIG_ARM_ACTION TL_Arm(TL_CAMERA *tl, TRIG_ARM_ACTION action) {
 	static char *rname = "TL_Arm";
 	int rc;
 
 	/* Verify structure and arm */
-	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) {
-		rc = 1;
-	} else if ( (rc = tl_camera_arm(tl->handle, 2)) == 0) {
-		tl->trigger.bArmed = TRUE;
-		tl->nValid = tl->iLast = tl->iShow = 0;			/* Always start from zero again */
-	} else {
-		TL_CameraErrMsg(rc, "Arm failed", rname);
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return TRIG_ARM_UNKNOWN;
+	
+	switch (action) {
+		case TRIG_ARM:
+			if ( (rc = tl_camera_arm(tl->handle, 2)) != 0) {
+				TL_CameraErrMsg(rc, "Arm failed", rname);
+				return TRIG_ARM_UNKNOWN;
+			}
+			tl->trigger.bArmed = TRUE;
+			tl->nValid = tl->iLast = tl->iShow = 0;			/* Always start from zero again */
+			break;
+		case TRIG_DISARM:
+			if ( (rc = tl_camera_disarm(tl->handle)) != 0) {
+				TL_CameraErrMsg(rc, "Disarm failed", rname);
+				return TRIG_ARM_UNKNOWN;
+			}
+			tl->trigger.bArmed = FALSE;
+			break;
+		default:
+			break;
 	}
 
-	return rc;
+	return tl->trigger.bArmed ? TRIG_ARM : TRIG_DISARM ;
 }
 
-int TL_Disarm(TL_CAMERA *tl) {
-	static char *rname = "TL_Disarm";
-	int rc;
-
-	/* Verify structure and disarm */
-	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) {
-		rc = 1;
-	} else if ( (rc = tl_camera_disarm(tl->handle)) == 0) {
-		tl->trigger.bArmed = FALSE;
-	} else {
-		TL_CameraErrMsg(rc, "Disarm failed", rname);
-	}
-
-	return rc;
-}
 
 /* ===========================================================================
 -- Software trigger of camera

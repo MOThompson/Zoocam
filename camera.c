@@ -82,13 +82,56 @@ static int GetPreferredImageFormat(HWND hdlg);
 /* ------------------------------- */
 
 /* ===========================================================================
+-- Get information about the camera
+--
+-- Usage: int Camera_GetCameraInfo(WND_INFO *wnd, CAMERA_INFO *info);
+--
+-- Inputs: wnd     - pointer to valid window information
+--         info    - pointer to structure to receive camera information
+--
+-- Output: *info (if not NULL)
+--
+-- Return: 0 if successful, 1 if no camera initialized
+=========================================================================== */
+int Camera_GetCameraInfo(WND_INFO *wnd, CAMERA_INFO *info) {
+	static char *rname = "Camera_GetCameraInfo";
+
+	TL_CAMERA  *tl;
+	DCX_CAMERA *dcx;
+	int rc;
+	BOOL bServerRequest;
+
+	if (info != NULL) memset(info, 0, sizeof(*info));		/* Otherwise, empty out */
+
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
+	if (wnd == NULL) return 1;										/* Nothing initialized */
+
+	switch (wnd->Camera.driver) {
+		case DCX:
+			dcx = (DCX_CAMERA *) wnd->Camera.details;
+			rc = DCx_GetCameraInfo(dcx, info);
+			break;
+		case TL:
+			tl = (TL_CAMERA *) wnd->Camera.details;
+			rc = TL_GetCameraInfo(tl, info);
+			break;
+		default:
+			if (info != NULL) info->type = CAMERA_UNKNOWN;
+			rc = 1;
+			break;
+	}
+
+	return rc;
+}
+
+/* ===========================================================================
 -- Get the exposure setting for the camera
 --
--- Usage: int Camera_GetExposureParms(HWND hdlg, WND_INFO *wnd, 
+-- Usage: int Camera_GetExposureParms(WND_INFO *wnd, 
 --												  double *ms_min, double *ms_max, double *ms_incr);
 --
--- Inputs: hdlg    - calling dialog box (or NULL)
---         wnd     - pointer to valid window information
+-- Inputs: wnd     - pointer to valid window information
 --         ms_min  - pointer to get minimum allowed exposure time
 --         ms_max  - pointer to get maximum allowed exposure time
 --         ms_incr - pointer to get minmum increment time
@@ -99,13 +142,16 @@ static int GetPreferredImageFormat(HWND hdlg);
 --
 -- Notes: Not all cameras have a minimum increment; returns 0.001 ms if unknown
 =========================================================================== */
-int Camera_GetExposureParms(HWND hdlg, WND_INFO *wnd, double *ms_min, double *ms_max, double *ms_incr) {
+int Camera_GetExposureParms(WND_INFO *wnd, double *ms_min, double *ms_max, double *ms_incr) {
 	static char *rname = "Camera_GetExposureParms";
 
 	TL_CAMERA  *camera;
 	DCX_CAMERA *dcx;
 	int rc;
+	BOOL bServerRequest;
 
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 1;
 
 	switch (wnd->Camera.driver) {
@@ -129,23 +175,26 @@ int Camera_GetExposureParms(HWND hdlg, WND_INFO *wnd, double *ms_min, double *ms
 /* ===========================================================================
 -- Get the exposure setting for the camera
 --
--- Usage: double Camera_GetExposure(HWND hdlg, WND_INFO *wnd);
+-- Usage: double Camera_GetExposure(WND_INFO *wnd);
 --
--- Inputs: hdlg  - calling dialog box (or NULL)
---         wnd   - pointer to valid window information
+-- Inputs: wnd   - pointer to valid window information
 --
 -- Output: none
 --
 -- Return: Current exposure time in milliseconds
 =========================================================================== */
-double Camera_GetExposure(HWND hdlg, WND_INFO *wnd) {
+double Camera_GetExposure(WND_INFO *wnd) {
 	static char *rname = "Camera_GetExposure";
 
 	double rval;
 	TL_CAMERA  *camera;
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 0;
+
 	switch (wnd->Camera.driver) {
 		case DCX:
 			dcx = (DCX_CAMERA *) wnd->dcx;						/* (DCX_CAMERA *) wnd->Camera.details; */
@@ -167,26 +216,25 @@ double Camera_GetExposure(HWND hdlg, WND_INFO *wnd) {
 -- Set the exposure time for currently active camera (in ms).  Returns
 -- actual exposure time
 --
--- Usage: double Camera_SetExposure(HWND hdlg, WND_INFO *wnd, double ms_expose);
+-- Usage: double Camera_SetExposure(WND_INFO *wnd, double ms_expose);
 --
--- Inputs: hdlg - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd  - handle to the main information structure
+-- Inputs: wnd  - handle to the main information structure
 --         ms_exposure - desired exposure time in milliseconds
 --
 -- Output: sets exposure on active camera within allowable bounds
 --
 -- Return: 0 on error, otherwise actual exposure time instantiated in ms
 =========================================================================== */
-double Camera_SetExposure(HWND hdlg, WND_INFO *wnd, double ms_expose) {
+double Camera_SetExposure(WND_INFO *wnd, double ms_expose) {
 	static char *rname = "Camera_SetExposure";
 
 	TL_CAMERA *camera;
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 
 	/* Make sure we have valid structures */
-	if (wnd == NULL) wnd = main_wnd;
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 0.0;
-	if (hdlg == NULL) hdlg = wnd->main_hdlg;
 
 	/* Now just switch on the type of camera */
 	switch (wnd->Camera.driver) {
@@ -204,10 +252,11 @@ double Camera_SetExposure(HWND hdlg, WND_INFO *wnd, double ms_expose) {
 			break;
 	}
 
+	/* Server can't modify dialog box, so help here */
 	/* Update exposure, but also deal with fact that framerate may change */
-	if (hdlg != NULL && IsWindow(hdlg)) {
-		SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
-		SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);
+	if (wnd->hdlg != NULL && IsWindow(wnd->hdlg)) {
+		SendMessage(wnd->hdlg, WMP_SHOW_EXPOSURE, 0, 0);
+		SendMessage(wnd->hdlg, WMP_SHOW_FRAMERATE, 0, 0);
 	}
 
 	return ms_expose;
@@ -217,13 +266,12 @@ double Camera_SetExposure(HWND hdlg, WND_INFO *wnd, double ms_expose) {
 /* ===========================================================================
 -- Set the RGB gains ... each camera may do very differnt things
 --
--- Usage: int Camera_Set_RGB_Gain(HWND hdlg, WND_INFO *wnd, 
+-- Usage: int Camera_Set_RGB_Gain(WND_INFO *wnd, 
 --											 enum {R_CHAN, G_CHAN, B_CHAN} channel, 
 --											 enum {IS_SLIDER, IS_VALUE} entry, 
 --											 double value);
 --
--- Inputs: hdlg    - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd     - handle to the main information structure
+-- Inputs: wnd     - handle to the main information structure
 --         channel - which channel to modify
 --                    M_CHAN = master, R_CHAN, G_CHAN, B_CHAN = red, reen, blue
 --         entry   - type of data
@@ -236,18 +284,16 @@ double Camera_SetExposure(HWND hdlg, WND_INFO *wnd, double ms_expose) {
 -- Return: 0 if successful; otherwise error code
 --           1 ==> camera is not active
 =========================================================================== */
-int Camera_SetGains(HWND hdlg, WND_INFO *wnd, GAIN_CHANNEL channel, ENTRY_TYPE entry, double value) {
+int Camera_SetGains(WND_INFO *wnd, GAIN_CHANNEL channel, ENTRY_TYPE entry, double value) {
 	static char *rname = "Camera_SetGains";
 
 	int rc, ival;
 	TL_CAMERA *camera;
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 
 	/* Make sure we have valid structures */
-	if (wnd == NULL) wnd = main_wnd;
-	if (hdlg == NULL) hdlg = wnd->main_hdlg;
-
-	/* Must have an active camera to set */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 1;
 
 	rc = 0;
@@ -280,6 +326,9 @@ int Camera_SetGains(HWND hdlg, WND_INFO *wnd, GAIN_CHANNEL channel, ENTRY_TYPE e
 			break;
 	}
 
+	/* Server can't modify dialog box, so help here */
+	if (bServerRequest) SendMessage(wnd->hdlg, WMP_SHOW_GAINS, 0, 0);
+
 	return rc;
 }
 
@@ -287,26 +336,23 @@ int Camera_SetGains(HWND hdlg, WND_INFO *wnd, GAIN_CHANNEL channel, ENTRY_TYPE e
 /* ===========================================================================
 -- Reset RGB gains to default values (original when camera opened)
 --
--- Usage: int Camera_ResetGains(HWND hdlg, WND_INFO *wnd);
+-- Usage: int Camera_ResetGains(WND_INFO *wnd);
 --
--- Inputs: hdlg    - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd     - handle to the main information structure
+-- Inputs: wnd     - handle to the main information structure
 --
 -- Output: resets gains of all channels to defaults if possible
 --
 -- Return: 0 if successful; otherwise error code
 --           1 ==> camera is not active
 =========================================================================== */
-int Camera_ResetGains(HWND hdlg, WND_INFO *wnd) {
+int Camera_ResetGains(WND_INFO *wnd) {
 	static char *rname = "Camera_ResetGains";
 
 	int rc;
+	BOOL bServerRequest;
 
 	/* Make sure we have valid structures */
-	if (wnd == NULL) wnd = main_wnd;
-	if (hdlg == NULL) hdlg = wnd->main_hdlg;
-
-	/* Must have an active camera to set */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 1;
 
 	rc = 0;
@@ -342,10 +388,9 @@ int Camera_ResetGains(HWND hdlg, WND_INFO *wnd) {
 /* ===========================================================================
 -- Set the RGB gains ... each camera may do very differnt things
 --
--- Usage: int Camera_GetGains(HWND hdlg, WND_INFO *wnd, double values[4], double slider[4]);
+-- Usage: int Camera_GetGains(WND_INFO *wnd, double values[4], double slider[4]);
 --
--- Inputs: hdlg      - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd       - handle to the main information structure
+-- Inputs: wnd       - handle to the main information structure
 --         values[4] - array to receive numerical values for text entry boxes
 --         slider[4] - array to receive fractions [0.0,1.0] for setting sliders
 --                     Order is master, red, green, blue in each array
@@ -355,12 +400,13 @@ int Camera_ResetGains(HWND hdlg, WND_INFO *wnd) {
 -- Return: 0 if successful; otherwise error code
 --           1 ==> camera is not active
 =========================================================================== */
-int Camera_GetGains(HWND hdlg, WND_INFO *wnd, double values[4], double slider[4]) {
+int Camera_GetGains(WND_INFO *wnd, double values[4], double slider[4]) {
 	static char *rname = "Camera_GetGains";
 
 	int i, rc;
 	TL_CAMERA *camera;
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 	double rval[4], db_min, db_max;
 	int ival[4];
 
@@ -369,10 +415,7 @@ int Camera_GetGains(HWND hdlg, WND_INFO *wnd, double values[4], double slider[4]
 	if (slider != NULL) for (i=0; i<4; i++) slider[i] = 0.0;
 
 	/* Make sure we have valid structures */
-	if (wnd == NULL) wnd = main_wnd;
-	if (hdlg == NULL) hdlg = wnd->main_hdlg;
-
-	/* Must have an active camera to set */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 1;
 
 	rc = 0;
@@ -411,22 +454,24 @@ int Camera_GetGains(HWND hdlg, WND_INFO *wnd, double values[4], double slider[4]
 /* ===========================================================================
 -- Get the exposure setting for the camera
 --
--- Usage: Camera_GetFPSActual(HWND hdlg, WND_INFO *wnd);
+-- Usage: Camera_GetFPSActual(WND_INFO *wnd);
 --
--- Inputs: hdlg    - calling dialog box (or NULL)
---         wnd     - pointer to valid window information
+-- Inputs: wnd     - pointer to valid window information
 --
 -- Output: none
 --
 -- Return: Estimate of framerate from camera
 =========================================================================== */
-double Camera_GetFPSActual(HWND hdlg, WND_INFO *wnd) {
+double Camera_GetFPSActual(WND_INFO *wnd) {
 	static char *rname = "Camera_GetFPSActual";
 
 	DCX_CAMERA *dcx;
 	TL_CAMERA  *camera;
+	BOOL bServerRequest;
 	double fps;
 
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 1;
 
 	switch (wnd->Camera.driver) {
@@ -449,26 +494,25 @@ double Camera_GetFPSActual(HWND hdlg, WND_INFO *wnd) {
 /* ===========================================================================
 -- Set the framerate on cameras supporting
 --
--- Usage: double Camera_SetFPSControl(HWND hdlg, WND_INFO *wnd, double fps);
+-- Usage: double Camera_SetFPSControl(WND_INFO *wnd, double fps);
 --
--- Inputs: hdlg - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd  - handle to the main information structure
+-- Inputs: wnd  - handle to the main information structure
 --         fps  - desired rate
 --
 -- Output: sets fps if possible
 --
 -- Return: Actual value set, or 0 if error
 =========================================================================== */
-double Camera_SetFPSControl(HWND hdlg, WND_INFO *wnd, double fps) {
+double Camera_SetFPSControl(WND_INFO *wnd, double fps) {
 	static char *rname = "Camera_SetFPSControl";
 
 	DCX_CAMERA *dcx;
 	TL_CAMERA *tl;
+	BOOL bServerRequest;
 
 	/* Make sure we have valid structures and an active camera */
-	if (wnd == NULL) wnd = main_wnd;
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 1;
-	if (hdlg == NULL) hdlg = wnd->main_hdlg;
 
 	switch (wnd->Camera.driver) {
 		case DCX:
@@ -486,32 +530,34 @@ double Camera_SetFPSControl(HWND hdlg, WND_INFO *wnd, double fps) {
 			break;
 	}
 
+	/* Server can't modify dialog box, so help here */
+	if (bServerRequest) SendMessage(wnd->hdlg, WMP_SHOW_FRAMERATE, 0, 0);
+
 	return fps;
 }
 
 /* ===========================================================================
 -- Return the framerate setting on cameras supporting
 --
--- Usage: double Camera_GetFPSControl(HWND hdlg, WND_INFO *wnd);
+-- Usage: double Camera_GetFPSControl(WND_INFO *wnd);
 --
--- Inputs: hdlg - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd  - handle to the main information structure
+-- Inputs: wnd  - handle to the main information structure
 --
 -- Output: none
 --
 -- Return: - current framerate setting in fps if supported or <= 0 on error
 =========================================================================== */
-double Camera_GetFPSControl(HWND hdlg, WND_INFO *wnd) {
+double Camera_GetFPSControl(WND_INFO *wnd) {
 	static char *rname = "Camera_GetFPSControl";
 
 	TL_CAMERA *camera;
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 	double fps;
 
 	/* Make sure we have valid structures and an active camera */
-	if (wnd == NULL) wnd = main_wnd;
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 0.0;
-	if (hdlg == NULL) hdlg = wnd->main_hdlg;
 
 	switch (wnd->Camera.driver) {
 		case DCX:
@@ -532,47 +578,56 @@ double Camera_GetFPSControl(HWND hdlg, WND_INFO *wnd) {
 /* ===========================================================================
 -- Set the gamma factor on cameras supporting
 --
--- Usage: double Camera_SetGamma(HWND hdlg, WND_INFO *wnd, double gamma);
+-- Usage: double Camera_SetGamma(WND_INFO *wnd, double gamma);
 --
--- Inputs: hdlg - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd  - handle to the main information structure
+-- Inputs: wnd  - handle to the main information structure
 --         gamma - desired value ... with 1.0 as neutral
 --
 -- Output: sets gamma factor on active camera
 --
 -- Return: value actually set or 0.0 on error
 =========================================================================== */
-double Camera_SetGamma(HWND hdlg, WND_INFO *wnd, double gamma) {
+double Camera_SetGamma(WND_INFO *wnd, double gamma) {
 	static char *rname = "Camera_SetGamma";
 
+	double rval;
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 1;
+
 	if (wnd->Camera.driver != DCX) return 2;
 	dcx = wnd->dcx;
 
-	return DCx_SetGamma(dcx, gamma);
+	rval = DCx_SetGamma(dcx, gamma);
+
+	/* Server can't modify dialog box, so help here */
+	if (bServerRequest) SendMessage(wnd->hdlg, WMP_SHOW_GAMMA, 0, 0);
+
+	return rval;
 }
 
 /* ===========================================================================
 -- Return the gamma factor on cameras supporting
 --
--- Usage: double Camera_GetGamma(HWND hdlg, WND_INFO *wnd, double *gamma);
+-- Usage: double Camera_GetGamma(WND_INFO *wnd, double *gamma);
 --
--- Inputs: hdlg - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd  - handle to the main information structure
+-- Inputs: wnd  - handle to the main information structure
 --
 -- Output: none
 --
 -- Return: gamma value from camera, or 0 on error
 =========================================================================== */
-double Camera_GetGamma(HWND hdlg, WND_INFO *wnd) {
+double Camera_GetGamma(WND_INFO *wnd) {
 	static char *rname = "Camera_GetGamma";
 
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 0.0;
 
 	if (wnd->Camera.driver != DCX) return 0.0;
@@ -586,22 +641,26 @@ double Camera_GetGamma(HWND hdlg, WND_INFO *wnd) {
 -- Alternate routine to render a specific image frame in the buffer to a window
 -- Live images are processed in the threads
 --
--- Usage: int Camera_RenderFrame(HWND hdlg, WND_INFO *wnd, int frame, HWND hwnd);
+-- Usage: int Camera_RenderFrame(WND_INFO *wnd, int frame, HWND hwnd);
 --
--- Inputs: hdlg  - calling dialog box (or NULL)
---         wnd   - pointer to valid window information
---         frame - index of frame to image (0 = current)
+-- Inputs: wnd   - pointer to valid window information
+--         frame - index of frame to image (-1 ==> for most recent)
 --                 will be limited to allowed range
 --         hwnd  - window where image is to be rendered
 =========================================================================== */
-int Camera_RenderFrame(HWND hdlg, WND_INFO *wnd, int frame, HWND hwnd) {
+int Camera_RenderFrame(WND_INFO *wnd, int frame, HWND hwnd) {
 	static char *rname = "Camera_RenderFrame";
 
 	int rc;
 	TL_CAMERA *camera;
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 
-	if (! IsWindow(hwnd)) return 0;
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
+	if (wnd == NULL) return 1;
+
+	if (! IsWindow(hwnd)) return 1;
 
 	switch (wnd->Camera.driver) {
 		case DCX:
@@ -625,10 +684,9 @@ int Camera_RenderFrame(HWND hdlg, WND_INFO *wnd, int frame, HWND hwnd) {
 /* ===========================================================================
 -- Force trigger camera
 --
--- Usage: Camera_Trigger(HWND hdlg, WND_INFO *wnd);
+-- Usage: Camera_Trigger(WND_INFO *wnd);
 --
--- Inputs: hdlg    - calling dialog box (or NULL)
---         wnd     - pointer to valid window information
+-- Inputs: wnd     - pointer to valid window information
 --
 -- Output: Triggers camera immediately (last time if FREERUN)
 --
@@ -638,14 +696,16 @@ int Camera_RenderFrame(HWND hdlg, WND_INFO *wnd, int frame, HWND hwnd) {
 --               = 0 returns immediately but still triggers the capture
 --        If trigger mode was FREERUN, will be set to SOFTWARE after call
 =========================================================================== */
-int Camera_Trigger(HWND hdlg, WND_INFO *wnd) {
+int Camera_Trigger(WND_INFO *wnd) {
 	static char *rname = "Camera_Trigger";
 
 	DCX_CAMERA *dcx;
 	TL_CAMERA  *camera;
 	int rc;
+	BOOL bServerRequest;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 1;
 
 	switch (wnd->Camera.driver) {
@@ -668,71 +728,48 @@ int Camera_Trigger(HWND hdlg, WND_INFO *wnd) {
 /* ===========================================================================
 -- Software arm/disarm camera (pending triggers)
 --
--- Usage: int Camera_Arm(HWND hdlg, WND_INFO *wnd);
---        int Camera_Disarm(HWND hdlg, WND_INFO *wnd);
+-- Usage: TRIG_ARM_ACTION Camera_Arm(WND_INFO *wnd, TRIG_ARM_ACTION action);
 --
--- Inputs: hdlg   - calling dialog box (or NULL)
---         wnd    - pointer to valid window information
+-- Inputs: wnd    - pointer to valid window information
+--         action - one of TRIG_ARM_QUERY, TRIG_ARM, TRIG_DISARM (dflt=query)
 --
 -- Output: Arms or disarms camera (with expectation of pending trigger)
 --
--- Return: 0 if successful
---           1 ==> wnd invalid
---           other ==> return from camera call that failed
+-- Return: Trigger arm state
+--				 TRIG_ARM_UNKNOWN on error 
+--				   otherwise TRiG_ARM or TRIG_DISARM
 --
 -- Notes: While valid for all triggers, intended primarily for TRIG_BURST
 --        In TRIG_FREERUN, after disarm, must arm AND trigger to restart
 =========================================================================== */
-int Camera_Arm(HWND hdlg, WND_INFO *wnd) {
+TRIG_ARM_ACTION Camera_Arm(WND_INFO *wnd, TRIG_ARM_ACTION action) {
 	static char *rname = "Camera_Arm";
 
 	DCX_CAMERA *dcx;
 	TL_CAMERA  *camera;
+	BOOL bServerRequest;
 	int rc;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 1;
 
 	switch (wnd->Camera.driver) {
 		case DCX:
 			dcx = (DCX_CAMERA *) wnd->dcx;
-			rc = DCx_Arm(dcx);
+			rc = DCx_Arm(dcx, action);
 			break;
 		case TL:
 			camera = (TL_CAMERA *) wnd->Camera.details;
-			rc = TL_Arm(camera);
+			rc = TL_Arm(camera, action);
 			break;
 		default:
 			rc = 0;
 			break;
 	}
 
-	return rc;
-}
-
-int Camera_Disarm(HWND hdlg, WND_INFO *wnd) {
-	static char *rname = "Camera_Disarm";
-
-	DCX_CAMERA *dcx;
-	TL_CAMERA  *camera;
-	int rc;
-
-	/* Verify structure and that we have a camera */
-	if (wnd == NULL) return 1;
-
-	switch (wnd->Camera.driver) {
-		case DCX:
-			dcx = (DCX_CAMERA *) wnd->dcx;
-			rc = DCx_Disarm(dcx);
-			break;
-		case TL:
-			camera = (TL_CAMERA *) wnd->Camera.details;
-			rc = TL_Disarm(camera);
-			break;
-		default:
-			rc = 0;
-			break;
-	}
+	/* Server can't modify dialog box, so help here */
+	if (bServerRequest) SendMessage(wnd->hdlg, WMP_SHOW_ARM, 0, 0);
 
 	return rc;
 }
@@ -740,11 +777,10 @@ int Camera_Disarm(HWND hdlg, WND_INFO *wnd) {
 /* ===========================================================================
 -- Set/Query the triggering mode for the camera
 --
--- Usage: TRIGGER_MODE Camera_SetTriggerMode(HWND hdlg, WND_INFO *wnd, TRIGGER_MODE mode, TRIGGER_INFO *info);
---        TRIGGER_MODE Camera_GetTriggerMode(HWND hdlg, WND_INFO *wnd, TRIGGER_INFO *info);
+-- Usage: TRIGGER_MODE Camera_SetTriggerMode(WND_INFO *wnd, TRIGGER_MODE mode, TRIGGER_INFO *info);
+--        TRIGGER_MODE Camera_GetTriggerMode(WND_INFO *wnd, TRIGGER_INFO *info);
 --
--- Inputs: hdlg   - calling dialog box (or NULL)
---         wnd    - pointer to valid window information
+-- Inputs: wnd    - pointer to valid window information
 --         mode   - one of the allowed triggering modes
 --                  CAMERA_TRIG_SOFTWARE, CAMERA_TRIG_FREERUN, CAMERA_TRIG_EXTERNAL
 --         info   - structure with details about triggering
@@ -765,14 +801,16 @@ int Camera_Disarm(HWND hdlg, WND_INFO *wnd) {
 --        is termimated by a Camera_Disarm() call.  TRIG_BURST can be used
 --        to differentiate calls to Arm, Disarm, and Trigger appropriately.
 =========================================================================== */
-TRIGGER_MODE Camera_SetTriggerMode(HWND hdlg, WND_INFO *wnd, TRIGGER_MODE mode, TRIGGER_INFO *info) {
+TRIGGER_MODE Camera_SetTriggerMode(WND_INFO *wnd, TRIGGER_MODE mode, TRIGGER_INFO *info) {
 	static char *rname = "Camera_SetTriggerMode";
 
 	DCX_CAMERA *dcx;
 	TL_CAMERA  *camera;
+	BOOL bServerRequest;
 	int rc;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return -1;
 
 	switch (wnd->Camera.driver) {
@@ -791,18 +829,23 @@ TRIGGER_MODE Camera_SetTriggerMode(HWND hdlg, WND_INFO *wnd, TRIGGER_MODE mode, 
 			break;
 	}
 
+	/* Server can't modify dialog box, so help here */
+	if (bServerRequest) SendMessage(wnd->hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
+
 	return rc;
 }
 
 
-TRIGGER_MODE Camera_GetTriggerMode(HWND hdlg, WND_INFO *wnd, TRIGGER_INFO *info) {
+TRIGGER_MODE Camera_GetTriggerMode(WND_INFO *wnd, TRIGGER_INFO *info) {
 	static char *rname = "Camera_GetTriggerMode";
 
 	DCX_CAMERA *dcx;
 	TL_CAMERA  *camera;
+	BOOL bServerRequest;
 	int rc;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return -1;
 
 	switch (wnd->Camera.driver) {
@@ -827,11 +870,10 @@ TRIGGER_MODE Camera_GetTriggerMode(HWND hdlg, WND_INFO *wnd, TRIGGER_INFO *info)
 /* ===========================================================================
 -- Set number of frames per trigger (allow 0 for infinite)
 --
--- Usage: int Camera_SetFramesPerTrigger(HWND hdlg, WND_INFO *wnd, int frames);
---        int Camera_GetFramesPerTrigger(HWND hdlg, WND_INFO *wnd);
+-- Usage: int Camera_SetFramesPerTrigger(WND_INFO *wnd, int frames);
+--        int Camera_GetFramesPerTrigger(WND_INFO *wnd);
 --
--- Inputs: hdlg   - calling dialog box (or NULL)
---         wnd    - pointer to valid window information
+-- Inputs: wnd    - pointer to valid window information
 --         frames - # of frames per trigger, or 0 for infinite
 --
 -- Output: Sets camera triggering count
@@ -841,14 +883,16 @@ TRIGGER_MODE Camera_GetTriggerMode(HWND hdlg, WND_INFO *wnd, TRIGGER_INFO *info)
 - Note: The value will only be set if in TRIG_SOFTWARE or TRIG_EXTERNAL
 --       modes.  But value will be stored in the internal info in any case
 =========================================================================== */
-int Camera_GetFramesPerTrigger(HWND hdlg, WND_INFO *wnd) {
+int Camera_GetFramesPerTrigger(WND_INFO *wnd) {
 	static char *rname = "Camera_GetFramesPerTrigger";
 
 	DCX_CAMERA *dcx;
 	TL_CAMERA  *camera;
+	BOOL bServerRequest;
 	int rc;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return -1;
 
 	switch (wnd->Camera.driver) {
@@ -870,14 +914,16 @@ int Camera_GetFramesPerTrigger(HWND hdlg, WND_INFO *wnd) {
 	return rc;
 }
 
-int Camera_SetFramesPerTrigger(HWND hdlg, WND_INFO *wnd, int frames) {
+int Camera_SetFramesPerTrigger(WND_INFO *wnd, int frames) {
 	static char *rname = "Camera_SetFramesPerTrigger";
 
 	DCX_CAMERA *dcx;
 	TL_CAMERA  *camera;
+	BOOL bServerRequest;
 	int rc;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return -1;
 
 	switch (wnd->Camera.driver) {
@@ -903,11 +949,10 @@ int Camera_SetFramesPerTrigger(HWND hdlg, WND_INFO *wnd, int frames) {
 /* ===========================================================================
 -- Set/Query the color correction mode for the camera
 --
--- Usage: COLOR_CORRECT Camera_SetColorCorrection(HWND hdlg, WND_INFO *wnd, COLOR_CORRECT mode, double rval);
---        COLOR_CORRECT Camera_SetColorCorrection(HWND hdlg, WND_INFO *wnd, double &rval);
+-- Usage: COLOR_CORRECT Camera_SetColorCorrection(WND_INFO *wnd, COLOR_CORRECT mode, double rval);
+--        COLOR_CORRECT Camera_SetColorCorrection(WND_INFO *wnd, double &rval);
 --
--- Inputs: hdlg   - calling dialog box (or NULL)
---         wnd    - pointer to valid window information
+-- Inputs: wnd    - pointer to valid window information
 --         mode   - one of the allowed color correction modes
 --         rval   - strength of color corrections (camera dependent)
 --
@@ -915,13 +960,15 @@ int Camera_SetFramesPerTrigger(HWND hdlg, WND_INFO *wnd, int frames) {
 --
 -- Return: Actual color correction mode set for camera or <0 on error
 =========================================================================== */
-COLOR_CORRECT Camera_SetColorCorrection(HWND hdlg, WND_INFO *wnd, COLOR_CORRECT mode, double rval) {
+COLOR_CORRECT Camera_SetColorCorrection(WND_INFO *wnd, COLOR_CORRECT mode, double rval) {
 	static char *rname = "Camera_SetColorCorrection";
 
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 	int rc;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return -1;
 
 	switch (wnd->Camera.driver) {
@@ -939,13 +986,15 @@ COLOR_CORRECT Camera_SetColorCorrection(HWND hdlg, WND_INFO *wnd, COLOR_CORRECT 
 	return rc;
 }
 
-COLOR_CORRECT Camera_GetColorCorrection(HWND hdlg, WND_INFO *wnd, double *rval) {
+COLOR_CORRECT Camera_GetColorCorrection(WND_INFO *wnd, double *rval) {
 	static char *rname = "Camera_GetColorCorrection";
 
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 	int rc;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return -1;
 
 	switch (wnd->Camera.driver) {
@@ -967,10 +1016,9 @@ COLOR_CORRECT Camera_GetColorCorrection(HWND hdlg, WND_INFO *wnd, double *rval) 
 /* ===========================================================================
 -- Returns statistics on the ring buffers
 --
--- Usage: int Camera_GetRingInfo(HWND hdlg, WND_INFO *wnd, RING_INFO *info);
+-- Usage: int Camera_GetRingInfo(WND_INFO *wnd, RING_INFO *info);
 --
--- Inputs: hdlg    - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd     - handle to the main information structure
+-- Inputs: wnd     - handle to the main information structure
 --
 -- Output: writes a file unless cancelled
 --
@@ -978,15 +1026,17 @@ COLOR_CORRECT Camera_GetColorCorrection(HWND hdlg, WND_INFO *wnd, double *rval) 
 --           1 ==> bad parameters or camera is not active
 --           2 ==> info was NULL
 =========================================================================== */
-int Camera_GetRingInfo(HWND hdlg, WND_INFO *wnd, RING_INFO *info) {
+int Camera_GetRingInfo(WND_INFO *wnd, RING_INFO *info) {
 	static char *rname = "Camera_GetRingInfo";
 
 	int rc;
 	DCX_CAMERA *dcx;
 	TL_CAMERA *tl;
+	BOOL bServerRequest;
 
-	/* Make sure we have valid structures and an active camera */
-	if (wnd == NULL) wnd = main_wnd;
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
+	if (wnd == NULL) return 1;
 
 	/* Useless call if no info ... return with error or set default return values */
 	if (info == NULL) return 2;
@@ -1016,10 +1066,9 @@ int Camera_GetRingInfo(HWND hdlg, WND_INFO *wnd, RING_INFO *info) {
 /* ===========================================================================
 -- Allocate (or deallocate) ring buffer for images
 --
--- Usage: int Camera_SetBufferSize(HWND hdlg, WND_INFO *wnd, int nBuf);
+-- Usage: int Camera_SetBufferSize(WND_INFO *wnd, int nBuf);
 --
--- Inputs: hdlg - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd  - handle to the main information structure
+-- Inputs: wnd  - handle to the main information structure
 --         nBuf - number of buffers to allocate in the ring (DCX_MAX_RING_SIZE)
 --                constrained within limits [1, DCX_MAX_RING_SIZE]
 --
@@ -1029,14 +1078,16 @@ int Camera_GetRingInfo(HWND hdlg, WND_INFO *wnd, RING_INFO *info) {
 --
 -- Note: A request can be ignored and will return previous size
 =========================================================================== */
-int Camera_SetRingBufferSize(HWND hdlg, WND_INFO *wnd, int nBuf) {
+int Camera_SetRingBufferSize(WND_INFO *wnd, int nBuf) {
 	static char *rname = "Camera_SetRingBufferSize";
 
 	int rc;
 	DCX_CAMERA *dcx;
 	TL_CAMERA *tl;
+	BOOL bServerRequest;
 
-	/* Have to have a camera enable to even bother asking */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 0;
 
 	switch (wnd->Camera.driver) {
@@ -1053,31 +1104,35 @@ int Camera_SetRingBufferSize(HWND hdlg, WND_INFO *wnd, int nBuf) {
 			break;
 	}
 
+	/* Server can't modify dialog box, so help here */
+	if (bServerRequest) SetDlgItemInt(wnd->hdlg, IDV_RING_SIZE, nBuf, FALSE);
+
 	return rc;
 }
 
 /* ===========================================================================
 -- Determine formats that camera supports for writing
 --
--- Usage: int Camera_GetSaveFormatFlag(HWND hdlg, WND_INFO *wnd);
+-- Usage: int Camera_GetSaveFormatFlag(WND_INFO *wnd);
 --
--- Inputs: hdlg - pointer to the window handle
---         wnd  - handle to the main information structure
+-- Inputs: wnd  - handle to the main information structure
 --
 -- Output: none
 --
 -- Return: Bit-wise flags giving camera capabilities
---				 FL_BMP | FL_JPG | FL_RAW | FL_BURST (unique)
+--				 FILE_BMP | FILE_JPG | FILE_RAW | FILE_BURST (unique)
 --         0 on errors (no capabilities)
 =========================================================================== */
-int Camera_GetSaveFormatFlag(HWND hdlg, WND_INFO *wnd) {
+int Camera_GetSaveFormatFlag(WND_INFO *wnd) {
 	static char *rname = "Camera_GetSaveFormatFlag";
 
 	int rc;
 	TL_CAMERA *camera;
 	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
 
-	/* Verify structure and that we have a camera */
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
 	if (wnd == NULL) return 0;
 
 	switch (wnd->Camera.driver) {
@@ -1100,27 +1155,164 @@ int Camera_GetSaveFormatFlag(HWND hdlg, WND_INFO *wnd) {
 
 
 /* ===========================================================================
--- Save the most recent image as an image file
+-- Get information about a specific image
 --
--- Usage: int Camera_SaveBMPImage(HWND hdlg, WND_INFO *wnd, int dflt_format);
+-- Usage: int Camera_GetImageInfo(WND_INFO *wnd, int frame, IMAGE_INFO *info);
 --
--- Inputs: hdlg   - pointer to the window handle (will use IDC_CAMERA_LIST element)
---         wnd    - handle to the main information structure
---         dflt_format - default save format (can be overwitten in dialog box)
+-- Inputs: wnd   - pointer to valid window information
+--         frame - index of frame to image (-1 = current)
+--                    invalid frame return error (rc = 2)
+--         info  - pointer to structure to receive image information
 --
--- Output: writes a file with current image (unless cancelled)
+-- Output: *info (if not NULL)
+--
+-- Return: 0 if successful, 
+--           1 => no camera initialized
+--           2 => frame invalid
+=========================================================================== */
+int Camera_GetImageInfo(WND_INFO *wnd, int frame, IMAGE_INFO *info) {
+	static char *rname = "Camera_GetImageInfo";
+
+	TL_CAMERA  *tl;
+	DCX_CAMERA *dcx;
+	int rc;
+	BOOL bServerRequest;
+
+	if (info != NULL) memset(info, 0, sizeof(*info));		/* Otherwise, empty out */
+
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
+	if (wnd == NULL) return 1;										/* Nothing initialized */
+
+	switch (wnd->Camera.driver) {
+		case DCX:
+			dcx = (DCX_CAMERA *) wnd->Camera.details;
+			rc = DCx_GetImageInfo(dcx, frame, info);
+			break;
+		case TL:
+			tl = (TL_CAMERA *) wnd->Camera.details;
+			rc = TL_GetImageInfo(tl, frame, info);
+			break;
+		default:
+			if (info != NULL) info->type = CAMERA_UNKNOWN;
+			rc = 1;
+			break;
+	}
+
+	return rc;
+}
+
+/* ===========================================================================
+-- Get pointer to raw data for a specific image, and length of that data
+--
+-- Usage: int Camera_GetImageData(WND_INFO *wnd, int frame, void **image_data, int *length);
+--
+-- Inputs: wnd        - pointer to valid window information
+--         frame      - index of frame to image (-1 = current)
+--                        invalid frame return error (rc = 2)
+--         image_data - pointer to get a pointer to actual memory location (shared)
+--         length     - pointer to get count to # of bytes in the image data
+--
+-- Output: *image_data - a pointer (UNSIGNED SHORT *) to actual data
+--         *length     - number of bytes in the memory buffer
+--
+-- Return: 0 if successful, 
+--           1 => no camera initialized
+--           2 => frame invalid
+=========================================================================== */
+int Camera_GetImageData(WND_INFO *wnd, int frame, void **image_data, int *length) {
+	static char *rname = "Camera_GetImageData";
+
+	TL_CAMERA  *tl;
+	DCX_CAMERA *dcx;
+	int rc;
+	BOOL bServerRequest;
+
+	/* Default return values */
+	if (image_data != NULL) *image_data = NULL;
+	if (length     != NULL) *length = 0;
+
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
+	if (wnd == NULL) return 1;										/* Nothing initialized */
+
+	switch (wnd->Camera.driver) {
+		case DCX:
+			dcx = (DCX_CAMERA *) wnd->Camera.details;
+			rc = DCx_GetImageData(dcx, frame, image_data, length);
+			break;
+		case TL:
+			tl = (TL_CAMERA *) wnd->Camera.details;
+			rc = TL_GetImageData(tl, frame, image_data, length);
+			break;
+		default:
+			rc = 1;
+			break;
+	}
+
+	return rc;
+}
+
+
+/* ===========================================================================
+-- Guess file format from extension of a given filename
+--
+-- Usage: FILE_FORMAT GuessFileFormat(char *path);
+--
+-- Inputs: path   - a pathname
+--
+-- Output: none
+--
+-- Return: Matching format, or FILE_BMP if none match 
+=========================================================================== */
+FILE_FORMAT GuessFileFormat(char *path) {
+
+	FILE_FORMAT format;
+	char *aptr;
+	int i;
+
+	static struct {
+		char *ext;
+		FILE_FORMAT format;
+	} exts[] = { {".bmp", FILE_BMP}, {".raw", FILE_RAW}, {".png", FILE_PNG}, {".jpg", FILE_JPG}, {".jpeg", FILE_JPG} };
+
+	/* Set the default return value */
+	format = FILE_BMP;
+
+	/* Look for the extension and compare to known types */
+	aptr = path + strlen(path)-1;
+	while (*aptr != '.' && aptr != path) aptr--;
+	if (*aptr == '.') {											/* Modify to actual file type */
+		for (i=0; i<sizeof(exts)/sizeof(exts[0]); i++) {
+			if (_stricmp(aptr, exts[i].ext) == 0) format = exts[i].format;
+		}
+	}
+
+	return format;
+}
+
+
+/* ===========================================================================
+-- Query for a filename to save image
+--
+-- Usage: int GetFilename(WND_INFO *wnd, char *path, size_t length, FILE_FORMAT dflt_format, FILE_FORMAT *format);
+--
+-- Inputs: wnd      - handle to the main information structure
+--         path     - variable to receive new pathname
+--         length   - number of characters available in path
+--         dlft_fmt - default format for the open dialog box
+--         format   - variable to receive actual format
+--
+-- Output: writes file with image (unless cancelled)
 --
 -- Return: 0 if successful; otherwise error code
 --           1 ==> bad parameters or camera is not active
+--           2 ==> invalid frame
 =========================================================================== */
-int Camera_SaveImage(HWND hdlg, WND_INFO *wnd, int dflt_format) {
-	static char *rname = "Camera_SaveImage";
+static int GetFilename(WND_INFO *wnd, char *path, size_t length, FILE_FORMAT dflt_format, FILE_FORMAT *format) {
+	static char *rname = "GetFilename";
 
-	int rc;
-	TL_CAMERA *camera;
-	DCX_CAMERA *dcx;
-
-	int i, flags;
+	int i;
 	size_t len;
 	int format_flags, format_index, nformats;
 	char *aptr, *dfltExt, filter[256];
@@ -1128,45 +1320,32 @@ int Camera_SaveImage(HWND hdlg, WND_INFO *wnd, int dflt_format) {
 	/* information for creating filter string */
 	static struct {
 		int flag;
+		FILE_FORMAT format;
 		char *text,	*wild, *ext;
 	} filters[]	= {
-		{FL_BMP, "Bitmap format (*.bmp)",	"*.bmp", "bmp"},
-		{FL_RAW, "Raw format (*.raw)",		"*.raw", "raw"},
-		{FL_PNG, "PNG format (*.png)",		"*.png", "png"},
-		{FL_JPG, "JPEG format (*.jpg)",		"*.jpg", "jpg"},
-		{0xFFFF,	"All files (*.*)",			"*.*",	"bmp"}				/* Will also become default extension of bmp */
+		{FL_BMP, FILE_BMP,  "Bitmap format (*.bmp)",	"*.bmp", "bmp"},
+		{FL_RAW, FILE_RAW,  "Raw format (*.raw)",		"*.raw", "raw"},
+		{FL_PNG, FILE_PNG,  "PNG format (*.png)",		"*.png", "png"},
+		{FL_JPG, FILE_JPG,  "JPEG format (*.jpg)",	"*.jpg", "jpg"},
+		{0xFFFF, FILE_DFLT, "All files (*.*)",			"*.*",	"bmp"}				/* Will also become default extension of bmp */
 	};
-	static struct {
-		char *ext;
-		int flag;
-	} exts[] = { {".bmp", FL_BMP}, {".raw", FL_RAW}, {".png", FL_PNG}, {".jpg", FL_JPG}, {".jpeg", FL_JPG} };
 
 	/* parameters for querying a pathname */
 	static char local_dir[PATH_MAX]="";		/* Directory -- keep for multiple calls */
-	char pathname[PATH_MAX];
 	OPENFILENAME ofn;
 
-	/* If wnd not give, use one from global variables */
-	if (wnd == NULL) wnd = main_wnd;
-
-	/* Verify structure and that we have a camera */
-	if (wnd == NULL) return 1;
-	if (hdlg == NULL) hdlg = wnd->main_hdlg;
-
-	rc = 0;
-
-	/* Stop the video if running (SOFTWARE trigger for moment) */
-	if (wnd->LiveVideo) Camera_SetTriggerMode(hdlg, wnd, TRIG_SOFTWARE, NULL);
-	wnd->LiveVideo = FALSE;
+	/* Default return values */
+	*path   = '\0';
+	*format = FILE_BMP;							/* Default format is bitmap */
 
 	/* Generate the filter string to include allowed extensions */
-	format_flags  = Camera_GetSaveFormatFlag(hdlg, wnd);
-	format_index  = 0;		/* Index of dflt_format in list.  If stays 0, okay for call */
+	format_flags  = Camera_GetSaveFormatFlag(wnd);
+	format_index  = 0;							/* Index of dflt_format in list.  If stays 0, okay for call */
 
 	/* Generate filter string ... looks like "bitmap image (*.bmp)\0*.bmp\0raw camera (*.raw)\0*.raw\0All files (*.*)\0*.*\0\0" */
 	aptr = filter; len = sizeof(filter);
 	dfltExt = NULL;
-	format_flags |= 0x8000;								/* Ensure we match "all files" entry */
+	format_flags |= 0x8000;						/* Ensure we match "all files" entry */
 	nformats = 0;
 	for (i=0; i<sizeof(filters)/sizeof(filters[0]); i++) {
 		if (format_flags & filters[i].flag) {
@@ -1174,7 +1353,7 @@ int Camera_SaveImage(HWND hdlg, WND_INFO *wnd, int dflt_format) {
 			strcpy_s(aptr, len, filters[i].text); len -= strlen(aptr)+1; aptr += strlen(aptr)+1;
 			strcpy_s(aptr, len, filters[i].wild); len -= strlen(aptr)+1; aptr += strlen(aptr)+1;
 			if (dfltExt == NULL) dfltExt = filters[i].ext;	/* Ensure we have one! */
-			if (filters[i].flag == dflt_format) {
+			if (filters[i].format == dflt_format) {
 				format_index = nformats;
 				dfltExt = filters[i].ext;
 			}
@@ -1183,16 +1362,16 @@ int Camera_SaveImage(HWND hdlg, WND_INFO *wnd, int dflt_format) {
 	*aptr = '\0';													/* final null to terminate list */
 
 	/* Get a save-as filename */
-	strcpy_s(pathname, sizeof(pathname), "image");		/* Pathname must be initialized with a value (even if just '\0) */
+	strcpy_s(path, length, "image");					/* Pathname must be initialized (even if just '\0) */
 	ofn.lStructSize       = sizeof(OPENFILENAME);
-	ofn.hwndOwner         = hdlg;
+	ofn.hwndOwner         = wnd->hdlg;
 	ofn.lpstrTitle        = "Save image";
 	ofn.lpstrFilter       = filter;
 	ofn.lpstrCustomFilter = NULL;
 	ofn.nMaxCustFilter    = 0;
 	ofn.nFilterIndex      = format_index;
-	ofn.lpstrFile         = pathname;				/* Full path */
-	ofn.nMaxFile          = sizeof(pathname);
+	ofn.lpstrFile         = path;						/* Full path */
+	ofn.nMaxFile          = length;
 	ofn.lpstrFileTitle    = NULL;						/* Partial path */
 	ofn.nMaxFileTitle     = 0;
 	ofn.lpstrDefExt       = dfltExt;
@@ -1200,32 +1379,75 @@ int Camera_SaveImage(HWND hdlg, WND_INFO *wnd, int dflt_format) {
 	ofn.Flags = OFN_LONGNAMES | OFN_NOCHANGEDIR | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
 
 	/* Query a filename ... if abandoned, just return now with no complaints */
-	if (! GetSaveFileName(&ofn)) { rc = 1; goto ExitSave; }
+	if (! GetSaveFileName(&ofn)) return 2;
 
 	/* Save directory for subsequent calls */
-	strcpy_s(local_dir, sizeof(local_dir), pathname);
+	strcpy_s(local_dir, sizeof(local_dir), path);
 	local_dir[ofn.nFileOffset-1] = '\0';
 
 	/* Determine the file format from the extension */
-	flags = FL_BMP;												/* Default format is bitmap */
-	aptr = pathname+strlen(pathname)-1;
-	while (*aptr != '.' && aptr != pathname) aptr--;
-	if (*aptr == '.') {											/* Modify to actual file type */
-		for (i=0; i<sizeof(exts)/sizeof(exts[0]); i++) {
-			if (_stricmp(aptr, exts[i].ext) == 0) flags = exts[i].flag;
-		}
+	*format = GuessFileFormat(path);
+
+	return 0;
+}
+
+/* ===========================================================================
+-- Save the most recent image as an image file
+--
+-- Usage: int Camera_SaveImage(WND_INFO *wnd, int frame, char *path, FILE_FORMAT format);
+--
+-- Inputs: wnd    - handle to the main information structure
+--         frame  - frame to save (-1 => last)
+--         path   - filename (NULL to query)
+--         format - format (if path given) or preferred format if querying
+--
+-- Output: writes file with image (unless cancelled)
+--
+-- Return: 0 if successful; otherwise error code
+--           1 ==> bad parameters or camera is not active
+--           2 ==> invalid frame
+=========================================================================== */
+int Camera_SaveImage(WND_INFO *wnd, int frame, char *pathname, FILE_FORMAT format) {
+	static char *rname = "Camera_SaveImage";
+
+	int rc;
+	TL_CAMERA *camera;
+	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
+
+	char path[PATH_MAX];								/* Local storage for pathname if NULL */
+
+	/* If wnd not give, use one from global variables */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
+	if (wnd == NULL) return 1;
+
+	rc = 0;
+
+#if 0
+	/* Stop the video if running (SOFTWARE trigger for moment) */
+	if (wnd->LiveVideo) Camera_SetTriggerMode(wnd, TRIG_SOFTWARE, NULL);
+	wnd->LiveVideo = FALSE;
+#endif
+
+	/* If path is NULL, query a pathname using local storage */
+	if (pathname == NULL || *pathname == '\0') {
+		if (GetFilename(wnd, path, sizeof(path), format, &format) != 0) return 3;			/* Aborted */
+		pathname = path;
 	}
+
+	/* Guess format for the drivers ... though they will ultimately choose a default */
+	if (format == FILE_DFLT) format = GuessFileFormat(pathname);
 
 	/* Send to appropriate driver routine */
 	switch (wnd->Camera.driver) {
 		case DCX:
 			dcx = wnd->dcx;
-			DCx_SaveImage(dcx, pathname, -1, flags);
+			rc = DCx_SaveImage(dcx, pathname, frame, format);
 			break;
 
 		case TL:
 			camera = (TL_CAMERA *) wnd->Camera.details;
-			rc = TL_SaveImage(camera, pathname, -1, flags);
+			rc = TL_SaveImage(camera, pathname, frame, format);
 			break;
 
 		default:
@@ -1233,24 +1455,27 @@ int Camera_SaveImage(HWND hdlg, WND_INFO *wnd, int dflt_format) {
 			break;
 	}
 
+#if 0
 ExitSave:
 	/* Re-enable video if halted for save */
-	if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
-		Camera_SetTriggerMode(hdlg, wnd, TRIG_FREERUN, 0);
+	if (GetDlgItemCheck(wnd->hdlg, IDB_LIVE)) {
+		Camera_SetTriggerMode(wnd, TRIG_FREERUN, 0);
 		wnd->LiveVideo = TRUE;
 	}
+#endif
 
 	return rc;
 }
 
+
 /* ===========================================================================
 -- Save all valid images that would have been collected in burst run
 --
--- Usage: Camera_SaveBurstImages(HWND hdlg, WND_INFO *wnd, int format);
+-- Usage: Camera_SaveAll(WND_INFO *wnd, char *pattern, FILE_FORMAT format);
 --
--- Inputs: hdlg   - pointer to the window handle
---         wnd    - pointer to current descriptor
---         format - format to save data (defaults to FL_BMP)
+-- Inputs: wnd     - pointer to current descriptor
+--         pattern - root of filenames or NULL to query
+--         format  - format to save data (defaults to FILE_BMP)
 --
 -- Output: Saves images as a series of bitmaps
 --
@@ -1261,8 +1486,8 @@ ExitSave:
 =========================================================================== */
 #ifndef USE_RINGS
 
-int Camera_SaveBurstImages(HWND hdlg, WND_INFO *wnd, int format) {
-	static char *rname="Camera_SaveBurstImages";
+int Camera_SaveAll(WND_INFO *wnd, char *pattern, FILE_FORMAT format) {
+	static char *rname="Camera_SaveAll";
 
 	Beep(300,200);
 	return 1;
@@ -1270,58 +1495,75 @@ int Camera_SaveBurstImages(HWND hdlg, WND_INFO *wnd, int format) {
 
 #else
 
-int Camera_SaveBurstImages(HWND hdlg, WND_INFO *wnd, int format) {
-	static char *rname="Camera_SaveBurstImages";
+int Camera_SaveAll(WND_INFO *wnd, char *pattern, FILE_FORMAT format) {
+	static char *rname="Camera_SaveAll";
 
 	int rc;
-	BOOL wasLive;
-	char pattern[PATH_MAX], *aptr;
 	RING_INFO rings;
 	OPENFILENAME ofn;
 
 	DCX_CAMERA *dcx;
 	TL_CAMERA *tl;
+	BOOL bServerRequest;
 
+	char path[PATH_MAX], *aptr;
 	static char local_dir[PATH_MAX] = "";
 
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
+	if (wnd == NULL) return 2;
+
 	/* Verify that we have buffers to save */
-	if (Camera_GetRingInfo(hdlg, wnd, &rings) != 0 || rings.nValid <= 0) return 2;
+	if (Camera_GetRingInfo(wnd, &rings) != 0 || rings.nValid <= 0) return 2;
 
-	/* Get the pattern for the save (directory and name without the extension */
-	strcpy_m(pattern, sizeof(pattern), "basename");			/* Default name must be initialized with something */
-	ofn.lStructSize       = sizeof(ofn);
-	ofn.hwndOwner         = hdlg;
-	ofn.lpstrTitle        = "Burst image database save";
-	ofn.lpstrFilter       = "Excel csv file (*.csv)\0*.csv\0\0";
-	ofn.lpstrCustomFilter = NULL;
-	ofn.nMaxCustFilter    = 0;
-	ofn.nFilterIndex      = 1;
-	ofn.lpstrFile         = pattern;					/* Full path */
-	ofn.nMaxFile          = sizeof(pattern);
-	ofn.lpstrFileTitle    = NULL;						/* Partial path */
-	ofn.nMaxFileTitle     = 0;
-	ofn.lpstrDefExt       = "csv";
-	ofn.lpstrInitialDir   = (*local_dir=='\0' ? NULL : local_dir);
-	ofn.Flags = OFN_LONGNAMES | OFN_NOCHANGEDIR | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
+	/* Do we want to query? */
+	if (pattern == NULL || *pattern == '\0') {
 
-	/* Get filename and maybe abort */
-	fprintf(stderr, "Requesting filename ... "); fflush(stderr);
-	if (! GetSaveFileName(&ofn)) return 3;						/* If aborted, just skip and go back to re-enabling the image */
-	fprintf(stderr, "returned\n"); fflush(stderr);
+		/* Get the pattern for the save (directory and name without the extension */
+		strcpy_m(path, sizeof(path), "basename");		/* Default name must be initialized with something */
+		ofn.lStructSize       = sizeof(ofn);
+		ofn.hwndOwner         = wnd->hdlg;
+		ofn.lpstrTitle        = "Burst image database save";
+		ofn.lpstrFilter       = "Excel csv file (*.csv)\0*.csv\0\0";
+		ofn.lpstrCustomFilter = NULL;
+		ofn.nMaxCustFilter    = 0;
+		ofn.nFilterIndex      = 1;
+		ofn.lpstrFile         = path;						/* Full path */
+		ofn.nMaxFile          = sizeof(path);
+		ofn.lpstrFileTitle    = NULL;						/* Partial path */
+		ofn.nMaxFileTitle     = 0;
+		ofn.lpstrDefExt       = "csv";
+		ofn.lpstrInitialDir   = (*local_dir=='\0' ? NULL : local_dir);
+		ofn.Flags = OFN_LONGNAMES | OFN_NOCHANGEDIR | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
 
-	/* Save the directory for the next time */
-	strcpy_m(local_dir, sizeof(local_dir), pattern);
-	local_dir[ofn.nFileOffset-1] = '\0';						/* Save for next time! */
+		/* Get filename and maybe abort */
+		if (! GetSaveFileName(&ofn) != 0) return 3;				/* If aborted, just skip and go back to re-enabling the image */
 
-	aptr = pattern + strlen(pattern) - 4;						/* Should be the ".csv" */
-	if (_stricmp(aptr, ".csv") == 0) *aptr = '\0';
+		/* Scan and remove a .csv extension if it exists */
+		if (strlen(path) > 4) {
+			aptr = path + strlen(path) - 4;				/* Should be the ".csv" */
+			if (_stricmp(aptr, ".csv") == 0) *aptr = '\0';
+		}
 
+		/* Save the directory for the next time */
+		strcpy_m(local_dir, sizeof(local_dir), path);
+		local_dir[ofn.nFileOffset-1] = '\0';						/* Save for next time! */
+
+		/* And now point to local storage as the template */
+		pattern = path;
+	}
+
+#if 0
 	/* Are we triggering freerun?  Stop now and restart at end */
-	wasLive = Camera_GetTriggerMode(hdlg, wnd, NULL) == TRIG_FREERUN;
+	wasLive = Camera_GetTriggerMode(wnd, NULL) == TRIG_FREERUN;
 	if (wasLive) {																	/* Stop now */
-		Camera_SetTriggerMode(hdlg, wnd, TRIG_SOFTWARE, 0);			/* Put in software mode */
+		Camera_SetTriggerMode(wnd, TRIG_SOFTWARE, 0);			/* Put in software mode */
 		Sleep(1000);																/* Wait 1 second to end */
 	}
+#endif
+
+	/* Pass a valid format ... default is BMP */
+	if (format == FILE_DFLT) format = FILE_BMP;
 
 	/* Now we have to switch based on the cameras */
 	switch (wnd->Camera.driver) {
@@ -1340,8 +1582,10 @@ int Camera_SaveBurstImages(HWND hdlg, WND_INFO *wnd, int format) {
 			break;
 	}
 
+#if 0
 	/* If we were live before, restart freerun mode */
-	if (wasLive) Camera_SetTriggerMode(hdlg, wnd, TRIG_FREERUN, 0);
+	if (wasLive) Camera_SetTriggerMode(wnd, TRIG_FREERUN, 0);
+#endif
 
 	return rc;
 }

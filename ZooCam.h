@@ -10,16 +10,17 @@ HWND ZooCam_main_hdlg;
 WND_INFO *main_wnd;
 
 /* Special calls to the display thread */
-#define	WMP_SHOW_FRAMERATE			(WM_APP+3)
-#define	WMP_SHOW_EXPOSURE				(WM_APP+4)
-#define	WMP_SHOW_GAMMA					(WM_APP+6)
-#define	WMP_SHOW_COLOR_CORRECT		(WM_APP+7)
-#define	WMP_SHOW_GAINS					(WM_APP+8)
-#define	WMP_UPDATE_IMAGE_W_CURSOR	(WM_APP+9)
-#define	WMP_SHOW_CURSOR_POSN			(WM_APP+9)
-#define	WMP_BURST_ARM					(WM_APP+10)
-#define	WMP_BURST_COMPLETE			(WM_APP+11)
-#define	WMP_UPDATE_TRIGGER_BUTTONS	(WM_APP+12)
+#define	WMP_SHOW_FRAMERATE				(WM_APP+3)
+#define	WMP_SHOW_EXPOSURE					(WM_APP+4)
+#define	WMP_SHOW_GAMMA						(WM_APP+6)
+#define	WMP_SHOW_COLOR_CORRECT			(WM_APP+7)
+#define	WMP_SHOW_GAINS						(WM_APP+8)
+#define	WMP_UPDATE_IMAGE_WITH_CURSOR	(WM_APP+9)
+#define	WMP_SHOW_CURSOR_POSN				(WM_APP+9)
+#define	WMP_SHOW_ARM						(WM_APP+10)
+#define	WMP_BURST_ARM						(WM_APP+11)
+#define	WMP_BURST_COMPLETE				(WM_APP+12)
+#define	WMP_UPDATE_TRIGGER_BUTTONS		(WM_APP+13)
 
 /* Support routines that are now safe and simple */
 int GenerateCrosshair(WND_INFO *wnd, HWND hwnd);
@@ -101,31 +102,6 @@ typedef enum _BURST_ACTION {BURST_STATUS=0, BURST_ARM=1, BURST_ABORT=2, BURST_WA
 int Burst_Actions(BURST_ACTION request, int msTimeout, int *response);
 
 /* ===========================================================================
--- Interface to the RING functions
---
--- Usage: int Ring_Actions(RING_ACTION request, int option, RING_INFO *response);
---
--- Inputs: request - what to do
---           (0) RING_GET_INFO        ==> return structure ... also # of frames
---           (0) RING_GET_SIZE        ==> return number of frames in the ring
---           (1) RING_SET_SIZE        ==> set number of frames in the ring
---           (2) RING_GET_ACTIVE_CNT  ==> returns number of frames currently with data
---         option - For RING_SET_SIZE, desired number
---         response - pointer to for return of RING_INFO data
---
--- Output: *response - if !NULL, gets current RING_INFO data
---
--- Return: On error, -1 ==> or -2 ==> invalid request (not in enum)
---             RING_GET_INFO:       configured number of rings
---             RING_GET_SIZE:			configured number of rings
---		         RING_SET_SIZE:			new configured number of rings
---		         RING_GET_ACTIVE_CNT:	number of buffers with image data
-=========================================================================== */
-typedef enum _RING_ACTION {RING_GET_INFO=0, RING_GET_SIZE=1, RING_SET_SIZE=2, RING_GET_ACTIVE_CNT=3} RING_ACTION;
-
-int Ring_Actions(RING_ACTION request, int option, struct _RING_INFO *response);
-
-/* ===========================================================================
 -- Interface to the BURST functions
 --
 -- Usage: int DCx_Query_Frame_Data(int frame, double *tstamp, int *width, int *height, int *pitch, char **pMem);
@@ -167,15 +143,15 @@ int DCx_Enable_Live_Video(int state);
 #ifdef INCLUDE_WND_DETAIL_INFO
 
 /* Upper level camera information encoded in the combobox dropdown and ActiveCamera pointer */
-typedef struct _CAMERA_INFO {
+typedef struct _CAMERA {
 	enum {UNKNOWN=0, DCX=1, TL=2} driver;		/* empty initialization points to none */
 	char id[64];										/* Up to 32 char id for combobox */
 	char description[256];							/* Optional description for help	*/
 	void *details;										/* Camera driver specific detail */
-} CAMERA_INFO;
+} CAMERA;
 
 typedef struct _WND_INFO {
-	HWND main_hdlg;							/* Handle to primary dialog box */
+	HWND hdlg;									/* Handle to primary dialog box */
 
 	BOOL LiveVideo;							/* Are we in free-run mode? */
 	BOOL PauseImageRendering;				/* Critical sections where buffers maybe changing ... disable access */
@@ -191,7 +167,7 @@ typedef struct _WND_INFO {
 	} BurstModeStatus;						/* Internal status */
 
 	/* Camera initialized */
-	CAMERA_INFO Camera;						/* Pointer to primary info on the camera (DCX or TL) */
+	CAMERA Camera;								/* Pointer to primary info on the camera (DCX or TL) */
 
 	/* Common camera information */
 	int Image_Count;							/* Number of images processed - use to identify new data */

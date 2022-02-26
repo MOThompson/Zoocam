@@ -13,7 +13,7 @@ SYSLIBS = wsock32.lib user32.lib gdi32.lib comdlg32.lib comctl32.lib advapi32.li
 
 TL_SDK_INCLUDE = -I/code/lab/DCx/tl_sdk\include -I/code/lab/DCx/tl_sdk/load_dll_helpers
 
-OBJS = ZooCam.obj camera.obj dcx.obj tl.obj DCx_server.obj numato_dio.obj focus_client.obj win32ex.obj graph.obj ki224.obj server_support.obj tl_camera_sdk_load.obj tl_mono_to_color_processing_load.obj timer.obj
+OBJS = ZooCam.obj camera.obj dcx.obj tl.obj ZooCam_server.obj numato_dio.obj focus_client.obj win32ex.obj graph.obj ki224.obj server_support.obj tl_camera_sdk_load.obj tl_mono_to_color_processing_load.obj timer.obj
 
 # server.exe  -- removed since must now be able to access the dialog box
 # client.exe  -- removed for the moment
@@ -32,13 +32,13 @@ z:\lab\exes\ZooCam.exe : ZooCam.exe
 	copy $** $@
 
 # Primary routines
-client.exe : DCx_client.c DCx_client.h ZooCam.h server_support.obj server_support.h
-	cl -Feclient.exe -DLOCAL_CLIENT_TEST $(CFLAGS) DCx_client.c server_support.obj $(SYSLIBS)
+client.exe : ZooCam_client.c ZooCam_client.h ZooCam.h server_support.obj server_support.h
+	cl -Feclient.exe -DLOCAL_CLIENT_TEST $(CFLAGS) ZooCam_client.c server_support.obj $(SYSLIBS)
 
-server.exe : server_test.c DCx_server.obj server_support.obj server_support.h DCx_server.h DCx_client.h 
-	cl -Feserver.exe $(CFLAGS) server_test.c DCx_server.obj server_support.obj $(SYSLIBS)
+server.exe : server_test.c ZooCam_server.obj server_support.obj server_support.h ZooCam_server.h ZooCam_client.h 
+	cl -Feserver.exe $(CFLAGS) server_test.c ZooCam_server.obj server_support.obj $(SYSLIBS)
 
-ZooCam.obj : ZooCam.c DCx_client.h uc480.h
+ZooCam.obj : ZooCam.c ZooCam_client.h uc480.h
 	cl -c  $(TL_SDK_INCLUDE) -DSTANDALONE $(CFLAGS) ZooCam.c
 
 camera.obj : camera.c 
@@ -50,8 +50,8 @@ dcx.obj : dcx.c
 tl.obj : tl.c 
 	cl -c $(TL_SDK_INCLUDE) $(CFLAGS) tl.c
 
-dcx_server.obj : dcx_server.c
-	cl -c $(TL_SDK_INCLUDE) $(CFLAGS) dcx_server.c
+ZooCam_server.obj : ZooCam_server.c
+	cl -c $(TL_SDK_INCLUDE) $(CFLAGS) ZooCam_server.c
 
 numato_dio.obj : numato_dio.c
 	cl -c $(CFLAGS) numato_dio.c
@@ -136,17 +136,17 @@ camera.obj : win32ex.h graph.h resource.h camera.h dcx.h tl.h ZooCam.h
 
 dcx.obj : win32ex.h camera.h dcx.h
 
-tl.obj : timer.h camera.h tl.h
+tl.obj : win32ex.h timer.h camera.h tl.h
 
-ZooCam.obj : win32ex.h graph.h resource.h timer.h numato_DIO.h ki224.h camera.h dcx.h tl.h ZooCam.h dcx_server.h focus_client.h
+ZooCam.obj : win32ex.h graph.h resource.h timer.h numato_DIO.h ki224.h camera.h dcx.h tl.h ZooCam.h ZooCam_server.h focus_client.h
 
-DCX_client.obj : server_support.h ZooCam.h DCX_client.h
+ZooCam_client.obj : server_support.h ZooCam.h ZooCam_client.h
 
-DCX_server.obj : server_support.h ZooCam.h ki224.h DCX_server.h DCX_client.h
+ZooCam_server.obj : server_support.h ZooCam.h ki224.h ZooCam_server.h ZooCam_client.h
 
 # implicit is also ni4882.h but covered in the -I opriona
 ki224.obj : resource.h win32ex.h ki224.h
 
 numato_DIO.obj : numato_DIO.h
 
-server_test.obj : server_support.h ZooCam.h DCx_server.h DCx_client.h
+server_test.obj : server_support.h ZooCam.h ZooCam_server.h ZooCam_client.h

@@ -19,6 +19,7 @@
 #include <float.h>
 #include <errno.h>
 #include <math.h>
+#include <time.h>
 
 /* from standard Windows library */
 #define STRICT						  /* define before including windows.h for stricter type checking */
@@ -1232,4 +1233,23 @@ int SetDlgRTFText(HWND hdlg, int control, char *msg, int fSize, int colorindex) 
 	SendDlgItemMessage(hdlg, control, EM_STREAMIN, (WPARAM) SF_RTF, (LPARAM) &stream);
 
 	return(0);
+}
+
+/* ===========================================================================
+-- Convert from SYSTEMTIME structure to UNIX time (time_t)
+=========================================================================== */
+time_t TimeFromSystemTime(const SYSTEMTIME *pTime) {
+	struct tm tm;
+
+	memset(&tm, 0, sizeof(tm));
+	tm.tm_year = pTime->wYear - 1900;	/* Indexed from 1900 as per C standard */
+	tm.tm_mon  = pTime->wMonth - 1;		/* January = 0 */
+	tm.tm_mday = pTime->wDay;
+
+	tm.tm_hour = pTime->wHour;
+	tm.tm_min  = pTime->wMinute;
+	tm.tm_sec  = pTime->wSecond;
+	tm.tm_isdst = -1;							/* Let system determine if DST */
+
+	return mktime(&tm);
 }

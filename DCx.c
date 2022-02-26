@@ -61,6 +61,7 @@
 /* ------------------------------- */
 /* My internal function prototypes */
 /* ------------------------------- */
+static time_t TimeFromUC480Time(const UC480TIME *pTime);
 
 /* ------------------------------- */
 /* My usage of other external fncs */
@@ -168,6 +169,50 @@ int DCx_CloseCamera(DCX_CAMERA *dcx) {
 
 
 /* ===========================================================================
+-- Get information about the camera
+--
+-- Usage: int DCx_GetCameraInfo(DCx_CAMERA *dcx, CAMERA_INFO *info);
+--
+-- Inputs: dcx  - pointer to camera structure
+--         info - pointer to structure to receive camera information
+--
+-- Output: *info (if not NULL)
+--
+-- Return: 0 if successful, 1 if no camera initialized
+=========================================================================== */
+int DCx_GetCameraInfo(DCX_CAMERA *dcx, CAMERA_INFO *info) {
+	static char *rname = "DCx_GetCameraInfo";
+
+	/* Must be valid structure */
+	if (info != NULL) { memset(info, 0, sizeof(*info)); info->type = CAMERA_DCX; }
+
+	/* Validate structure and camera active */
+	if (dcx == NULL || dcx->hCam  <= 0) return 1;
+
+	/* If info NULL, just state we are alive and return */
+	if (info == NULL) return 0;
+
+	/* Return sensor and camera information from DCX_CAMERA structure */
+	sprintf_s(info->name, sizeof(info->name), "%d", dcx->CameraInfo.Select);
+	strcpy_m(info->model,			sizeof(info->model),			 dcx->SensorInfo.strSensorName);
+	strcpy_m(info->serial,			sizeof(info->serial),		 dcx->CameraInfo.SerNo);
+	strcpy_m(info->manufacturer,	sizeof(info->manufacturer), dcx->CameraInfo.ID);
+	strcpy_m(info->version,			sizeof(info->version),		 dcx->CameraInfo.Version);
+	strcpy_m(info->date,				sizeof(info->date),			 dcx->CameraInfo.Date);
+
+	info->x_pixel_um = dcx->SensorInfo.wPixelSize / 100.0;		/* Strange units */
+	info->y_pixel_um = dcx->SensorInfo.wPixelSize / 100.0;
+	info->bColor     = dcx->SensorInfo.nColorMode != IS_COLORMODE_MONOCHROME;
+	info->height     = dcx->height;
+	info->width      = dcx->width;
+
+	return 0;
+}
+
+
+#if 0
+
+/* ===========================================================================
 -- Query of DCX camera status
 --
 -- Usage: int DCX_Status(DCX_CAMERA *dcx, DCX_STATUS *status);
@@ -228,7 +273,7 @@ int DCx_Status(DCX_CAMERA *dcx, DCX_STATUS *status) {
 
 	return 0;
 }
-
+#endif
 
 /* ===========================================================================
 -- Enumerate list of available cameras into an array structure for use with the
@@ -993,48 +1038,54 @@ int DCx_SaveParameterFile(DCX_CAMERA *dcx, char *path) {
 /* ===========================================================================
 -- Software arm/disarm camera (pending triggers)
 --
--- Usage: int DCx_Arm(DCX_CAMERA *dcx);
---        int DCx_Disarm(DCX_CAMERA *dcx);
+-- Usage: TRIG_ARM_ACTION DCx_Arm(DCX_CAMERA *dcx, TRIG_ARM_ACTION action);
 --
 -- Inputs: dcx - structure associated with a camera
+--         action - one of TRIG_ARM_QUERY, TRIG_ARM, TRIG_DISARM (dflt=query)
 --
 -- Output: Arms or disarms camera (with expectation of pending trigger)
 --
--- Return: 0 if successful
---           1 ==> tl invalid or closed
---           other ==> return from camera call that failed
+-- Return: Trigger arm state
+--				 TRIG_ARM_UNKNOWN on error 
+--				   otherwise TRiG_ARM or TRIG_DISARM
 --
 -- Notes: While valid for all triggers, intended primarily for TRIG_BURST
 --        In TRIG_FREERUN, after disarm, must arm AND trigger to restart
 =========================================================================== */
-int DCx_Arm(DCX_CAMERA *dcx) {
+TRIG_ARM_ACTION DCx_Arm(DCX_CAMERA *dcx, TRIG_ARM_ACTION action) {
 	static char *rname = "DCx_Arm";
 	int rc;
 
 	/* Verify structure and arm */
-	if (dcx == NULL || dcx->hCam <= 0) {
-		rc = 1;
-	} else if ( (rc = is_CaptureVideo(dcx->hCam, IS_DONT_WAIT)) != 0) {
-		fprintf(stderr, "[%s] Arm (start) failed (%d)\n", rname, rc);
-		fflush(stderr);
+	if (dcx == NULL || dcx->hCam <= 0) return TRIG_ARM_UNKNOWN;
+
+	switch (action) {
+		case TRIG_ARM:
+			/* Don't rearm if already armed */
+			if (! dcx->trigger.bArmed) {
+				if ( (rc = is_CaptureVideo(dcx->hCam, IS_DONT_WAIT)) != 0) {
+					fprintf(stderr, "[%s] Arm (start) failed (%d)\n", rname, rc); fflush(stderr);
+					return TRIG_ARM_UNKNOWN;
+				}
+				dcx->trigger.bArmed = TRUE;
+				dcx->nValid = dcx->iLast = dcx->iShow = 0;			/* Always start from zero again */
+			}
+			break;
+		case TRIG_DISARM:
+			/* Don't disarm if already disarmed */
+			if (dcx->trigger.bArmed) {
+				if ( (rc = is_FreezeVideo(dcx->hCam, IS_DONT_WAIT)) != 0) {
+					fprintf(stderr, "[%s] Disarm failed (%d)\n", rname, rc); fflush(stderr);
+					return TRIG_ARM_UNKNOWN;
+				}
+				dcx->trigger.bArmed = FALSE;
+			}
+			break;
+		default:
+			break;
 	}
 
-	return rc;
-}
-
-int DCx_Disarm(DCX_CAMERA *dcx) {
-	static char *rname = "DCx_Disarm";
-	int rc;
-
-	/* Verify structure and disarm */
-	if (dcx == NULL || dcx->hCam <= 0) {
-		rc = 1;
-	} else if ( (rc = is_FreezeVideo(dcx->hCam, IS_DONT_WAIT)) != 0) {
-		fprintf(stderr, "[%s] Disarm failed (%d)\n", rname, rc);
-		fflush(stderr);
-	}
-
-	return rc;
+	return dcx->trigger.bArmed ? TRIG_ARM : TRIG_DISARM ;
 }
 
 /* ===========================================================================
@@ -1171,7 +1222,7 @@ TRIGGER_MODE DCx_SetTriggerMode(DCX_CAMERA *dcx, TRIGGER_MODE mode, TRIGGER_INFO
 				}
 				is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);		/* Try forced stop */
 			}
-
+			dcx->trigger.bArmed = FALSE;
 			VerifyLastImage(dcx);									/* Check if an extra frame snuck in */
 		}
 
@@ -1180,6 +1231,7 @@ TRIGGER_MODE DCx_SetTriggerMode(DCX_CAMERA *dcx, TRIGGER_MODE mode, TRIGGER_INFO
 		if (dcx->trigger.mode == TRIG_FREERUN) {
 			is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
 			dcx->iLast = dcx->iShow = dcx->nValid = 0;			/* All reset these values */
+			dcx->trigger.bArmed = TRUE;
 		}
 	}
 
@@ -1595,97 +1647,6 @@ int DCx_Acquire_Image(DCX_IMAGE_INFO *info, char **buffer) {
 }
 
 /* ===========================================================================
--- DCx_Set_Exposure_Parms
---
--- Usage: int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual);
---
--- Inputs: options - OR'd bitwise flag indicating parameters that will be modified
---         request - pointer to structure with values for the selected conditions
---         actual  - pointer to variable to receive the actual settings (all updated)
---
--- Output: *actual - if not NULL, values of all parameters after modification
---
--- Return: 0 ==> successful
---         1 ==> no camera initialized
---
--- Notes:
---    1) Parameters are validated but out-of-bound will not generate failure
---    2) exposure is prioritized if both DCX_MODIFY_EXPOSURE and DCX_MODIFY_FPS
---       are specified.  FPS will be modified only if lower than max possible
---    3) If DCX_MODIFY_EXPOSURE is given without DCX_MODIFY_FPS,
---       maximum FPS will be set
---    4) Trying DCXF_MODIFY_BLUE_GAIN on a monochrome camera is a NOP
-=========================================================================== */
-int DCx_Set_Exposure_Parms(int options, DCX_EXPOSURE_PARMS *request, DCX_EXPOSURE_PARMS *actual) {
-	static char *rname = "DCx_Set_Exposure_Parms";
-
-	DCX_EXPOSURE_PARMS mine;
-	DCX_CAMERA *dcx;
-	
-	int gamma;
-	int master,red,green,blue;
-	double fps;
-
-	/* Set response code to -1 to indicate major error */
-	if (actual == NULL) actual = &mine;			/* So don't have to check */
-	memset(actual, 0, sizeof(*actual));
-
-	/* Must have been started at some point to be able to do anything */
-	if ( (dcx = local_dcx) == NULL) return 1;					/* No camera active */
-	if (dcx->hCam <= 0) return 1;									/* No camera active */
-	
-#if 0																		/* No ability to reset the display ... belongs at camera equivalent routine */
-	hdlg = wnd->main_hdlg;
-	if (hdlg != NULL && ! IsWindow(hdlg)) hdlg = NULL;		/* Mark hdlg if not window */
-#endif
-
-	/* If we don't have data, we can't have any options for setting */
-	if (request == NULL) options = 0;
-
-	if (options & DCXF_MODIFY_GAMMA) {
-		gamma = min(100,max(0,request->gamma));
-		is_Gamma(dcx->hCam, IS_GAMMA_CMD_SET, &gamma, sizeof(gamma));
-#if 0
-		if (hdlg != NULL) SendMessage(hdlg, WMP_SHOW_GAMMA, 0, 0);
-#endif
-	}
-
-	if (options & (DCXF_MODIFY_MASTER_GAIN | DCXF_MODIFY_RED_GAIN | DCXF_MODIFY_GREEN_GAIN | DCXF_MODIFY_BLUE_GAIN)) {
-		master = (options & DCXF_MODIFY_MASTER_GAIN) ? min(100,max(0,request->master_gain)) : IS_IGNORE_PARAMETER;
-		red    = (options & DCXF_MODIFY_RED_GAIN)    ? min(100,max(0,request->red_gain))    : IS_IGNORE_PARAMETER;
-		green  = (options & DCXF_MODIFY_GREEN_GAIN)  ? min(100,max(0,request->green_gain))  : IS_IGNORE_PARAMETER;
-		blue   = (options & DCXF_MODIFY_BLUE_GAIN)   ? min(100,max(0,request->blue_gain))   : IS_IGNORE_PARAMETER;
-		is_SetHardwareGain(dcx->hCam, master, red, green, blue);
-#if 0
-		if (hdlg != NULL) SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
-#endif
-	}
-
-	/* Do the exposure first maximizing, and then maybe frame rate */
-	if (options & DCXF_MODIFY_EXPOSURE) {
-		DCx_SetExposure(dcx, request->exposure);
-		if (options & DCXF_MODIFY_FPS) {
-			is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &fps);		/* Determine maximized framerate */
-			if (request->fps < fps) is_SetFrameRate(dcx->hCam, request->fps, &fps);
-		}
-	} else if (options & DCXF_MODIFY_FPS) {
-		is_SetFrameRate(dcx->hCam, request->fps, &fps);
-	}
-
-	/* Retrieve the current values now */
-	is_Exposure(dcx->hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &actual->exposure, sizeof(actual->exposure));
-	is_SetFrameRate(dcx->hCam, IS_GET_FRAMERATE, &actual->fps);
-	is_Gamma(dcx->hCam, IS_GAMMA_CMD_GET, &actual->gamma, sizeof(actual->gamma));
-	actual->master_gain = (dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(dcx->hCam, IS_GET_MASTER_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-	actual->red_gain    = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_RED_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-	actual->green_gain  = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_GREEN_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-	actual->blue_gain   = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(dcx->hCam, IS_GET_BLUE_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
-
-	return 0;
-}
-
-
-/* ===========================================================================
 -- Query the current ring buffer values
 --
 -- Usage: int DCx_GetRingInfo(DCX_CAMERA *dcx, int *nBuffers, int *nValid, int *iLast, int *iShow);
@@ -1717,6 +1678,117 @@ int DCx_GetRingInfo(DCX_CAMERA *dcx, int *nBuffers, int *nValid, int *iLast, int
 
 
 /* ===========================================================================
+-- Get information about a specific image
+--
+-- Usage: int DCx_GetImageInfo(DCX_CAMERA *dcx, int frame, IMAGE_INFO *info);
+--
+-- Inputs: dcx   - an opened TL camera
+--         frame - index of frame to image (-1 = current)
+--                    invalid frame return error (rc = 2)
+--         info  - pointer to structure to receive image information
+--
+-- Output: *info (if not NULL)
+--
+-- Return: 0 if successful, 
+--           1 => no camera initialized
+--           2 => frame invalid
+=========================================================================== */
+int DCx_GetImageInfo(DCX_CAMERA *dcx, int frame, IMAGE_INFO *info) {
+	static char *rname = "DCx_GetImageInfo";
+
+	int pitch, ival;
+	double rval;
+	HCAM hCam;
+	UC480IMAGEINFO ImageInfo;
+
+	/* Make sure the structure is valid and there is still an opened camera */
+	if (dcx == NULL || dcx->hCam <= 0) return -1;
+	hCam = dcx->hCam;
+
+	if (frame == -1) frame = dcx->iLast;								/* Last image */
+	if (frame < 0 || frame > dcx->nValid) return 2;
+	if (info == NULL) return 0;
+	memset(info, 0, sizeof(*info));
+
+	/* Point to the appropriate image */
+	info->type   = CAMERA_DCX;
+	info->frame  = frame;
+	info->width  = dcx->width;
+	info->height = dcx->height;
+
+	is_GetImageMemPitch(hCam, &pitch);
+	info->memory_pitch = pitch;
+
+	is_GetImageInfo(hCam, dcx->Image_PID[frame], &ImageInfo, sizeof(ImageInfo));
+	info->camera_time = ImageInfo.u64TimestampDevice*100E-9;
+	info->timestamp = TimeFromUC480Time(&ImageInfo.TimestampSystem);
+
+	is_Exposure(hCam, IS_EXPOSURE_CMD_GET_EXPOSURE, &rval, sizeof(rval));
+	info->exposure = rval;
+
+	is_Gamma(hCam, IS_GAMMA_CMD_GET, &ival, sizeof(ival));
+	info->gamma = rval / 100.0;
+
+	info->color_correct_mode = is_SetColorCorrection(hCam, IS_GET_CCOR_MODE, &rval);
+	info->color_correct_strength = rval;
+	
+	ival = (dcx->SensorInfo.bMasterGain) ? is_SetHardwareGain(hCam, IS_GET_MASTER_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	info->master_gain = ival;
+	ival = (dcx->SensorInfo.bRGain)      ? is_SetHardwareGain(hCam, IS_GET_RED_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	info->red_gain = ival;
+	ival = (dcx->SensorInfo.bGGain)      ? is_SetHardwareGain(hCam, IS_GET_GREEN_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	info->green_gain = ival;
+	ival = (dcx->SensorInfo.bBGain)      ? is_SetHardwareGain(hCam, IS_GET_BLUE_GAIN, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER, IS_IGNORE_PARAMETER) : 0 ;
+	info->blue_gain = ival;
+
+	return 0;
+}
+
+
+/* ===========================================================================
+-- Get pointer to raw data for a specific image, and length of that data
+--
+-- Usage: int DCx_GetImageData(DCX_CAMERA *dcx, int frame, void **image_data, size_t *length);
+--
+-- Inputs: dcx        - an opened TL camera
+--         frame      - index of frame to image (-1 = current)
+--                        invalid frame return error (rc = 2)
+--         image_data - pointer to get a pointer to actual memory location (shared)
+--         length     - pointer to get count to # of bytes in the image data
+--
+-- Output: *data   - a pointer (UNSIGNED SHORT *) to actual data
+--         *length - number of bytes in the memory buffer
+--
+-- Return: 0 if successful, 
+--           1 => no camera initialized
+--           2 => frame invalid
+=========================================================================== */
+int DCx_GetImageData(DCX_CAMERA *dcx, int frame, void **image_data, size_t *length) {
+	static char *rname = "DCx_GetImageData";
+
+	int pitch;
+	HCAM hCam;
+
+	/* Default returns */
+	if (image_data != NULL) *image_data = NULL;
+	if (length     != NULL) *length = 0;
+
+	/* Make sure the structure is valid and there is still an opened camera */
+	if (dcx == NULL || dcx->hCam <= 0) return 1;
+	hCam = dcx->hCam;
+
+	if (frame == -1) frame = dcx->iLast;								/* Last image */
+	if (frame < 0 || frame > dcx->nValid) return 2;
+
+	is_GetImageMemPitch(hCam, &pitch);
+	if (image_data != NULL) *image_data = (void *) dcx->Image_Mem[frame];
+	if (length     != NULL) *length = (size_t) (pitch * dcx->height);		/* Number of bytes in memory */
+
+	return 0;
+}
+
+
+/* ===========================================================================
 -- Determine formats that camera supports for writing
 --
 -- Usage: int DCx_GetSaveFormatFlag(DCX_CAMERA *dcx);
@@ -1726,23 +1798,23 @@ int DCx_GetRingInfo(DCX_CAMERA *dcx, int *nBuffers, int *nValid, int *iLast, int
 -- Output: none
 --
 -- Return: Bit-wise flags giving camera capabilities
---				 FL_BMP | FL_JPEG | FL_RAW | FL_BURST (unique)
+--				 FL_BMP | FL_JPEG | FL_RAW
 --         0 on errors (no capabilities)
 =========================================================================== */
 int DCx_GetSaveFormatFlag(DCX_CAMERA *dcx) {
 	static char *rname = "DCx_GetSaveFormatFlag";
 
-	return FL_BMP | FL_JPG | FL_PNG | FL_BURST ;
+	return FL_BMP | FL_JPG | FL_PNG ;
 }
 
 /* ===========================================================================
 -- Save image as file
 --
--- Usage:  int DCX_SaveImage(DCX_CAMERA *dcx, char *frame, int format);
+-- Usage:  int DCX_SaveImage(DCX_CAMERA *dcx, char *frame, FILE_FORMAT format);
 --
 -- Inputs: dcx    - pointer to structure with information about the DCx camera
 --         fname  - filename, or NULL to bring up dialog box
---         format - One of the FL_XXX file formats (from camera.h)
+--         format - One of the FILE_XXX file formats (from camera.h)
 --
 -- Output: Saves the file as specified.
 --
@@ -1750,13 +1822,19 @@ int DCx_GetSaveFormatFlag(DCX_CAMERA *dcx) {
 --         1 - camera is not initialized and active
 --         2 - file save failed for some other reason
 =========================================================================== */
-int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int frame, int format) {
+int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int frame, FILE_FORMAT format) {
 	static char *rname = "DCx_SaveImage";
 
 	wchar_t fname_w[MAX_PATH];
 	IMAGE_FILE_PARAMS ImageParams;
 	size_t ncount;
 	int rc;
+
+	/* Make sure the structure is valid and there is still an opened camera */
+	if (dcx == NULL || dcx->hCam <= 0) return 1;
+
+	if (frame == -1) frame = dcx->iLast;								/* Last image */
+	if (frame < 0 || frame > dcx->nValid) return 2;
 
 	/* Convert the filename or leave NULL for dialog box */
 	if (fname != NULL) {
@@ -1768,11 +1846,11 @@ int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int frame, int format) {
 
 	/* Choose a format */
 	switch (format) {
-		case FL_JPG:
+		case FILE_JPG:
 			ImageParams.nFileType = IS_IMG_JPG; break;
-		case FL_BMP:
+		case FILE_BMP:
 			ImageParams.nFileType = IS_IMG_BMP; break;
-		case FL_PNG:
+		case FILE_PNG:
 			ImageParams.nFileType = IS_IMG_PNG; break;
 		default:
 			ImageParams.nFileType = IS_IMG_BMP; break;
@@ -1782,8 +1860,8 @@ int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int frame, int format) {
 	ImageParams.nQuality = 75;
 
 	/* Default values for remaining parameters */
-	ImageParams.pnImageID    = NULL;	
-	ImageParams.ppcImageMem  = NULL;
+	ImageParams.pnImageID    = &dcx->Image_PID[frame];
+	ImageParams.ppcImageMem  = &dcx->Image_Mem[frame];
 
 	/* Let the driver do all the work */
 	rc = is_ImageFile(dcx->hCam, IS_IMAGE_FILE_CMD_SAVE, &ImageParams, sizeof(ImageParams));
@@ -1794,13 +1872,13 @@ int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int frame, int format) {
 /* ===========================================================================
 -- Save all valid images that would have been collected in burst run
 --
--- Usage: DCx_SaveBurstImages(DCX_CAMERA *dcx, char *pattern, int format);
+-- Usage: DCx_SaveBurstImages(DCX_CAMERA *dcx, char *pattern, FILE_FORMAT format);
 --
 -- Inputs: dcx     - pointer to active camera
 --         pattern - root of name for files
 --							  <pattern>.csv - logfile 
 --                     <pattern>_ddd.bmp - individual images
---         format  - format of data to save (FL_BMP, FL_PNG, FL_JPEG ... default FL_BMP)
+--         format  - format of data to save (FILE_BMP, FILE_PNG, FILE_JPEG ... default FILE_BMP)
 --
 -- Output: Saves stored images as a series of bitmaps
 --
@@ -1809,7 +1887,7 @@ int DCx_SaveImage(DCX_CAMERA *dcx, char *fname, int frame, int format) {
 --         2 ==> buffers not yet allocated or no data
 --         3 ==> save abandoned by choice in FileOpen dialog
 =========================================================================== */
-int DCx_SaveBurstImages(DCX_CAMERA *dcx, char *pattern, int format) {
+int DCx_SaveBurstImages(DCX_CAMERA *dcx, char *pattern, FILE_FORMAT format) {
 	static char *rname = "DCx_SaveBurstImages";
 
 	IMAGE_FILE_PARAMS ImageParams;
@@ -1856,11 +1934,11 @@ RetryFileOpen:
 
 	/* Choose a format */
 	switch (format) {
-		case FL_JPG:
+		case FILE_JPG:
 			ImageParams.nFileType = IS_IMG_JPG; extension = "jpg"; break;
-		case FL_PNG:
+		case FILE_PNG:
 			ImageParams.nFileType = IS_IMG_PNG; extension = "png"; break;
-		case FL_BMP:
+		case FILE_BMP:
 		default:
 			ImageParams.nFileType = IS_IMG_BMP; extension = "bmp"; break;
 	}
@@ -1895,12 +1973,12 @@ RetryFileOpen:
 /* ===========================================================================
 -- Capture an image and save as a file
 --
--- Usage: int DCX_CaptureImage(DCX_CAMERA *dcx, char *fname, int format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
+-- Usage: int DCX_CaptureImage(DCX_CAMERA *dcx, char *fname, FILE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap);
 --
 -- Inputs: dcx     - pointer to structure with information about the DCx camera
 --         fname   - if not NULL, pointer to name of file to be saved
 --                   if NULL, brings up a Save As ... dialog box
---         format  - one of FL_BMP, FL_JPG, FL_PNG
+--         format  - one of FILE_BMP, FILE_JPG, FILE_PNG
 --         quality - quality of image (primary JPEG)
 --         info    - pointer (if not NULL) to structure to be filled with image info
 --			  HwndRenderBitmap - if not NULL, handle were we should try to render the bitmap
@@ -1912,7 +1990,7 @@ RetryFileOpen:
 --         1 - camera is not initialized and active
 --         2 - file save failed for some other reason
 =========================================================================== */
-int DCx_CaptureImage(DCX_CAMERA *dcx, char *fname, int format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap) {
+int DCx_CaptureImage(DCX_CAMERA *dcx, char *fname, FILE_FORMAT format, int quality, DCX_IMAGE_INFO *info, HWND hwndRenderBitmap) {
 	static char *rname = "DCx_CaptureImage";
 
 	wchar_t fname_w[MAX_PATH];
@@ -1955,11 +2033,11 @@ int DCx_CaptureImage(DCX_CAMERA *dcx, char *fname, int format, int quality, DCX_
 	ImageParams.ppcImageMem  = NULL;
 
 	switch (format) {
-		case FL_JPG:
+		case FILE_JPG:
 			ImageParams.nFileType = IS_IMG_JPG; break;
-		case FL_PNG:
+		case FILE_PNG:
 			ImageParams.nFileType = IS_IMG_PNG; break;
-		case FL_BMP:
+		case FILE_BMP:
 		default:
 			ImageParams.nFileType = IS_IMG_BMP; break;
 	}
@@ -2010,3 +2088,25 @@ int DCx_CaptureImage(DCX_CAMERA *dcx, char *fname, int format, int quality, DCX_
 
 	return rc;
 }
+
+
+/* ===========================================================================
+-- Convert UC480TIME structure to standard UNIX time
+=========================================================================== */
+static time_t TimeFromUC480Time(const UC480TIME *pTime) {
+
+	struct tm tm;
+
+	memset(&tm, 0, sizeof(tm));
+	tm.tm_year = pTime->wYear - 1900;	/* Indexed from 1900 as per C standard */
+	tm.tm_mon  = pTime->wMonth - 1;		/* January = 0 */
+	tm.tm_mday = pTime->wDay;
+
+	tm.tm_hour = pTime->wHour;
+	tm.tm_min  = pTime->wMinute;
+	tm.tm_sec  = pTime->wSecond;
+	tm.tm_isdst = -1;							/* Let system determine if DST */
+
+	return mktime(&tm);
+}
+

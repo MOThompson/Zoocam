@@ -11,7 +11,11 @@
 
 #pragma pack(4)
 typedef struct _TL_IMAGE {
+	int index;											/* Index of this buffer (frame)	*/
 	BOOL valid;											/* Is data in buffer valid			*/
+	int locks;											/* # buffer locks; 0 => availble	*/
+	struct _TL_CAMERA *tl;							/* If we need other info			*/
+
 	int imageID;										/* Unique ID of image (# since start) */
 	unsigned short *raw;								/* Buffer with the raw data		*/
 	double camera_time;								/* Camera pixel clock timestamp	*/
@@ -59,7 +63,7 @@ typedef struct _TL_RAW_FILE_HEADER {
 	typedef struct _TL_CAMERA {
 		int magic;												/* Magic value to indicate valid */
 		char ID[32];											/* String ID for the camera		*/
-		char name[64];											/* Registered name of camera		*/
+		char name[32];											/* Registered name of camera		*/
 		char model[16];										/* Model									*/
 		char serial[16];										/* Serial number						*/
 		char firmware[1024];									/* Firmware revisions				*/
@@ -68,6 +72,10 @@ typedef struct _TL_RAW_FILE_HEADER {
 		enum TL_COLOR_FILTER_ARRAY_PHASE color_filter;	/* Color filter array phase		*/
 		float color_correction[9];							/* Color correction matrix			*/
 		float white_balance[9];								/* Default white balance matrix	*/
+
+		int bit_depth;											/* Bit depth							*/
+		int width, height;									/* Image size							*/
+		double pixel_height_um, pixel_width_um;		/* Pixel size in um					*/
 		
 		BOOL bGainControl;									/* Has master gain control?		*/
 		double db_min, db_max;								/* Min/max gain in dB */
@@ -82,11 +90,8 @@ typedef struct _TL_RAW_FILE_HEADER {
 		
 		int clock_Hz;											/* Camera clock frequency (or 0)	*/
 		
-		int bit_depth;											/* Bit depth							*/
-		int width, height;									/* Image size							*/
-		double pixel_height_um, pixel_width_um;		/* Pixel size in um					*/
 		int pixel_bytes;										/* Number of bytes per pixel		*/
-		int image_bytes;										/* Number of bytes in an image	*/
+		size_t image_bytes;									/* Number of bytes in an image	*/
 		void *color_processor;
 		BOOL IsSensorColor;									/* TRUE color, FALSE monochrome	*/
 		
@@ -166,6 +171,8 @@ int TL_EnumCameraList(int *pcount, TL_CAMERA **pinfo[]);
 
 BOOL TL_IsValidCamera(TL_CAMERA *tl);
 
+int TL_GetCameraInfo(TL_CAMERA *tl, CAMERA_INFO *info);
+
 int TL_AddImageSignal(TL_CAMERA *tl, HANDLE signal);
 int TL_RemoveImageSignal(TL_CAMERA *tl, HANDLE signal);
 
@@ -174,12 +181,15 @@ int TL_ProcessRawSeparation(TL_CAMERA *tl, int frame);	/* No ties to TL_ProcessR
 
 BITMAPINFOHEADER *TL_CreateDIB(TL_CAMERA *tl, int frame, int *rc);
 
+int TL_GetImageInfo(TL_CAMERA *tl, int frame, IMAGE_INFO *info);
+int TL_GetImageData(TL_CAMERA *tl, int frame, void **image_data, size_t *length);
+
 int TL_GetSaveFormatFlag(TL_CAMERA *tl);
-int TL_GetSaveName(char *path, size_t length, int *format);
-int TL_SaveImage(TL_CAMERA *tl, char *path, int frame, int format);
+int TL_GetSaveName(char *path, size_t length, FILE_FORMAT *format);
+int TL_SaveImage(TL_CAMERA *tl, char *path, int frame, FILE_FORMAT format);
 int TL_SaveBMPImage(TL_CAMERA *tl, char *path, int frame);
 int TL_SaveRawImage(TL_CAMERA *tl, char *path, int frame);
-int TL_SaveBurstImages(TL_CAMERA *tl, char *pattern, int format);
+int TL_SaveBurstImages(TL_CAMERA *tl, char *pattern, FILE_FORMAT format);
 
 int TL_RenderFrame(TL_CAMERA *tl, int frame, HWND hwnd);
 
@@ -201,8 +211,7 @@ int TL_SetRGBGains(TL_CAMERA *tl, double  red, double  green, double  blue);
 int TL_GetDfltRGBGains(TL_CAMERA *tl, double *red, double *green, double *blue);
 
 /* Triggering controls (freerun especially) */
-int TL_Arm(TL_CAMERA *tl);
-int TL_Disarm(TL_CAMERA *tl);
+TRIG_ARM_ACTION TL_Arm(TL_CAMERA *tl, TRIG_ARM_ACTION action);
 int TL_Trigger(TL_CAMERA *tl);
 int TL_SetFramesPerTrigger(TL_CAMERA *tl, int frames);
 int TL_GetFramesPerTrigger(TL_CAMERA *tl);
