@@ -1802,6 +1802,7 @@ int TL_RenderFrame(TL_CAMERA *tl, int frame, HWND hwnd) {
 
 	DeleteDC(hDCBits);				/* Delete the temporary DC for the bitmap */
 	DeleteObject(hBitmap);			/* Delete the bitmap object itself */
+
 	ReleaseDC(hwnd, hdc);			/* Release the main DC */
 	free(bmih);							/* Release memory associated with the bitmap itself */
 
@@ -2309,7 +2310,10 @@ TRIG_ARM_ACTION TL_Arm(TL_CAMERA *tl, TRIG_ARM_ACTION action) {
 				return TRIG_ARM_UNKNOWN;
 			}
 			tl->trigger.bArmed = TRUE;
-			tl->nValid = tl->iLast = tl->iShow = 0;			/* Always start from zero again */
+			if (tl->trigger.mode == TRIG_FREERUN) {				/* Arming start freerun mode simultaneously */
+				if (tl_camera_issue_software_trigger(tl->handle) != 0) TL_CameraErrMsg(rc, "Failed to trigger camera", rname);
+				tl->nValid = tl->iLast = tl->iShow = 0;			/* Counting should reset to zero again */
+			}
 			break;
 		case TRIG_DISARM:
 			if ( (rc = tl_camera_disarm(tl->handle)) != 0) {
@@ -2337,6 +2341,7 @@ TRIG_ARM_ACTION TL_Arm(TL_CAMERA *tl, TRIG_ARM_ACTION action) {
 --
 -- Return: 0 if successful
 --           1 ==> dcx or dcx->hCam invalid
+--           3 ==> not enabled
 --           other ==> return from tl_camera_issue_software_trigger() command
 --
 -- Notes: While valid for all trigger modes, primarily intended for TRIG_BURST 
@@ -2347,11 +2352,15 @@ int TL_Trigger(TL_CAMERA *tl) {
 	static char *rname = "TL_Trigger";
 	int rc;
 
-	/* Verify structure and disarm */
-	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) {
-		rc = 1;
-	} else if ( (rc = tl_camera_issue_software_trigger(tl->handle)) != 0) {
-		TL_CameraErrMsg(rc, "Software trigger failed", rname);
+	/* Verify structure */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
+
+	if (! tl->trigger.bArmed) {
+		Beep(300,200);
+		rc = 3;
+	} else {
+		rc = tl_camera_issue_software_trigger(tl->handle);
+		if (rc != 0) TL_CameraErrMsg(rc, "Software trigger failed", rname);
 	}
 
 	return rc;
@@ -2366,7 +2375,7 @@ int TL_Trigger(TL_CAMERA *tl) {
 --
 -- Inputs: tl     - structure associated with a camera
 --         mode   - one of the allowed triggering modes
---                  TRIG_SOFTWARE, TRIG_FREERUN, TRIG_EXTERNAL
+--                  TRIG_SOFTWARE, TRIG_FREERUN, TRIG_EXTERNAL, TRIG_SS or TRIG_BURST
 --         info   - if !NULL, details on triggering; if NULL, will use defaults 
 --                  what is used and valid depends on the mode ... look at code 
 --
@@ -2396,7 +2405,7 @@ TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *i
 		/* Change to number of frames per trigger ... because of structure, 0 can't be set here */
 		if (info->frames_per_trigger > 0 && info->frames_per_trigger != tl->trigger.frames_per_trigger) {
 			tl->trigger.frames_per_trigger = info->frames_per_trigger;
-			if ( (mode == tl->trigger.mode) && (mode == TRIG_EXTERNAL || mode == TRIG_SOFTWARE)) {
+			if ( (mode == tl->trigger.mode) && (mode == TRIG_EXTERNAL || mode == TRIG_SS || mode == TRIG_SOFTWARE)) {
 				if (tl->trigger.bArmed && (rc = tl_camera_disarm(tl->handle)) != 0) TL_CameraErrMsg(rc, "Failed to disarm", rname);
 				if ( (rc = tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, tl->trigger.frames_per_trigger)) != 0) 
 					TL_CameraErrMsg(rc, "Failed to set frames per trigger", rname);
@@ -2407,7 +2416,7 @@ TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *i
 		/* Change to external trigger slope */
 		if ( (info->ext_slope == TRIG_EXT_POS || info->ext_slope == TRIG_EXT_NEG) && (info->ext_slope != tl->trigger.ext_slope)) {
 			tl->trigger.ext_slope = info->ext_slope;
-			if (mode == tl->trigger.mode && mode == TRIG_EXTERNAL) {
+			if (mode == tl->trigger.mode && (mode == TRIG_EXTERNAL || mode == TRIG_SS)) {
 				if (tl->trigger.bArmed && (rc = tl_camera_disarm(tl->handle)) != 0) TL_CameraErrMsg(rc, "Failed to disarm", rname);
 				if ( (rc = tl_camera_set_trigger_polarity(tl->handle, (tl->trigger.ext_slope == TRIG_EXT_POS) ? TL_CAMERA_TRIGGER_POLARITY_ACTIVE_HIGH : TL_CAMERA_TRIGGER_POLARITY_ACTIVE_LOW)) != 0)
 					TL_CameraErrMsg(rc, "Failed to set edge triggering mode", rname);
@@ -2419,7 +2428,6 @@ TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *i
 	/* At this point, if mode hasn't changed there nothing left to do */
 	if (mode == tl->trigger.mode) return mode;
 
-
 	/* Step 1 ... disarm camera so can change mode */
 	if ( (rc = tl_camera_disarm(tl->handle)) != 0) TL_CameraErrMsg(rc, "Failed to disarm", rname);
 	tl->trigger.bArmed = FALSE;
@@ -2430,7 +2438,7 @@ TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *i
 		case TRIG_FREERUN:
 		case TRIG_BURST:										/* Almost identical */
 			if ( (rc = tl_camera_set_operation_mode(tl->handle, TL_CAMERA_OPERATION_MODE_SOFTWARE_TRIGGERED)) != 0) 
-				TL_CameraErrMsg(rc, "Failed to set TRIG_SOFTWARE", rname);
+				TL_CameraErrMsg(rc, "Failed to shift DCx to a software trigger mode", rname);
 			if ( (rc = tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, 0)) != 0) 
 				TL_CameraErrMsg(rc, "Failed to set frames per trigger", rname);
 			if (mode == TRIG_FREERUN) {
@@ -2440,7 +2448,9 @@ TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *i
 			}
 			break;
 
+		/* These are identical as far as setting trigger mode is concerned ... handle with image capture */
 		case TRIG_EXTERNAL:
+		case TRIG_SS:
 			if (tl->trigger.ext_slope != TRIG_EXT_POS || tl->trigger.ext_slope != TRIG_EXT_NEG) tl->trigger.ext_slope = TRIG_EXT_POS;
 			if (tl->trigger.frames_per_trigger <= 0) tl->trigger.frames_per_trigger = 1;
 
@@ -2458,7 +2468,7 @@ TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *i
 		/* Set to single frame via software trigger and arm (also default) */
 		case TRIG_SOFTWARE:
 		default:
-			mode = TRIG_SOFTWARE;
+			mode = TRIG_SOFTWARE;			/* Default will be TRIG_SOFTWARE if invalid value passed */
 			if (tl->trigger.frames_per_trigger <= 0) tl->trigger.frames_per_trigger = 1;
 
 			if ( (rc = tl_camera_set_operation_mode(tl->handle, TL_CAMERA_OPERATION_MODE_SOFTWARE_TRIGGERED)) != 0)
@@ -2491,8 +2501,8 @@ TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *i
 --
 -- Return: 0 if successful, error from calls otherwise
 --
--- Note: The value will only be set if in TRIG_SOFTWARE or TRIG_EXTERNAL
---       modes.  But value will be stored in the internal info in any case
+-- Note: Value set internally always, but only passed to camera in 
+--       TRIG_SOFTWARE, TRIG_EXTERNAL, and TRIG_SS modes.
 =========================================================================== */
 int TL_GetFramesPerTrigger(TL_CAMERA *tl) {
 
@@ -2515,10 +2525,16 @@ int TL_SetFramesPerTrigger(TL_CAMERA *tl, int frames) {
 
 	/* Only actually send if in EXT or SOFTWARE modes ... need to deal with potentially armed */
 	/* Disable first if armed, and then re-enable after change to the parameter */
-	if (tl->trigger.mode == TRIG_EXTERNAL || tl->trigger.mode == TRIG_SOFTWARE) {
-		if (tl->trigger.bArmed && (rc = tl_camera_disarm(tl->handle)) != 0) TL_CameraErrMsg(rc, "Failed to disarm", rname);
-		if ( (rc = tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, frames)) != 0) TL_CameraErrMsg(rc, "Failed to set frames per trigger", rname);
-		if (tl->trigger.bArmed && (rc = tl_camera_arm(tl->handle, 2)) != 0) TL_CameraErrMsg(rc, "Failed to re-arm", rname);
+	if (tl->trigger.mode == TRIG_EXTERNAL || tl->trigger.mode == TRIG_SS || tl->trigger.mode == TRIG_SOFTWARE) {
+		if (tl->trigger.bArmed && (rc = tl_camera_disarm(tl->handle)) != 0) {
+			TL_CameraErrMsg(rc, "Failed to disarm", rname);
+		}
+		if ( (rc = tl_camera_set_frames_per_trigger_zero_for_unlimited(tl->handle, frames)) != 0) {
+			TL_CameraErrMsg(rc, "Failed to set frames per trigger", rname);
+		}
+		if (tl->trigger.bArmed && (rc = tl_camera_arm(tl->handle, 2)) != 0) {
+			TL_CameraErrMsg(rc, "Failed to re-arm", rname);
+		}
 	}
 
 	return 0;

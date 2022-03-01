@@ -102,6 +102,8 @@ int InitializeScrollBars(HWND hdlg, WND_INFO *wnd);
 int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd);
 void FreeCurve(GRAPH_CURVE *cv);
 
+static void AutoExposureThread(void *arglist);
+
 static void show_sharpness_dialog_thread(void *arglist);
 BOOL CALLBACK DCX_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -163,17 +165,6 @@ static int ColorCorrectionModes[] = { COLOR_DISABLE, COLOR_ENABLE, COLOR_BG40, C
 
 #define	ID_NULL			(-1)
 
-/* Which triggers can be enabled for a camera (set by the Open_Camera routines) */
-typedef struct _TRIGGER_CAPABILITIES {
-	BOOL bFreerun:1;
-	BOOL bSoftware:1;
-	BOOL bExternal:1;
-	BOOL bBurst:1;
-	BOOL bArmDisarm:1;
-	BOOL bMultipleFramesPerTrigger:1;
-} TRIGGER_CAPABILITIES;
-TRIGGER_CAPABILITIES TriggerCapabilities = {FALSE, FALSE, FALSE, FALSE, FALSE};
-
 /* List of information about the exposure radio buttons */
 struct {
 	int wID;
@@ -191,8 +182,8 @@ struct {
 int AllCameraControls[] = { 
 	IDB_CAMERA_DISCONNECT, IDC_CAMERA_MODES, IDB_CAMERA_DETAILS,
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
-	IDB_LIVE, IDB_TRIGGER, IDC_ARM,
-	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
+	IDC_LIVE, IDB_TRIGGER, IDC_ARM,
+	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
 	IDB_SAVE, IDB_SAVE_BURST,
 	IDV_RING_SIZE, IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDB_SHARPNESS_DIALOG, IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
@@ -210,8 +201,8 @@ int AllCameraControls[] = {
 /* List of camera controls that get turned off when starting resolution change */
 int CameraOffControls[] = { 
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
-	IDB_LIVE, IDB_TRIGGER, IDC_ARM,
-	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
+	IDC_LIVE, IDB_TRIGGER, IDC_ARM,
+	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
 	IDB_SAVE, IDB_SAVE_BURST,
 	IDV_RING_SIZE, IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDB_SHARPNESS_DIALOG, IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
@@ -244,10 +235,10 @@ int CameraOnControls[] = {
 int BurstArmControlsDisable[] = { 
 	IDC_CAMERA_LIST, IDC_CAMERA_MODES,
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
-	IDB_LIVE, IDB_TRIGGER,
-	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
+	IDC_LIVE, IDB_TRIGGER,
+	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
 	IDB_SAVE, IDB_SAVE_BURST,
-	IDB_FLOAT, IDB_SHARPNESS_DIALOG, IDV_RING_SIZE,
+	IDC_FLOAT, IDB_SHARPNESS_DIALOG, IDV_RING_SIZE,
 	IDB_NEXT_FRAME, IDB_PREV_FRAME,
 	ID_NULL
 };
@@ -256,11 +247,12 @@ int BurstArmControlsReenable[] = {
 	IDC_CAMERA_LIST, IDC_CAMERA_MODES,
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
 	IDB_SAVE, IDB_SAVE_BURST,
-	IDB_FLOAT, IDB_SHARPNESS_DIALOG, IDV_RING_SIZE,
+	IDC_FLOAT, IDB_SHARPNESS_DIALOG, IDV_RING_SIZE,
 	IDB_NEXT_FRAME, IDB_PREV_FRAME,
 	ID_NULL
 };
 
+/* Elements required for working with client/server to focus process */
 #ifdef USE_FOCUS
 	BOOL CALLBACK SharpnessDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -278,9 +270,12 @@ HANDLE hwndFloat = NULL;
 /* ===========================================================================
 -- Callback routine for floating image ... resizable image
 =========================================================================== */
+#define	CX_OFFSET	(20)					/* Extra width of x-direction		*/
+#define	CY_OFFSET	(43)					/* Size of bar at top of window	*/
+
 LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
-	int cxClient, cyClient, cxOffset, cyOffset;
+	int cxClient, cyClient;
 	RECT *pWindow, Client;
 	POINT point;
 	BOOL rc;
@@ -288,29 +283,35 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 	HDC	hdc;									/* Device context for drawing */
 	PAINTSTRUCT paintstruct;
 
+	WND_INFO *wnd;
+	HWND hdlg;
+
+	/* Recover the main window process for use in this routine */
+	wnd = main_wnd;
+	hdlg = wnd->hdlg;							/* And main window dialog box */
+
 	/* Default return and process messages */
 	rc = FALSE;
 	switch (msg) {
 
 		case WM_CREATE:
 			SetWindowText(hwnd, "Zoo Camera Imaging");
-			hwndFloat = hwnd;
-			Camera_RenderFrame(main_wnd, -1, hwnd);						/* Render the current image */
+			wnd->hdlg_float = hwndFloat = hwnd;
+			Camera_RenderFrame(wnd, -1, hwnd);								/* Render the current image */
 			rc = TRUE; break;
 			
 		case WM_PAINT:
-			hdc = BeginPaint(hwnd, &paintstruct);									/* Get DC */
-			EndPaint(hwnd, &paintstruct);												/* Release DC */
-//			Camera_RenderFrame(main_wnd, -1, hwnd);						/* Render current image */
+			hdc = BeginPaint(hwnd, &paintstruct);							/* Get DC */
+			EndPaint(hwnd, &paintstruct);										/* Release DC */
 			rc = TRUE; break;
 			
 		case WM_RBUTTONDOWN:
 			GetCursorPos((LPPOINT) &point);
 			ScreenToClient(hwnd, &point);
 			GetClientRect(hwnd, &Client);
-			main_wnd->cursor_posn.x = (1.0*point.x) / Client.right;
-			main_wnd->cursor_posn.y = (1.0*point.y) / Client.bottom;
-			SendMessage(main_wnd->hdlg, WMP_UPDATE_IMAGE_WITH_CURSOR, 0, 0);
+			wnd->cursor_posn.x = (1.0*point.x) / Client.right;
+			wnd->cursor_posn.y = (1.0*point.y) / Client.bottom;
+			SendMessage(hdlg, WMP_UPDATE_IMAGE_WITH_CURSOR, 0, 0);
 			rc = TRUE; break;
 
 		case WM_LBUTTONDBLCLK:								/* Magnify at this location */
@@ -318,11 +319,12 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 			break;
 
 		case WM_SIZING:
-			aspect = (main_wnd->height != 0) ? 1.0 * main_wnd->width / main_wnd->height : 16.0/9.0 ;
+			aspect = (wnd->height != 0) ? 1.0 * wnd->width / wnd->height : 16.0/9.0 ;
 			pWindow = (RECT *) lParam;												/* left, right, left, bottom */
-			cxOffset = 20; cyOffset = 43;											/* Just take these as given */
-			cxClient = (pWindow->right - pWindow->left) - cxOffset;
-			cyClient = (pWindow->bottom - pWindow->top) - cxOffset;
+			cxClient = (pWindow->right - pWindow->left) - CX_OFFSET;
+			cyClient = (pWindow->bottom - pWindow->top) - CY_OFFSET;
+
+			/* Determine how the size of the system changes ... lock aspect ratio */
 			switch (wParam) {
 				case WMSZ_RIGHT:
 				case WMSZ_LEFT:
@@ -343,9 +345,29 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 					}
 					break;
 			}
-			pWindow->bottom = pWindow->top  + cyClient + cyOffset;		/* Update both so don't have to do in case statement */
-			pWindow->right  = pWindow->left + cxClient + cxOffset;
-
+			/* Now modify the appropriate corner of the new rectangle */
+			switch (wParam) {
+				case WMSZ_RIGHT:
+				case WMSZ_BOTTOM:
+				case WMSZ_BOTTOMRIGHT:
+					pWindow->right = pWindow->left + cxClient + CX_OFFSET;
+					pWindow->bottom = pWindow->top + cyClient + CY_OFFSET;
+					break;
+				case WMSZ_LEFT:
+				case WMSZ_BOTTOMLEFT:
+					pWindow->left = pWindow->right - cxClient - CX_OFFSET;
+					pWindow->bottom = pWindow->top + cyClient + CY_OFFSET;
+					break;
+				case WMSZ_TOP:
+				case WMSZ_TOPRIGHT:
+					pWindow->right = pWindow->left + cxClient + CX_OFFSET;
+					pWindow->top = pWindow->bottom - cyClient - CY_OFFSET;
+					break;
+				case WMSZ_TOPLEFT:
+					pWindow->left = pWindow->right - cxClient - CX_OFFSET;
+					pWindow->top = pWindow->bottom - cyClient - CY_OFFSET;
+					break;
+			}
 			/* Message was handled - important here to acknowledge */
 			rc = TRUE; break;
 
@@ -356,8 +378,9 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 			break;
 
 		case WM_DESTROY:
+			SetDlgItemCheck(hdlg, IDC_FLOAT, FALSE);							/* Pass message to main dialog box */
 			PostQuitMessage(0);
-			hwndFloat = NULL;
+			wnd->hdlg_float = hwndFloat = NULL;
 			break;
 
 /* All other messages (a lot of them) are processed using default procedures */
@@ -428,6 +451,7 @@ int CalcSharpness(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor,
 -- Usage: _beginthread(AutoExposureThread, 0, NULL);
 =========================================================================== */
 static void AutoExposureThread(void *arglist) {
+	static char *rname="AutoExposureThread";
 
 	static BOOL active=FALSE;
 
@@ -445,8 +469,8 @@ static void AutoExposureThread(void *arglist) {
 	if (hdlg != NULL && ! IsWindow(hdlg)) hdlg = NULL;		/* Mark hdlg if not window */
 
 	/* Avoid multiple by just monitoring myself */
-	if (active || ! wnd->LiveVideo || wnd->Camera.driver == UNKNOWN) {
-		fprintf(stderr, "active: %d  wnd->LiveVideo: %d   wnd->Camera.driver: %d\n", active, wnd->LiveVideo, wnd->Camera.driver); fflush(stderr);
+	if (active || ! wnd->LiveVideo) {
+		fprintf(stderr, "[%s] Either already active (%d) or no live video (%d)\n", rname, active, wnd->LiveVideo); fflush(stderr);
 		Beep(300,200);
 		return;
 	}
@@ -463,18 +487,23 @@ static void AutoExposureThread(void *arglist) {
 	/* Set maximum number of saturated pixels to tolerate */
 	max_saturate = wnd->width*wnd->height / 1000;			/* Max tolerated as saturated */
 
-	/* Do binary search ... 1024 => 0.1% which is close enough */
-	for (try=0; try<10; try++) {
+	/* Do binary search ... Starting from 1000 ms, will get to within 0.03 ms */
+	fprintf(stderr, "iter\texposure \tlower bound\tupper bound\tnew expose\tlast expose\n"); fflush(stderr);
+	for (try=0; try<15; try++) {
 
 		/* Get current exposure time (ms) and image info */
 		exposure = Camera_GetExposure(wnd);
 		last_exposure = exposure;									/* Hold so know change at end */
 		LastImage = wnd->Image_Count;
 
+		/* Print debug information */
+		fprintf(stderr, "%d\t%9.3f\t%9.3f\t%9.3f", try, exposure, lower_bound, upper_bound); fflush(stderr);
+
 		/* If saturated, new upper_bound and use mid-point of lower/upper next time */
 		if (wnd->red_saturate > max_saturate || wnd->green_saturate > max_saturate || wnd->blue_saturate > max_saturate) {
 			upper_bound = exposure;
 			exposure = (upper_bound + lower_bound) / 2.0;
+			if (exposure > 500 && exposure > lower_bound) exposure = 500;	/* Don't sit at long exposures unless necessary */
 
 		/* Okay, intensity is low, not high ... ignore top max_saturate pixels to get highest intensity */
 		} else {
@@ -493,14 +522,30 @@ static void AutoExposureThread(void *arglist) {
 			blue_peak = i+1;
 
 			peak = max(red_peak, green_peak); peak = max(peak, blue_peak);
-			if (peak >= 245) break;															/* We are done */
-
-			exposure *= 250.0/peak;															/* New estimated exposure */
-			if (exposure > upper_bound) exposure = lower_bound + 0.95*(upper_bound-lower_bound);		/* Go 95% of the way */
-
+			if (peak >= 245) {
+				fprintf(stderr, "\n-- peak is >245 ... close enough to done\n"); fflush(stderr);
+				break;															/* We are done */
+			}
+			/* Estimate exposure where peak=250, but be careful extrapolating too far */
+			/* If extrapolate more than 2x, don't jump more than 2 "binary" levels	  */
+			exposure *= 250.0/max(1,peak);					/* Avoid zero divide */
+			if (peak > 125) {										/* Less than factor of 2... just use */
+				exposure = min(exposure, upper_bound);
+			} else {
+				exposure = min(exposure, 0.25*last_exposure+0.75*upper_bound);
+			}
 		}
-		if (fabs(exposure-last_exposure) < min_increment) break;												/* Not enough change to be done */
-		if ( (exposure > last_exposure) && ((exposure-last_exposure) < 0.03*last_exposure)) break;	/* Don't both going up by less than 3% */
+		fprintf(stderr, "\t%9.3f\t%9.3f\n", exposure, last_exposure); fflush(stderr);
+
+		/* minimal change ... declare life done */
+		if (fabs(exposure-last_exposure) < min_increment) {
+			fprintf(stderr, "-- exposure within minimum increment (%f)\n", min_increment); fflush(stderr);
+			break;
+		/* Don't both going up by less than 3% */
+		} else if ( (exposure > last_exposure) && ((exposure-last_exposure) < 0.03*last_exposure)) {
+			fprintf(stderr, "-- exposure change less than 3%%\n"); fflush(stderr);
+			break;
+		}
 
 		/* Reset the gain now and collect a few images to stabilize */
 		Camera_SetExposure(wnd, exposure);
@@ -512,10 +557,15 @@ static void AutoExposureThread(void *arglist) {
 		}
 		for (i=0; i<10; i++) {
 			if (wnd->Image_Count > LastImage+2) break;
-			Sleep(max(nint(exposure/2), 30));
+			Sleep(max(nint(exposure),50));
 		}
-		if (wnd->Image_Count <= LastImage+2) break;									/* No new image - abort */
+		if (wnd->Image_Count <= LastImage+2) {
+			fprintf(stderr, "Failed to get at least 2 new images (Image_Count: %d   LastImage: %d)\n", wnd->Image_Count, LastImage);
+			fflush(stderr);
+			break;									/* No new image - abort */
+		}
 	}
+	fprintf(stderr, "final\t%9.3f\t%9.3f\t%9.3f\n", exposure, lower_bound, upper_bound); fflush(stderr);
 
 	active = FALSE;						/* We are done with what we will try */
 	if (hdlg != NULL) {
@@ -591,12 +641,12 @@ static void trigger_burst_mode(void *arglist) {
 	wnd->BurstModeStatus = BURST_STATUS_RUNNING;
 	Camera_Trigger(wnd);											/* Send software trigger to camera driver */
 	if (hdlg != NULL) SetDlgItemText(hdlg, IDC_ARM, "Burst: running");
-	if (hdlg != NULL) SetDlgItemCheck(hdlg, IDB_LIVE, TRUE);	/* Show triggered state in the button */
+	if (hdlg != NULL) SetDlgItemCheck(hdlg, IDC_LIVE, TRUE);	/* Show triggered state in the button */
 
 	/* Wait for the end signal ... but never more than 10 seconds */
 	rc = WaitForSingleObject(end, 10000);
 	Camera_Arm(wnd, TRIG_DISARM);
-	if (hdlg != NULL) SetDlgItemCheck(hdlg, IDB_LIVE, FALSE);
+	if (hdlg != NULL) SetDlgItemCheck(hdlg, IDC_LIVE, FALSE);
 	wnd->BurstModeStatus = BURST_STATUS_COMPLETE;
 	goto BurstThreadExit;
 
@@ -629,6 +679,9 @@ int WINAPI ImageWindow(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR l
 	WNDCLASSEX wc;			/* A properties struct of our window */
 	MSG msg;					/* A temporary location for all messages */
 	static BOOL first = TRUE;
+	WND_INFO *wnd;
+	int cxSize, cySize;
+	double aspect;
 
 /* zero out the struct and set the stuff we want to modify */
 	if (first) {
@@ -652,11 +705,19 @@ int WINAPI ImageWindow(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR l
 		first = FALSE;
 	}
 
+	/* Figure out the appropriate size */
+	wnd = main_wnd;
+	aspect = (wnd->height != 0) ? 1.0 * wnd->width / wnd->height : 16.0/9.0 ;
+	cxSize = 640;
+	cySize = (int) (cxSize/aspect + 0.5);
+	cxSize += CX_OFFSET;						/* Offsets up in sizing code for window */
+	cySize += CY_OFFSET;
+
 	float_image_hwnd = CreateWindowEx(WS_EX_CLIENTEDGE, "FloatGraphClass", "Caption", WS_VISIBLE | WS_OVERLAPPEDWINDOW,
 								 CW_USEDEFAULT, /* x */
 								 CW_USEDEFAULT, /* y */
-								 640, /* width */
-								 500, /* height */
+								 cxSize, /* width */
+								 cySize, /* height */
 								 NULL, NULL, hThisInstance, NULL);
 	if (float_image_hwnd == NULL) {
 		MessageBox(NULL, "Window Creation Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
@@ -1200,7 +1261,6 @@ static int Camera_Close(HWND hdlg, WND_INFO *wnd) {
 	/* No camera now active */
 	wnd->Camera.driver = UNKNOWN;
 	wnd->LiveVideo = FALSE;
-	memset(&TriggerCapabilities, 0, sizeof(TriggerCapabilities));
 	SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
 
 	return rc;
@@ -1448,7 +1508,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			Init_ZooCam_Server();
 
 			/* Enable a floating window */
-			EnableDlgItem(hdlg, IDB_FLOAT, TRUE);
+			EnableDlgItem(hdlg, IDC_FLOAT, TRUE);
 
 			rcode = TRUE; break;
 
@@ -1671,13 +1731,6 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			Camera_ShowImage(wnd, rings.iShow, NULL);
 			rc = TRUE; break;
 
-		case WMP_SHOW_ARM:
-			if (Camera_GetTriggerMode(wnd, &trigger_info) != TRIG_BURST) {
-				SetDlgItemCheck(hdlg, IDC_ARM, trigger_info.bArmed);
-				SetDlgItemText(hdlg, IDC_ARM, trigger_info.bArmed ? "Camera armed" : "Arm camera");
-			}
-			rcode = 0; break;
-			
 		case WMP_SHOW_GAMMA:
 			rval = Camera_GetGamma(wnd);
 			SendDlgItemMessage(hdlg, IDS_GAMMA, TBM_SETPOS, TRUE, (int) (rval*100.0+0.5));
@@ -1751,24 +1804,30 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			mode = Camera_GetTriggerMode(wnd, &trigger_info);
 			if (mode < 0) {
 				static int wIDs[] = {IDB_TRIGGER, IDC_ARM,
-											IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_BURST};
+											IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST};
 				for (i=0; i<sizeof(wIDs)/sizeof(wIDs[0]); i++) EnableDlgItem(hdlg, wIDs[i], FALSE);
 				wnd->LiveVideo = FALSE;
+				SetDlgItemText(hdlg, IDC_LIVE, "Live");
+				SetDlgItemCheck(hdlg, IDC_LIVE, FALSE);
 			} else {
-				EnableDlgItem(hdlg, IDB_LIVE,				TriggerCapabilities.bFreerun && mode != TRIG_BURST);
-				EnableDlgItem(hdlg, IDR_TRIG_FREERUN,  TriggerCapabilities.bFreerun);
-				EnableDlgItem(hdlg, IDR_TRIG_SOFTWARE, TriggerCapabilities.bSoftware);
-				EnableDlgItem(hdlg, IDR_TRIG_EXTERNAL, TriggerCapabilities.bExternal);
-				EnableDlgItem(hdlg, IDR_TRIG_BURST,		TriggerCapabilities.bBurst);
-				EnableDlgItem(hdlg, IDB_TRIGGER,       (TriggerCapabilities.bSoftware || TriggerCapabilities.bExternal) && (mode == TRIG_SOFTWARE) );
-				EnableDlgItem(hdlg, IDC_ARM, TriggerCapabilities.bArmDisarm && (mode != TRIG_BURST));
+				TRIGGER_CAPABILITIES *caps;
+				caps = &trigger_info.capabilities;
+				EnableDlgItem(hdlg, IDC_LIVE,				caps->bFreerun && mode != TRIG_BURST);
+				EnableDlgItem(hdlg, IDR_TRIG_FREERUN,  caps->bFreerun);
+				EnableDlgItem(hdlg, IDR_TRIG_SOFTWARE, caps->bSoftware);
+				EnableDlgItem(hdlg, IDR_TRIG_EXTERNAL, caps->bExternal);
+				EnableDlgItem(hdlg, IDR_TRIG_SS,			caps->bSingleShot);
+				EnableDlgItem(hdlg, IDR_TRIG_BURST,		caps->bBurst);
+				EnableDlgItem(hdlg, IDB_TRIGGER,       trigger_info.bArmed && ((mode == TRIG_SOFTWARE) || (mode == TRIG_BURST) || ((mode == TRIG_EXTERNAL || mode == TRIG_SS) && caps->bForceExtTrigger)));
+				EnableDlgItem(hdlg, IDC_ARM, caps->bArmDisarm && (mode != TRIG_BURST));
 
-				bFlag = (mode == TRIG_SOFTWARE || mode == TRIG_EXTERNAL) && TriggerCapabilities.bMultipleFramesPerTrigger;
+				bFlag = (mode == TRIG_SOFTWARE || mode == TRIG_EXTERNAL || mode == TRIG_SS) && caps->bMultipleFramesPerTrigger;
 				ShowDlgItem(hdlg, IDT_TRIG_COUNT, bFlag); EnableDlgItem(hdlg, IDT_TRIG_COUNT, bFlag);
 				ShowDlgItem(hdlg, IDV_TRIG_COUNT, bFlag); EnableDlgItem(hdlg, IDV_TRIG_COUNT, bFlag);
 				SetDlgItemInt(hdlg, IDV_TRIG_COUNT, Camera_GetFramesPerTrigger(wnd), FALSE);
 				
-				ShowDlgItem(hdlg, IDB_BURST_ARM, mode == TRIG_BURST);
+				ShowDlgItem(hdlg, IDB_BURST_ARM, mode == TRIG_BURST || mode == TRIG_SS);						/* Different meanings, but both real */
+
 				if (mode != TRIG_BURST) {
 					SetDlgItemCheck(hdlg, IDC_ARM, trigger_info.bArmed);
 					SetDlgItemText(hdlg, IDC_ARM, trigger_info.bArmed ? "Camera armed" : "Arm camera");
@@ -1777,10 +1836,22 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					SetDlgItemText(hdlg, IDC_ARM, "Burst: standby");
 				}
 
+				/* Set the appropriate radio button corresponding to the mode */
 				SetRadioButtonIndex(hdlg, IDR_TRIG_FREERUN, IDR_TRIG_BURST, mode);
-				wnd->LiveVideo = (mode == TRIG_FREERUN);
+
+				/* Deal with the Live/Paused button */
+				if (mode == TRIG_FREERUN) {
+					wnd->LiveVideo = trigger_info.bArmed;
+					SetDlgItemCheck(hdlg, IDC_LIVE, TRUE);
+					SetDlgItemText(hdlg, IDC_LIVE, wnd->LiveVideo ? "Live" : "Paused");
+				} else {
+					wnd->LiveVideo = FALSE;
+					SetDlgItemText(hdlg, IDC_LIVE, "Live");
+					SetDlgItemCheck(hdlg, IDC_LIVE, FALSE);
+				}
+				SetRadioButtonIndex(hdlg, IDR_TRIG_FREERUN, IDR_TRIG_BURST, mode);
+				wnd->LiveVideo = (mode == TRIG_FREERUN) && trigger_info.bArmed;
 			}
-			SetDlgItemCheck(hdlg, IDB_LIVE, wnd->LiveVideo);
 			rcode = 0; break;
 
 
@@ -1951,7 +2022,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 						if (wnd->dcx->hCam > 0) {
 							DCx_SetTriggerMode(wnd->dcx, TRIG_SOFTWARE, NULL);
 							wnd->LiveVideo = FALSE;
-							SetDlgItemCheck(hdlg, IDB_LIVE, FALSE);
+							SetDlgItemCheck(hdlg, IDC_LIVE, FALSE);
 							EnableDlgItem(hdlg, IDB_TRIGGER, FALSE);
 							is_StopLiveVideo(wnd->dcx->hCam, IS_WAIT);
 
@@ -1959,7 +2030,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 								DCx_SetTriggerMode(wnd->dcx, TRIG_FREERUN, NULL);
 								SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
 								wnd->LiveVideo = TRUE;
-								SetDlgItemCheck(hdlg, IDB_LIVE, wnd->LiveVideo);
+								SetDlgItemCheck(hdlg, IDC_LIVE, wnd->LiveVideo);
 								SendMessage(hdlg, WMP_UPDATE_IMAGE_WITH_CURSOR, 0, 0);
 							} else {
 								ComboBoxClearSelection(hdlg, IDC_CAMERA_MODES);
@@ -1967,10 +2038,14 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 						}
 					}
 					rcode = TRUE; break;
-					
-				case IDB_FLOAT:
+
+				case IDC_FLOAT:
 					if (BN_CLICKED == wNotifyCode) {
-						if (! IsWindow(float_image_hwnd)) _beginthread(start_image_window, 0, NULL);
+						if (GetDlgItemCheck(hdlg, wID)) {
+							if (! IsWindow(float_image_hwnd)) _beginthread(start_image_window, 0, NULL);
+						} else {
+							if (IsWindow(float_image_hwnd)) SendMessage(float_image_hwnd, WM_CLOSE, 0, 0);
+						}
 					}
 					rcode = TRUE; break;
 
@@ -2131,45 +2206,53 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 #endif
 					rcode = TRUE; break;
 
-				case IDB_LIVE:
+				/** Complex operations 
+					-- If LiveVideo (freerun and armed), go to TRIG_SOFTWARE and uncheck
+					-- If freerun but not armed, just arm and go back to LiveVideo
+					-- If not in TRIG_FREERUN mode, set new trigger mode
+				**/
+				case IDC_LIVE:
 					if (BN_CLICKED == wNotifyCode) {
-						rc = GetDlgItemCheck(hdlg, IDB_LIVE);
-						fprintf(stderr, "%s\n", wnd->LiveVideo ? "Going live" : "Freezing video"); fflush(stderr);
-						rc = Camera_SetTriggerMode(wnd, rc ? TRIG_FREERUN : TRIG_SOFTWARE, NULL);	/* Actual mode */
-						SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
+						if (wnd->LiveVideo) {
+							Camera_SetTriggerMode(wnd, TRIG_SOFTWARE, NULL);	/* Go to software mode */
+						} else if (Camera_GetTriggerMode(wnd, NULL) == TRIG_FREERUN) {
+							Camera_Arm(wnd, TRIG_ARM);
+						} else {
+							Camera_SetTriggerMode(wnd, TRIG_FREERUN, NULL);		/* Go to freerun mode */
+						}
+						SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);	/* Will set click mode of button */
 					}
 					rcode = TRUE; break;
 
 				/* Enable or abort based on current status ... */
 				/* WMP_BURST_ABORT or WMP_BURST_ARM message will be sent by Burst_Actions() */
 				case IDB_BURST_ARM:
-					if (BN_CLICKED == wNotifyCode) Burst_Actions(wnd->BurstModeActive ? BURST_ABORT : BURST_ARM, 0, NULL);
+					if (BN_CLICKED == wNotifyCode) {
+						mode = Camera_GetTriggerMode(wnd, &trigger_info);
+						if (TRIG_BURST == mode) {
+							Burst_Actions(wnd->BurstModeActive ? BURST_ABORT : BURST_ARM, 0, NULL);
+						} else if (TRIG_SS == mode && ! trigger_info.bArmed) {
+							Camera_Arm(wnd, TRIG_ARM);
+							SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);	/* Will set click mode of button */
+						}
+					}
 					rcode = TRUE; break;
 
 					/* Button like ... down ==> armed, up ==> disarmed ... change state on click */
 				case IDC_ARM:
 					bFlag = GetDlgItemCheck(hdlg, wID);
-					if (bFlag) { 
-						Camera_Arm(wnd, TRIG_ARM);    
-						SetDlgItemText(hdlg, wID, "Camera armed");
-						if (Camera_GetTriggerMode(wnd, NULL) == TRIG_FREERUN) Camera_Trigger(wnd);
-					} else { 
-						Camera_Arm(wnd, TRIG_DISARM); 
-						SetDlgItemText(hdlg, wID, "Arm camera");
-					}
+					Camera_Arm(wnd, bFlag ? TRIG_ARM : TRIG_DISARM);    
+					SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
 					rcode = TRUE; break;
 					
 				case IDB_TRIGGER:
-					if (BN_CLICKED == wNotifyCode) {
-						mode = Camera_GetTriggerMode(wnd, &trigger_info);
-						Camera_Trigger(wnd);									/* Try in any case */
-						if (! trigger_info.bArmed) Beep(200,300);		/* But beep if expect failure */
-					}
+					if (BN_CLICKED == wNotifyCode) Camera_Trigger(wnd);
 					rcode = TRUE; break;
 
 				case IDR_TRIG_FREERUN:
 				case IDR_TRIG_SOFTWARE:
 				case IDR_TRIG_EXTERNAL:
+				case IDR_TRIG_SS:
 				case IDR_TRIG_BURST:
 					rc = GetRadioButtonIndex(hdlg, IDR_TRIG_FREERUN, IDR_TRIG_BURST);
 					Camera_SetTriggerMode(wnd, rc, NULL);
@@ -2356,6 +2439,11 @@ BOOL CALLBACK NUMATODlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 #endif
 
 /* ===========================================================================
+-- Dialog box procedure for working with the focus client/server
+--
+-- Usage: BOOL CALLBACK SharpnessDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
+--
+-- Standard windows dialog
 =========================================================================== */
 #ifdef USE_FOCUS
 
@@ -2544,7 +2632,112 @@ BOOL CALLBACK SharpnessDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam
 	}
 	return 0;
 }
+
+
+/* ===========================================================================
+-- Handle updates to the focus dislog box from frame updates
+--
+-- Usage: int Update_Focus_Dialog(int sharpness);
+--
+-- Inputs: sharpness - delta_max from region around cursor in new frame
+--
+-- Output: potentially updates the graph window if open
+--
+-- Return: 0 on success
+--           1 ==> SharpnessDlg.mode unknown
+--           2 ==> no remote focus client and too soon to try checking again
+--           3 ==> unable to connect to focus client on given IP address
+--           4 ==> focus client/server versions don't match
+--				 5 ==> unable to get status from focus server
+--				 6
+=========================================================================== */
+int Update_Focus_Dialog(int sharpness) {
+
+	int rc;
+	int client_version, server_version;
+	double zposn;
+	int status;
+	GRAPH_CURVE *cv;
+	static BOOL InSweep = FALSE;
+
+	/* Connection to focus client */
+	static BOOL Have_Focus_Client = FALSE;
+	static char *server_IP = LOOPBACK_SERVER_IP_ADDRESS;		/* Local test (server on same machine) */
+//	static char *server_IP = "128.253.129.74";					/* Machine in laser room */
+//	static char *server_IP = "128.253.129.71";					/* Machine in open lab room */
+
+	static time_t time_last_check = 0;
+
+	/* Do we have remote and the sharpness dialog up? */
+	if (SharpnessDlg.hdlg == NULL || SharpnessDlg.paused || SharpnessDlg.cv == NULL) return 0;
+	cv = SharpnessDlg.cv;
+
+	/* Make sure there is space for additional points */
+	if (cv->npt >= cv->nptmax) {
+		cv->nptmax += 1024;
+		cv->x = realloc(cv->x, sizeof(*cv->x)*cv->nptmax);
+		cv->y = realloc(cv->y, sizeof(*cv->y)*cv->nptmax);
+	}
+
+	/* Time sequence operations do not depend on the client/server interaction.  Handle now */
+	if (SharpnessDlg.mode == TIME_SEQUENCE) {
+		cv->x[cv->npt] = cv->npt ;
+		cv->y[cv->npt] = sharpness;
+		cv->npt++;
+		cv->modified = TRUE;
+		return 0;
+	}
+
+	/* Only understand FOCUS_SWEEP and TIME_SEQUENCE for modes */
+	if (SharpnessDlg.mode != FOCUS_SWEEP) return 1;
+
+	/* Need client for FOCUS_SWEEP */
+	if (! Have_Focus_Client) {
+
+		/* Only try every 10 seconds to reconnect */
+		if (time(NULL) < time_last_check+10) { InSweep = FALSE; return 2; }
+		time_last_check = time(NULL);
+
+		/* Try to connect */
+		if ( (rc = Init_Focus_Client(server_IP)) != 0) {
+			fprintf(stderr, "ERROR: Unable to connect to the server at the specified IP address (%s)\n", server_IP); fflush(stderr);
+			InSweep = FALSE; return 3;
+		}
+
+		/* Verify versions */
+		client_version = Focus_Remote_Query_Client_Version();
+		server_version = Focus_Remote_Query_Server_Version();
+		printf("Client/Server versions: %4.4d/%4.4d\n", client_version, server_version); fflush(stderr);
+		if (client_version != server_version) {
+			fprintf(stderr, "ERROR: Version mismatch between focus client and server.\n"); fflush(stderr);
+			InSweep = FALSE; return 4;
+		}
+
+		Have_Focus_Client = TRUE;
+	}
+
+	/* Query status of the focus position */
+	if ( (rc = Focus_Remote_Get_Focus_Status(&status)) != 0) {
+		fprintf(stderr, "ERROR: Looks like we lost the remote focus client.  Will retry every 10 seconds.  (rc=%d)\n", rc); fflush(stderr);
+		Have_Focus_Client = FALSE;
+		InSweep = FALSE; return 5;
+	}
+
+	if (status & FM_MOTOR_STATUS_SWEEP) {
+		Focus_Remote_Get_Focus_Posn(&zposn);
+		if (! InSweep) { cv->npt = 0; InSweep = TRUE; }
+		cv->x[cv->npt] = zposn;
+		cv->y[cv->npt] = sharpness;
+		cv->npt++;
+		cv->modified = TRUE;
+	} else {
+		InSweep = FALSE;
+	}
+
+	return 0;
+}
 #endif
+
 
 /* ===========================================================================
 -- Main callback routine for DCx camera info
@@ -3307,8 +3500,8 @@ static FILE_FORMAT GetDfltImageFormat(HWND hdlg) {
 =========================================================================== */
 int GenerateCrosshair(WND_INFO *wnd, HWND hwnd) {
 	RECT rect;
-	HDC hdc;
 	int ix,iy, width, height;
+	HDC hdc;
 
 	/* Create brushes for the cross-hair */
 	static HBRUSH background, foreground;
@@ -3332,7 +3525,9 @@ int GenerateCrosshair(WND_INFO *wnd, HWND hwnd) {
 	ix = (int) (wnd->cursor_posn.x*width  + 0.5);
 	iy = (int) (wnd->cursor_posn.y*height + 0.5);
 
-	hdc = GetDC(hwnd);				/* Get DC */
+	/* Get DC */
+	hdc = GetDC(hwnd);
+
 	if (! wnd->cursor_posn.fullwidth) {
 		int isize;
 		isize = min(20,width/10);
@@ -3355,7 +3550,8 @@ int GenerateCrosshair(WND_INFO *wnd, HWND hwnd) {
 		MoveToEx(hdc, ix, 0, NULL); LineTo(hdc, ix, height);
 	}		
 
-	ReleaseDC(hwnd, hdc);			/* Release DC */
+	/* Release DC */
+	ReleaseDC(hwnd, hdc);
 
 	/* Return successful */
 	return 0;
@@ -3394,22 +3590,15 @@ static int Camera_ShowImage(WND_INFO *wnd, int frame, int *pSharp) {
 	/* This is a number potentially incremented/decremented from existing. Bound to valid range */
 	switch (wnd->Camera.driver) {
 		case DCX:
-			rc = DCx_ShowImage(wnd, frame, pSharp);
+			rc = DCx_ShowImage(wnd, frame, pSharp);		/* Includes crosshair */
 			break;
 		case TL:
-			rc = TL_ShowImage(wnd, frame, pSharp);
+			rc = TL_ShowImage(wnd, frame, pSharp);			/* Includes crosshair */
 			break;
 		default:
 			rc = -1;
 			break;
 	}
-
-	/* If we were successful, add cursors to any windows rendered */
-	if (rc == 0) {
-		if (IsWindow(float_image_hwnd)) GenerateCrosshair(wnd, float_image_hwnd);
-		if (IsWindow(wnd->thumbnail))   GenerateCrosshair(wnd, wnd->thumbnail);
-	}
-
 	return rc;
 }
 
@@ -3437,9 +3626,13 @@ static int TL_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 	if (index < 0) index = tl->iLast;			/* As we set iShow, has to be valid */
 
 	/* Render the bitmap and report statistics */
-	if (IsWindow(float_image_hwnd)) TL_RenderFrame(tl, index, float_image_hwnd);
+	if (IsWindow(float_image_hwnd)) {
+		TL_RenderFrame(tl, index, float_image_hwnd);
+		GenerateCrosshair(wnd, float_image_hwnd);
+	}
 	if (IsWindow(wnd->thumbnail)) {
 		TL_RenderFrame(tl, index, wnd->thumbnail);
+		GenerateCrosshair(wnd, wnd->thumbnail);
 		CalcStatistics(wnd, tl->width, tl->height, tl->IsSensorColor ? 3*tl->width : tl->width, tl->IsSensorColor, tl->rgb24, pSharp);
 
 		image = &tl->images[tl->iShow];							/* Currently shown image (after render) */
@@ -3495,9 +3688,13 @@ static int DCx_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 
 	/* Render the bitmap and report statistics */
 	/* For DCX cameras, onlyi works if in IS_CM_BGR8_PACKED mode ... also could use is_GetImageHistogram */
-	if (IsWindow(float_image_hwnd)) is_RenderBitmap(dcx->hCam, PID, float_image_hwnd, IS_RENDER_FIT_TO_WINDOW);
+	if (IsWindow(float_image_hwnd)) {
+		is_RenderBitmap(dcx->hCam, PID, float_image_hwnd, IS_RENDER_FIT_TO_WINDOW);
+		GenerateCrosshair(wnd, float_image_hwnd);
+	}
 	if (IsWindow(wnd->thumbnail))   {
 		is_RenderBitmap(dcx->hCam, PID, wnd->thumbnail, IS_RENDER_FIT_TO_WINDOW);
+		GenerateCrosshair(wnd, wnd->thumbnail);
 		rc = is_GetImageMemPitch(dcx->hCam, &pitch);
 		CalcStatistics(wnd, wnd->width, wnd->height, pitch, wnd->dcx->IsSensorColor, pMem, pSharp);
 
@@ -3521,12 +3718,15 @@ static int DCx_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 --
 -- This is split into a high priority thread to try to recognize every one
 -- and a helper that does the calls to display the buffer into windows and
--- compute the statistics.  This can occasionally be mised.
+-- compute the statistics.  This can occasionally be missed.
 --
 -- Usage: static void RenderImageThread(void *arglist);
 --        static void ActualRenderThread(void *arglist);
 =========================================================================== */
+#define	MAX_DCX_FRAME_DISPLAY_HZ		(8)			/* Limit CPU consumed rendering images */
+
 static void DCx_ImageThread(void *arglist) {
+	static char *rname = "DCx_ImageThread";
 
 	int rc, CurrentImageIndex;
 	int delta_max;
@@ -3534,25 +3734,14 @@ static void DCx_ImageThread(void *arglist) {
 	WND_INFO *wnd;
 	DCX_CAMERA *dcx;
 	int PID;
-
-#ifdef USE_FOCUS
-	time_t time_last_check = 0;
-	int client_version, server_version;
-	double zposn;
-	char *server_IP;
-	BOOL Have_Focus_Client = FALSE;
-#endif
+	HIRES_TIMER *timer;
 
 	/* Just wait for events that mean I should render the images */
 	printf("DCx_ImageThread thread started\n"); fflush(stdout);
 
-	/* Check for the existence of the focus dialog first ... use if present */
-#ifdef USE_FOCUS
-	server_IP = LOOPBACK_SERVER_IP_ADDRESS;	/* Local test (server on same machine) */
-//		server_IP = "128.253.129.74";					/* Machine in laser room */
-//		server_IP = "128.253.129.71";					/* Machine in open lab room */
-	Have_Focus_Client = FALSE;
-#endif
+	/* Create a timer so can limit how often */
+	timer = HiResTimerCreate();						/* Create the timer and then reset	*/
+	HiResTimerReset(timer, 0.00);						/* to report 0.00 at this moment		*/
 
 	/* Now just wait around for images to arrive and process them */
 	while (main_wnd != NULL && ! abort_all_threads) {
@@ -3583,67 +3772,23 @@ static void DCx_ImageThread(void *arglist) {
 		}
 #endif
 
-		Camera_ShowImage(wnd, CurrentImageIndex, &delta_max);					/* Handles the cross-hairs for me */
+		/* Skip processing if (i) so requested or (ii) too many per second */
+		if (wnd->PauseImageRendering) continue;
+		if (HiResTimerDelta(timer) < 1.0/MAX_DCX_FRAME_DISPLAY_HZ) continue;
+
+		/* Reset timer to control overall allowed display rate */
+		HiResTimerReset(timer, 0.00);
+
+		/* Show image with crosshairs */
+		Camera_ShowImage(wnd, CurrentImageIndex, &delta_max);						/* Call to ShowImage adds cross-hairs for me */
 		if (! IsWindow(wnd->hdlg)) continue;
 
 #ifdef USE_FOCUS
-		/* Only need the dialog if we have the sharpness dialog */
-		if (SharpnessDlg.hdlg != NULL && ! SharpnessDlg.paused) {			/* Do we have remote and the sharpness dialog up? */
-			int status;
-			GRAPH_CURVE *cv;
-			static BOOL InSweep=FALSE;
-
-			if (! Have_Focus_Client) {
-				if (time(NULL)>time_last_check+10) {								/* Only try every 10 seconds to reconnect */
-					time_last_check = time(NULL);
-					if ( (rc = Init_Focus_Client(server_IP)) != 0) {
-						fprintf(stderr, "ERROR: Unable to connect to the server at the specified IP address (%s)\n", server_IP);
-						fflush(stderr);
-					} else {
-						client_version = Focus_Remote_Query_Client_Version();
-						server_version = Focus_Remote_Query_Server_Version();
-						printf("Client/Server versions: %4.4d/%4.4d\n", client_version, server_version); fflush(stderr);
-						if (client_version != server_version) {
-							fprintf(stderr, "ERROR: Version mismatch between client and server.  Have to abort\n");
-							fflush(stderr);
-						} else {
-							Have_Focus_Client = TRUE;
-						}
-					}
-				}
-			}
-
-			if (! Have_Focus_Client) {
-				InSweep = FALSE;
-			} else if ( (rc = Focus_Remote_Get_Focus_Status(&status)) != 0) {
-				fprintf(stderr, "ERROR: Looks like we lost the remote focus client.  Will recheck for it every 10 seconds.  (rc=%d)\n", rc); fflush(stderr);
-				Have_Focus_Client = FALSE;
-				InSweep = FALSE;
-			} else if ( SharpnessDlg.mode == TIME_SEQUENCE || (SharpnessDlg.mode == FOCUS_SWEEP && (status & FM_MOTOR_STATUS_SWEEP)) ) {
-				Focus_Remote_Get_Focus_Posn(&zposn);
-				if ( (cv = SharpnessDlg.cv) != NULL) {
-					if (SharpnessDlg.mode == FOCUS_SWEEP) {
-						if (! InSweep) cv->npt = 0;
-						InSweep = TRUE;
-					}
-					if (cv->npt >= cv->nptmax) {
-						cv->nptmax += 1024;
-						cv->x = realloc(cv->x, sizeof(*cv->x)*cv->nptmax);
-						cv->y = realloc(cv->y, sizeof(*cv->y)*cv->nptmax);
-					}
-					cv->x[cv->npt] = (SharpnessDlg.mode == FOCUS_SWEEP) ? zposn : cv->npt ;
-					cv->y[cv->npt] = delta_max;
-					cv->npt++;
-					cv->modified = TRUE;
-				}
-			} else {
-				InSweep = FALSE;
-			}
-		}
+		Update_Focus_Dialog(delta_max);
 #endif
-
 	}
 
+	HiResTimerDestroy(timer);
 	printf("DCx_ImageThread thread exiting\n"); fflush(stdout);
 	return;									/* Only happens when main_wnd is destroyed */
 }
@@ -3751,16 +3896,19 @@ static int DCx_CameraOpen(HWND hdlg, WND_INFO *wnd, DCX_CAMERA *dcx, UC480_CAMER
 	EnableDlgItem(hdlg, IDB_SAVE_BURST, TRUE);
 
 	/* Mark trigger controls that are visible */
-	memset(&TriggerCapabilities, 0, sizeof(TriggerCapabilities));
-	TriggerCapabilities.bFreerun   = TRUE;
-	TriggerCapabilities.bSoftware  = TRUE;
-	TriggerCapabilities.bBurst     = TRUE;
-	TriggerCapabilities.bArmDisarm = TRUE;
+	memset(&dcx->trigger.capabilities, 0, sizeof(dcx->trigger.capabilities));
+	dcx->trigger.capabilities.bFreerun    = TRUE;
+	dcx->trigger.capabilities.bExternal   = TRUE;
+	dcx->trigger.capabilities.bSingleShot = TRUE;
+	dcx->trigger.capabilities.bSoftware   = TRUE;
+	dcx->trigger.capabilities.bBurst      = TRUE;
+	dcx->trigger.capabilities.bForceExtTrigger = TRUE;
+	dcx->trigger.capabilities.bArmDisarm  = TRUE;
 	SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
 
 	/* Camera now active in freerun triggering - tell window */
 	wnd->LiveVideo = TRUE;
-	SetDlgItemCheck(hdlg, IDB_LIVE, wnd->LiveVideo);
+	SetDlgItemCheck(hdlg, IDC_LIVE, wnd->LiveVideo);
 
 	/* May have changed image, so show cursor (is this needed anymore?) */
 	SendMessage(hdlg, WMP_UPDATE_IMAGE_WITH_CURSOR, 0, 0);
@@ -3834,18 +3982,19 @@ static int TL_CameraOpen(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl) {
 	EnableDlgItem(hdlg, IDB_SAVE_BURST, TRUE);
 
 	/* Mark trigger controls that are visible */
-	memset(&TriggerCapabilities, 0, sizeof(TriggerCapabilities));
-	TriggerCapabilities.bFreerun   = TRUE;
-	TriggerCapabilities.bSoftware  = TRUE;
-	TriggerCapabilities.bExternal  = TRUE;
-	TriggerCapabilities.bBurst     = TRUE;
-	TriggerCapabilities.bArmDisarm = TRUE;
-	TriggerCapabilities.bMultipleFramesPerTrigger = TRUE;
+	memset(&tl->trigger.capabilities, 0, sizeof(tl->trigger.capabilities));
+	tl->trigger.capabilities.bFreerun    = TRUE;
+	tl->trigger.capabilities.bExternal   = TRUE;
+	tl->trigger.capabilities.bSingleShot = TRUE;
+	tl->trigger.capabilities.bSoftware   = TRUE;
+	tl->trigger.capabilities.bBurst      = TRUE;
+	tl->trigger.capabilities.bArmDisarm  = TRUE;
+	tl->trigger.capabilities.bMultipleFramesPerTrigger = TRUE;
 	SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
 
 	/* Camera now active in freerun triggering - tell window */
 	wnd->LiveVideo = TRUE;
-	SetDlgItemCheck(hdlg, IDB_LIVE, wnd->LiveVideo);
+	SetDlgItemCheck(hdlg, IDC_LIVE, wnd->LiveVideo);
 
 	return 0;
 }
@@ -3868,12 +4017,13 @@ static int TL_CameraOpen(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl) {
 --       to change cameras.  Use WM_TIMER instead to update statistics
 --       and frame counts
 =========================================================================== */
-#define	MAX_TL_FRAME_DISPLAY_HZ		(10)					/* Limit CPU consumed rendering images */
+#define	MAX_TL_FRAME_DISPLAY_HZ		(8)					/* Limit CPU consumed rendering images */
 
 static void TL_ImageThread(void *arglist) {
 	static char *rname = "TL_ImageThread";
 
 	TL_CAMERA *tl;
+	int delta_max;
 	HIRES_TIMER *timer;
 	WND_INFO *wnd;
 	int rc;
@@ -3911,7 +4061,9 @@ static void TL_ImageThread(void *arglist) {
 		HiResTimerReset(timer, 0.00);
 
 		/* Show image with crosshairs */
-		Camera_ShowImage(wnd, -1, NULL);						/* Call to ShowImage adds cross-hairs for me */
+		Camera_ShowImage(wnd, -1, &delta_max);				/* Call to ShowImage adds cross-hairs for me */
+		if (! IsWindow(wnd->hdlg)) continue;
+
 	}
 	TL_Process_Image_Thread_Active = FALSE;				/* Once out of loop, no more chance of lockup */
 
@@ -4067,13 +4219,13 @@ static int Set_DCx_Resolution(HWND hdlg, WND_INFO *wnd, int ImageFormatID) {
 	/* For some reason, have to stop the live video again to avoid error messages */
 	is_StopLiveVideo(dcx->hCam, IS_WAIT);
 	wnd->LiveVideo = FALSE;
-	if (GetDlgItemCheck(hdlg, IDB_LIVE)) {
+	if (GetDlgItemCheck(hdlg, IDC_LIVE)) {
 		is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
 		wnd->LiveVideo = TRUE;
 		dcx->iLast = dcx->iShow = dcx->nValid = 0;
 		EnableDlgItem(hdlg, IDB_TRIGGER, FALSE);
 	} else {
-		SetDlgItemCheck(hdlg, IDB_LIVE, FALSE);
+		SetDlgItemCheck(hdlg, IDC_LIVE, FALSE);
 		EnableDlgItem(hdlg, IDB_TRIGGER, TRUE);
 	}
 
@@ -4245,7 +4397,7 @@ int DCx_Enable_Live_Video(int state) {
 	hdlg = wnd->hdlg;
 	if (hdlg != NULL && ! IsWindow(hdlg)) hdlg = NULL;		/* Mark hdlg if not window */
 
-	/* See IDB_LIVE button for actions */
+	/* See IDC_LIVE button for actions */
 	if (state == 1) {								/* Do we want to enable? */
 		DCx_SetTriggerMode(dcx, TRIG_FREERUN, NULL);
 		wnd->LiveVideo = TRUE;

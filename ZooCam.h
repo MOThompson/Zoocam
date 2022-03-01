@@ -17,10 +17,9 @@ WND_INFO *main_wnd;
 #define	WMP_SHOW_GAINS						(WM_APP+8)
 #define	WMP_UPDATE_IMAGE_WITH_CURSOR	(WM_APP+9)
 #define	WMP_SHOW_CURSOR_POSN				(WM_APP+9)
-#define	WMP_SHOW_ARM						(WM_APP+10)
-#define	WMP_BURST_ARM						(WM_APP+11)
-#define	WMP_BURST_COMPLETE				(WM_APP+12)
-#define	WMP_UPDATE_TRIGGER_BUTTONS		(WM_APP+13)
+#define	WMP_BURST_ARM						(WM_APP+10)
+#define	WMP_BURST_COMPLETE				(WM_APP+11)
+#define	WMP_UPDATE_TRIGGER_BUTTONS		(WM_APP+12)
 
 /* Support routines that are now safe and simple */
 int GenerateCrosshair(WND_INFO *wnd, HWND hwnd);
@@ -151,9 +150,10 @@ typedef struct _CAMERA {
 } CAMERA;
 
 typedef struct _WND_INFO {
-	HWND hdlg;									/* Handle to primary dialog box */
+	HWND hdlg;									/* Handle to primary dialog box	*/
+	HWND hdlg_float;							/* Handle to floating window		*/
 
-	BOOL LiveVideo;							/* Are we in free-run mode? */
+	BOOL LiveVideo;							/* Are we in free-run mode?		*/
 	BOOL PauseImageRendering;				/* Critical sections where buffers maybe changing ... disable access */
 	BOOL BurstModeActive;					/* Are we in an active mode with burst (wait, collecting, etc.) */
 													/* Set to FALSE after arm'd to abort */

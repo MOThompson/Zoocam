@@ -40,9 +40,21 @@ typedef struct _CAMERA_INFO {
 #pragma pack()
 
 /* Values for the enumeration must match order of radio buttons */
-#define	NUM_TRIGGER_MODES		(4)
-typedef enum _TRIGGER_MODE     { TRIG_FREERUN=0, TRIG_SOFTWARE=1, TRIG_EXTERNAL=2, TRIG_BURST=3 } TRIGGER_MODE;
+#define	NUM_TRIGGER_MODES		(5)
+typedef enum _TRIGGER_MODE     { TRIG_FREERUN=0, TRIG_SOFTWARE=1, TRIG_EXTERNAL=2, TRIG_SS=3, TRIG_BURST=4 } TRIGGER_MODE;
 typedef enum _TRIGGER_POLARIY  { TRIG_EXT_NOCHANGE=0, TRIG_EXT_POS=1, TRIG_EXT_NEG=2, TRIG_EXT_UNSUPPORTED=3} TRIGGER_POLARITY ;
+
+/* Which triggers can be enabled for a camera (set by the Open_Camera routines) */
+typedef struct _TRIGGER_CAPABILITIES {
+	BOOL bFreerun:1;
+	BOOL bSoftware:1;
+	BOOL bExternal:1;
+	BOOL bSingleShot:1;
+	BOOL bBurst:1;
+	BOOL bArmDisarm:1;
+	BOOL bForceExtTrigger:1;
+	BOOL bMultipleFramesPerTrigger:1;
+} TRIGGER_CAPABILITIES;
 
 /* Only used in Camera_ArmDisarm() functions */
 typedef enum _TRIG_ARM_ACTION { TRIG_ARM_QUERY=0, TRIG_ARM=1, TRIG_DISARM=2, TRIG_ARM_UNKNOWN=3} TRIG_ARM_ACTION;
@@ -52,7 +64,8 @@ typedef enum _TRIG_ARM_ACTION { TRIG_ARM_QUERY=0, TRIG_ARM=1, TRIG_DISARM=2, TRI
 typedef struct _TRIGGER_INFO {
 	TRIGGER_MODE mode;						/* Current triggering mode (query only) */
 	TRIGGER_POLARITY ext_slope;			/* External trigger polarity  */
-	BOOL bArmed;								/* If true, trigger is armed (query only) */
+	TRIGGER_CAPABILITIES capabilities;	/* Trigger capabilities (read only) */
+	BOOL bArmed;								/* If true, trigger is armed (read only) */
 	int frames_per_trigger;					/* Frames per trigger (in SOFTWARE / HARDWARE modes) */
 	int msWait;									/* ms to wait for previous trig to complete before switch	*/
 	int nBurst;									/* number of images to capture on software/external trigger */

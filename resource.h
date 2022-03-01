@@ -38,8 +38,7 @@
 #define IDC_STATIC_ABOUT_COMPANY        2000
 #define IDC_STATIC_ABOUT_APPNAME        2001
 #define IDC_DISPLAY                     2003
-#define IDB_LIVE                        2004
-#define IDB_FLOAT                       2005
+#define IDC_LIVE                        2004
 #define IDB_CAPTURE                     2006
 #define IDB_TRIGGER                     2006
 #define IDB_SAVE_BURST                  2007
@@ -154,13 +153,15 @@
 #define IDR_TRIG_FREERUN                2106
 #define IDR_TRIG_SOFTWARE               2107
 #define IDR_TRIG_EXTERNAL               2108
-#define IDR_TRIG_BURST                  2109
-#define IDT_TRIG_COUNT                  2110
-#define IDR_IMAGE_BMP                   2111
-#define IDR_IMAGE_RAW                   2112
-#define IDR_IMAGE_JPG                   2113
-#define IDR_IMAGE_PNG                   2114
-#define IDC_ARM                         2115
+#define IDR_TRIG_SS                     2109
+#define IDR_TRIG_BURST                  2110
+#define IDT_TRIG_COUNT                  2111
+#define IDR_IMAGE_BMP                   2112
+#define IDR_IMAGE_RAW                   2113
+#define IDR_IMAGE_JPG                   2114
+#define IDR_IMAGE_PNG                   2115
+#define IDC_ARM                         2116
+#define IDC_FLOAT                       2117
 #define IDC_GPIB                        2401
 #define IDC_STATIC                      -1
 
@@ -171,7 +172,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        143
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2116
+#define _APS_NEXT_CONTROL_VALUE         2119
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

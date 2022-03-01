@@ -538,7 +538,7 @@ int DCx_Initialize_Resolution(DCX_CAMERA *dcx, int ImageFormatID) {
 	rc = is_SetColorMode(dcx->hCam, dcx->IsSensorColor ? IS_CM_BGR8_PACKED : IS_CM_MONO8); 
 
 	/* Set trigger mode off (so autorun) */
-	rc = is_SetExternalTrigger(dcx->hCam, IS_SET_TRIGGER_OFF); 
+	rc = is_SetExternalTrigger(dcx->hCam, IS_SET_TRIGGER_SOFTWARE);
 
 	rc = is_GetFrameTimeRange(dcx->hCam, &min, &max, &interval);
 	printf("  Min: %g  Max: %g  Inc: %g\n", min, max, interval); fflush(stdout);
@@ -757,6 +757,8 @@ double DCx_GetGamma(DCX_CAMERA *dcx) {
 -- Output: attempts to set camera framerate
 --
 -- Return: value actually set or 0 if any type of error
+--
+-- Verified driver reduces exposure if needed to accommodate framerate
 =========================================================================== */
 double DCx_SetFPSControl(DCX_CAMERA *dcx, double fps) {
 	static char *rname = "DCx_SetFPSControl";
@@ -764,7 +766,7 @@ double DCx_SetFPSControl(DCX_CAMERA *dcx, double fps) {
 	/* Make sure we are alive and the camera is connected (open) */
 	if (dcx == NULL || dcx->hCam <= 0) return 0.0;
 
-	fps = max(DCX_MIN_FPS, max(DCX_MAX_FPS, fps));
+	fps = max(DCX_MIN_FPS, min(DCX_MAX_FPS, fps));
 	is_SetFrameRate(dcx->hCam, fps, &fps);				/* Set and query simultaneously */
 
 	return fps;
@@ -1054,76 +1056,36 @@ int DCx_SaveParameterFile(DCX_CAMERA *dcx, char *path) {
 =========================================================================== */
 TRIG_ARM_ACTION DCx_Arm(DCX_CAMERA *dcx, TRIG_ARM_ACTION action) {
 	static char *rname = "DCx_Arm";
-	int rc;
 
 	/* Verify structure and arm */
 	if (dcx == NULL || dcx->hCam <= 0) return TRIG_ARM_UNKNOWN;
 
-	switch (action) {
-		case TRIG_ARM:
-			/* Don't rearm if already armed */
-			if (! dcx->trigger.bArmed) {
-				if ( (rc = is_CaptureVideo(dcx->hCam, IS_DONT_WAIT)) != 0) {
-					fprintf(stderr, "[%s] Arm (start) failed (%d)\n", rname, rc); fflush(stderr);
-					return TRIG_ARM_UNKNOWN;
-				}
-				dcx->trigger.bArmed = TRUE;
-				dcx->nValid = dcx->iLast = dcx->iShow = 0;			/* Always start from zero again */
-			}
-			break;
-		case TRIG_DISARM:
-			/* Don't disarm if already disarmed */
-			if (dcx->trigger.bArmed) {
-				if ( (rc = is_FreezeVideo(dcx->hCam, IS_DONT_WAIT)) != 0) {
-					fprintf(stderr, "[%s] Disarm failed (%d)\n", rname, rc); fflush(stderr);
-					return TRIG_ARM_UNKNOWN;
-				}
-				dcx->trigger.bArmed = FALSE;
-			}
-			break;
-		default:
-			break;
+	/* Are we moving from disarmed to armed? */
+	if ( (action == TRIG_ARM) && ! dcx->trigger.bArmed) {
+		dcx->trigger.bArmed = TRUE;
+		switch (dcx->trigger.mode) {
+			case TRIG_EXTERNAL:
+			case TRIG_SS:
+				is_SetExternalTrigger(dcx->hCam, dcx->trigger.ext_slope == TRIG_EXT_POS ? IS_SET_TRIGGER_HI_LO : IS_SET_TRIGGER_LO_HI);
+				break;
+			case TRIG_FREERUN:											/* Enabling auto starts triggering also */
+				is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+				break;
+			case TRIG_SOFTWARE:											/* once bArmed is set TRUE */
+			case TRIG_BURST:
+			default:
+				break;
+		}
+
+	/* Or moving from armed to disarmed? */
+	} else if ( (action == TRIG_DISARM) && dcx->trigger.bArmed) {
+		dcx->trigger.bArmed = FALSE;
+		is_StopLiveVideo(dcx->hCam, IS_DONT_WAIT);				/* All modes just stop immediately */
 	}
 
 	return dcx->trigger.bArmed ? TRIG_ARM : TRIG_DISARM ;
 }
 
-/* ===========================================================================
--- Software trigger of camera (single frame)
---
--- Usage: int DCx_Trigger(DCX_CAMERA *dcx);
---
--- Inputs: dcx - structure associated with a camera
---
--- Output: Triggers camera immediately (last time if FREERUN)
---
--- Return: 0 if successful
---           1 ==> dcx or dcx->hCam invalid
---           2 ==> not in SOFTWARE or EXTERNAL triggering modes
---
--- Notes: msWait < 0 will wait until there is an image captured
---               = 0 returns immediately but still triggers the capture
---        If trigger mode was FREERUN, will be set to SOFTWARE after call
-=========================================================================== */
-static int ms_to_wait(int msWait) {						/* Returns wait parameter for is_xxx calls */
-	if      (msWait  < 0) msWait = IS_WAIT;
-	else if (msWait == 0) msWait = IS_DONT_WAIT;
-	else if (msWait < 40) msWait = 4;
-	else                  msWait = (msWait+9)/10;	/* 10 ms increments */
-	return msWait;
-}
-
-int DCx_Trigger(DCX_CAMERA *dcx) {
-	static char *rname = "DCx_Trigger";
-
-	/* Validate parameters and that we are in a soft-trigger mode */
-	if (dcx == NULL || dcx->hCam <= 0) return 1;
-
-	is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);		/* ... ms_to_wait(msWait) ... Switches out of FREERUN */
-	if (TRIG_FREERUN == dcx->trigger.mode) dcx->trigger.mode = TRIG_SOFTWARE;
-
-	return 0;
-}
 
 /* ===========================================================================
 -- Check if there is one additional image after we quite recognizing
@@ -1169,7 +1131,7 @@ static void VerifyLastImage(DCX_CAMERA *dcx) {
 --
 -- Inputs: dcx    - structure associated with a camera
 --         mode   - one of the allowed triggering modes
---                  TRIG_SOFTWARE, TRIG_FREERUN, TRIG_EXTERNAL
+--                  TRIG_SOFTWARE, TRIG_FREERUN, TRIG_EXTERNAL, TRIG_SS or TRIG_BURST
 --         info   - pointer to structure with more details about triggering
 --                  if NULL, use default values
 --           msWait - time to wait before forcing change
@@ -1181,6 +1143,15 @@ static void VerifyLastImage(DCX_CAMERA *dcx) {
 --
 -- Return: Mode in camera or -1 on error
 =========================================================================== */
+static int ms_to_wait(int msWait) {						/* Returns wait parameter for is_xxx calls */
+	int rc;
+	if      (msWait  < 0) rc = IS_WAIT;
+	else if (msWait == 0) rc = IS_DONT_WAIT;
+	else if (msWait < 40) rc = 4;
+	else                  rc = (msWait+9)/10;			/* 10 ms increments */
+	return rc;
+}
+
 TRIGGER_MODE DCx_GetTriggerMode(DCX_CAMERA *dcx, TRIGGER_INFO *info) {
 	static char *rname = "DCx_GetTriggerMode";
 
@@ -1194,49 +1165,135 @@ TRIGGER_MODE DCx_GetTriggerMode(DCX_CAMERA *dcx, TRIGGER_INFO *info) {
 
 TRIGGER_MODE DCx_SetTriggerMode(DCX_CAMERA *dcx, TRIGGER_MODE mode, TRIGGER_INFO *info) {
 	static char *rname = "DCx_SetTriggerMode";
-	int msWait;
+
+	int rc;
 
 	/* Validate call parameters */
 	if (dcx == NULL || dcx->hCam <= 0) return -1;
 
-	/* Grab what might be valid from info and otherwise take defaults */
+	/* Handle potential changes to parameters in the new info first */
 	if (info != NULL) {
-		msWait = info->msWait;
-	} else {
-		msWait = 0;
-	}
 
-	if (dcx->trigger.mode != mode) {						/* Do we need to change? */
-
-		/* Move to TRIG_SOFTWARE (especially pause video if in FREERUN) */
-		if (dcx->trigger.mode == TRIG_FREERUN) {
-			int rc;
-			if ( (rc = is_FreezeVideo(dcx->hCam, ms_to_wait(msWait))) != 0) {
-				switch (rc) {
-					case IS_TIMED_OUT:
-						fprintf(stderr, "%s: is_FreezeVideo() timed out [rc=%d]\n", rname, rc); fflush(stderr);
-						break;
-					default:
-						fprintf(stderr, "%s: is_FreezeVideo() unknown error [rc=%d]\n", rname, rc); fflush(stderr);
-						break;
-				}
-				is_FreezeVideo(dcx->hCam, IS_DONT_WAIT);		/* Try forced stop */
-			}
-			dcx->trigger.bArmed = FALSE;
-			VerifyLastImage(dcx);									/* Check if an extra frame snuck in */
+		/* Change to number of frames per trigger ... because of structure, 0 can't be set here */
+		if (info->frames_per_trigger > 0 && info->frames_per_trigger != dcx->trigger.frames_per_trigger) {
+			dcx->trigger.frames_per_trigger = info->frames_per_trigger;
 		}
 
-		/* Now, do what's necessary to get to desired mode */
-		dcx->trigger.mode = mode;
-		if (dcx->trigger.mode == TRIG_FREERUN) {
+		/* Change to external trigger slope */
+		if ( (info->ext_slope == TRIG_EXT_POS || info->ext_slope == TRIG_EXT_NEG) && (info->ext_slope != dcx->trigger.ext_slope)) {
+			dcx->trigger.ext_slope = info->ext_slope;
+			if (mode == dcx->trigger.mode && (mode == TRIG_EXTERNAL || mode == TRIG_SS) ) {
+				is_StopLiveVideo(dcx->hCam, IS_DONT_WAIT);										/* Just reset again */
+				is_SetExternalTrigger(dcx->hCam, dcx->trigger.ext_slope == TRIG_EXT_POS ? IS_SET_TRIGGER_HI_LO : IS_SET_TRIGGER_LO_HI);
+				dcx->trigger.bArmed = TRUE;
+			}
+		}
+
+		/* Just copy the wait time, even if zero */
+		dcx->trigger.msWait = info->msWait;
+	}
+
+	/* At this point, if mode hasn't changed there nothing left to do */
+	if (mode == dcx->trigger.mode) return mode;
+
+	/* Move to TRIG_SOFTWARE (especially pause video if in FREERUN) */
+	if ( (rc = is_StopLiveVideo(dcx->hCam, ms_to_wait(dcx->trigger.msWait))) != 0) {	/* Stop whatever is happening now */
+		if (rc == IS_TIMED_OUT) {
+			fprintf(stderr, "%s: is_FreezeVideo() timed out [rc=%d]\n", rname, rc); fflush(stderr);
+		} else {
+			fprintf(stderr, "%s: is_FreezeVideo() unknown error [rc=%d]\n", rname, rc); fflush(stderr);
+		}
+	}
+	dcx->trigger.bArmed = FALSE;
+	if (dcx->trigger.mode == TRIG_FREERUN) VerifyLastImage(dcx);	/* Check for extra frame if was Live */
+
+	/* Now, do what's necessary to get to desired mode */
+	dcx->trigger.mode = mode;
+	switch (mode) {
+		case TRIG_FREERUN:
+			is_SetExternalTrigger(dcx->hCam, IS_SET_TRIGGER_SOFTWARE);
 			is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
 			dcx->iLast = dcx->iShow = dcx->nValid = 0;			/* All reset these values */
 			dcx->trigger.bArmed = TRUE;
-		}
+			break;
+
+		case TRIG_SOFTWARE:
+			is_SetExternalTrigger(dcx->hCam, IS_SET_TRIGGER_SOFTWARE);
+			dcx->trigger.bArmed = TRUE;
+			break;
+			
+		case TRIG_EXTERNAL:
+		case TRIG_SS:
+			is_SetExternalTrigger(dcx->hCam, dcx->trigger.ext_slope == TRIG_EXT_POS ? IS_SET_TRIGGER_HI_LO : IS_SET_TRIGGER_LO_HI);
+			dcx->trigger.bArmed = TRUE;
+			break;
+
+		case TRIG_BURST:
+			is_SetExternalTrigger(dcx->hCam, IS_SET_TRIGGER_SOFTWARE);
+			dcx->trigger.bArmed = FALSE;
+			break;
 	}
 
 	/* Return current mode */
 	return dcx->trigger.mode;
+}
+
+/* ===========================================================================
+-- Software trigger of camera (single frame)
+--
+-- Usage: int DCx_Trigger(DCX_CAMERA *dcx);
+--
+-- Inputs: dcx - structure associated with a camera
+--
+-- Output: Triggers camera immediately (last time if FREERUN)
+--
+-- Return: 0 if successful
+--           1 ==> dcx or dcx->hCam invalid
+--           2 ==> not in SOFTWARE or EXTERNAL triggering modes
+--           3 ==> not enabled
+--
+-- Notes: msWait < 0 will wait until there is an image captured
+--               = 0 returns immediately but still triggers the capture
+--        If trigger mode was FREERUN, will be set to SOFTWARE after call
+=========================================================================== */
+int DCx_Trigger(DCX_CAMERA *dcx) {
+	static char *rname = "DCx_Trigger";
+
+	int rc;
+	
+	/* Validate parameters and that we are in a soft-trigger mode */
+	if (dcx == NULL || dcx->hCam <= 0) return 1;
+
+	if (! dcx->trigger.bArmed) {
+		Beep(300, 200);
+		return 3;
+	}
+
+	rc = 0;
+	switch (dcx->trigger.mode) {
+		case TRIG_SOFTWARE:											/* Will acquire one image for each call is_FreezeVideo() */
+			rc = is_FreezeVideo(dcx->hCam, IS_DONT_WAIT) ;
+			break;
+			
+		case TRIG_EXTERNAL:											/* Force external trigger ... no change otherwise */
+		case TRIG_SS:
+			fprintf(stderr, "Issuing is_ForceTrigger()\n"); fflush(stderr);
+			rc = is_ForceTrigger(dcx->hCam);						/* Must have used IS_DONT_WAIT in is_FreezeVideo call */
+			break;
+
+		case TRIG_BURST:												/* Both burst and freerun start on trigger */
+			if (! is_CaptureVideo(dcx->hCam, IS_GET_LIVE)) {	/* Check if running, now */
+				rc = is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+				dcx->nValid = dcx->iLast = dcx->iShow = 0;
+			}
+			break;
+
+		case TRIG_FREERUN:											/* Not valid (always running) */
+		default:
+			rc = 0;
+			break;
+	}
+	return rc;
 }
 
 
@@ -1253,8 +1310,8 @@ TRIGGER_MODE DCx_SetTriggerMode(DCX_CAMERA *dcx, TRIGGER_MODE mode, TRIGGER_INFO
 --
 -- Return: 0 if successful, error from calls otherwise
 --
--- Note: The value will only be set if in TRIG_SOFTWARE or TRIG_EXTERNAL
---       modes.  But value will be stored in the internal info in any case
+-- Note: Value set internally always, but only passed to camera in 
+--       TRIG_SOFTWARE, TRIG_EXTERNAL, and TRIG_SS modes.
 =========================================================================== */
 int DCx_GetFramesPerTrigger(DCX_CAMERA *dcx) {
 

@@ -666,17 +666,16 @@ int Camera_RenderFrame(WND_INFO *wnd, int frame, HWND hwnd) {
 		case DCX:
 			dcx = (DCX_CAMERA *) wnd->dcx;
 			rc = DCx_RenderFrame(dcx, frame, hwnd);
-			GenerateCrosshair(wnd, hwnd);
-			GenerateCrosshair(wnd, hwnd);
 			break;
 		case TL:
 			camera = (TL_CAMERA *) wnd->Camera.details;
 			rc = TL_RenderFrame(camera, frame, hwnd);
-			GenerateCrosshair(wnd, hwnd);
 			break;
 		default:
 			break;
 	}
+
+	GenerateCrosshair(wnd, hwnd);
 	return 0;
 }
 
@@ -691,6 +690,7 @@ int Camera_RenderFrame(WND_INFO *wnd, int frame, HWND hwnd) {
 -- Output: Triggers camera immediately (last time if FREERUN)
 --
 -- Return: 0 if successful, !0 otherwise (see individual)
+--           3 ==> not enabled
 --
 -- Notes: msWait < 0 will wait until there is an image captured
 --               = 0 returns immediately but still triggers the capture
@@ -769,7 +769,7 @@ TRIG_ARM_ACTION Camera_Arm(WND_INFO *wnd, TRIG_ARM_ACTION action) {
 	}
 
 	/* Server can't modify dialog box, so help here */
-	if (bServerRequest) SendMessage(wnd->hdlg, WMP_SHOW_ARM, 0, 0);
+	if (bServerRequest) SendMessage(wnd->hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);			/* Too many interdependencies */
 
 	return rc;
 }
@@ -782,7 +782,7 @@ TRIG_ARM_ACTION Camera_Arm(WND_INFO *wnd, TRIG_ARM_ACTION action) {
 --
 -- Inputs: wnd    - pointer to valid window information
 --         mode   - one of the allowed triggering modes
---                  CAMERA_TRIG_SOFTWARE, CAMERA_TRIG_FREERUN, CAMERA_TRIG_EXTERNAL
+--                  TRIG_SOFTWARE, TRIG_FREERUN, TRIG_EXTERNAL, TRIG_SS or TRIG_BURST
 --         info   - structure with details about triggering
 --           info.msWait - time to wait before forcing change
 --                         <0 ==> wait indefinitely for image
@@ -880,8 +880,8 @@ TRIGGER_MODE Camera_GetTriggerMode(WND_INFO *wnd, TRIGGER_INFO *info) {
 --
 -- Return: 0 if successful, error from calls otherwise
 --
-- Note: The value will only be set if in TRIG_SOFTWARE or TRIG_EXTERNAL
---       modes.  But value will be stored in the internal info in any case
+-- Note: Value set internally always, but only passed to camera in 
+--       TRIG_SOFTWARE, TRIG_EXTERNAL, and TRIG_SS modes.
 =========================================================================== */
 int Camera_GetFramesPerTrigger(WND_INFO *wnd) {
 	static char *rname = "Camera_GetFramesPerTrigger";
