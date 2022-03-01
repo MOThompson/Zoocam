@@ -172,6 +172,8 @@ typedef struct _WND_INFO {
 	/* Common camera information */
 	int Image_Count;							/* Number of images processed - use to identify new data */
 	int height, width;						/* Image height and width in pixels */
+	double fps_min, fps_max;				/* Minimum and maximum frame rates from drivers */
+	double has_fps_control;					/* Does this camera have fps control (from drivers) */
 	BOOL bColor;								/* Sensor is color */
 
 	/* Cross-hair focus of windows */	

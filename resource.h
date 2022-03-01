@@ -162,6 +162,8 @@
 #define IDR_IMAGE_PNG                   2115
 #define IDC_ARM                         2116
 #define IDC_FLOAT                       2117
+#define IDT_FPS_MAX                     2119
+#define IDT_FPS_MIN                     2120
 #define IDC_GPIB                        2401
 #define IDC_STATIC                      -1
 
@@ -172,7 +174,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        143
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2119
+#define _APS_NEXT_CONTROL_VALUE         2121
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

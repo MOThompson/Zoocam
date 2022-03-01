@@ -89,7 +89,8 @@
 
 #define	nint(x)	(((x)>0) ? ( (int) (x+0.5)) : ( (int) (x-0.5)) )
 
-#define	MAX_FPS		(25)
+#define	DFLT_FPS_MAX				(25)					/* Default range for FPS scale */
+#define	MAX_FRAME_DISPLAY_HZ		(8)					/* Limit CPU consumed rendering images */
 
 /* ------------------------------- */
 /* My external function prototypes */
@@ -522,8 +523,11 @@ static void AutoExposureThread(void *arglist) {
 			blue_peak = i+1;
 
 			peak = max(red_peak, green_peak); peak = max(peak, blue_peak);
+
+			fprintf(stderr, "\t%3d/%d\t%3d/%d\t%3d/%d\t%3d", red_peak, wnd->red_saturate, green_peak, wnd->green_saturate, blue_peak, wnd->blue_saturate, peak);
+
 			if (peak >= 245) {
-				fprintf(stderr, "\n-- peak is >245 ... close enough to done\n"); fflush(stderr);
+				fprintf(stderr, "\n  -- peak is >245 ... close enough to done\n"); fflush(stderr);
 				break;															/* We are done */
 			}
 			/* Estimate exposure where peak=250, but be careful extrapolating too far */
@@ -555,13 +559,17 @@ static void AutoExposureThread(void *arglist) {
 			sprintf_s(msg, sizeof(msg), "iter %d", try+1);
 			SetDlgItemText(hdlg, IDB_AUTO_EXPOSURE, msg);
 		}
+		/* Need to wait at least for two frame periods (maximum update rate) */
+		/* Values for saturation only updated with images that are displayed */
+		Sleep(2100/MAX_FRAME_DISPLAY_HZ);
+
+		/* And then keep sleeping until we know we have had two new images */
 		for (i=0; i<10; i++) {
 			if (wnd->Image_Count > LastImage+2) break;
 			Sleep(max(nint(exposure),50));
 		}
 		if (wnd->Image_Count <= LastImage+2) {
-			fprintf(stderr, "Failed to get at least 2 new images (Image_Count: %d   LastImage: %d)\n", wnd->Image_Count, LastImage);
-			fflush(stderr);
+			fprintf(stderr, "Failed to get at least 2 new images (Image_Count: %d   LastImage: %d)\n", wnd->Image_Count, LastImage); fflush(stderr);
 			break;									/* No new image - abort */
 		}
 	}
@@ -1161,16 +1169,22 @@ static int Camera_Open(HWND hdlg, WND_INFO *wnd, CAMERA *request) {
 		case DCX:
 			dcx  = wnd->dcx;
 			rc = DCx_CameraOpen(hdlg, wnd, dcx, (UC480_CAMERA_INFO *) request->details);
-			wnd->bColor = dcx->IsSensorColor;							/* Copy parameters to wnd structure */
-			wnd->height = dcx->height;
-			wnd->width  = dcx->width;
+			wnd->bColor  = dcx->IsSensorColor;							/* Copy parameters to wnd structure */
+			wnd->height  = dcx->height;
+			wnd->width   = dcx->width;
+			wnd->fps_min = 0;
+			wnd->fps_max = DFLT_FPS_MAX;
+			wnd->has_fps_control = TRUE;
 			break;
 		case TL:
 			tl = (TL_CAMERA *) request->details;
 			rc = TL_CameraOpen(hdlg, wnd, tl);
-			wnd->bColor = tl->IsSensorColor;					/* Copy parameters to wnd structure */
-			wnd->height = tl->height;
-			wnd->width  = tl->width;
+			wnd->bColor  = tl->IsSensorColor;					/* Copy parameters to wnd structure */
+			wnd->height  = tl->height;
+			wnd->width   = tl->width;
+			wnd->fps_min = tl->fps_min;
+			wnd->fps_max = tl->fps_max;
+			wnd->has_fps_control = tl->bFrameRateControl;
 			break;
 		default:
 			fprintf(stderr, "[%s] Driver from camera structure invalid (%d)\n", rname, request->driver); fflush(stderr);
@@ -1355,7 +1369,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 	static char *rname = "CameraDlgProc";
 
 	BOOL rcode, bFlag;
-	int i, ineed, nfree, ichan, rc, mode;
+	int i, ival, ineed, nfree, ichan, rc, mode;
 	CAMERA *nfirst;
 	int wID, wNotifyCode;
 	char szBuf[256];
@@ -1563,6 +1577,11 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case TIMER_FRAME_RATE_UPDATE:
 					fps = Camera_GetFPSActual(wnd);
 					SetDlgItemDouble(hdlg, IDT_ACTUALFRAMERATE, "%.2f", fps);
+					if (! wnd->has_fps_control) {
+						ival = nint(200.0*(fps-wnd->fps_min)/(wnd->fps_max-wnd->fps_min));
+						ival = max(0,min(200,ival));
+						SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPOS, TRUE, ival);
+					}
 					break;
 
 				case TIMER_STATS_UPDATE:
@@ -1705,7 +1724,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				if (ipos != -99999) {
 					switch (wID) {
 						case IDS_FRAME_RATE:
-							Camera_SetFPSControl(wnd, 0.1*ipos);			/* Range of the slider */
+							Camera_SetFPSControl(wnd, wnd->fps_min+ipos/200.0*(wnd->fps_max-wnd->fps_min));			/* Range of the slider */
 							SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);		/* May have changed */
 							SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);		/* Show actual values */
 							break;
@@ -1772,11 +1791,16 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 		case WMP_SHOW_FRAMERATE:
 			fps = Camera_GetFPSControl(wnd);
+			SetDlgItemDouble(hdlg, IDT_FPS_MIN, "%.0f fps", wnd->fps_min);
+			SetDlgItemDouble(hdlg, IDT_FPS_MAX, "%.0f fps", wnd->fps_max);
 			if (fps > 0.0) {
-				SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPOS, TRUE, (int) (10.0*fps));
+				ival = nint(200.0*(fps-wnd->fps_min)/(wnd->fps_max-wnd->fps_min));
+				ival = max(0,min(200,ival));
+				SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPOS, TRUE, ival);
 				SetDlgItemDouble(hdlg, IDV_FRAME_RATE, "%.2f", fps);
 			} else {
-				SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPOS, TRUE, 0);
+				/* The IDS_FRAME_RATE control is used to display actual if there is no control */
+				if (wnd->has_fps_control) SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPOS, TRUE, 0);
 				SetDlgItemText(hdlg, IDV_FRAME_RATE, "N/A");
 			}
 			rcode = TRUE; break;
@@ -1977,6 +2001,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 				case IDC_FULL_WIDTH_CURSOR:
 					wnd->cursor_posn.fullwidth = GetDlgItemCheck(hdlg, wID);
+					SendMessage(hdlg, WMP_UPDATE_IMAGE_WITH_CURSOR, 0, 0);
 					rcode = TRUE; break;
 
 				case IDB_CAMERA_DISCONNECT:
@@ -2321,19 +2346,6 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 	return rcode;
 }
 
-#ifdef USE_FOCUS
-static void show_sharpness_dialog_thread(void *arglist) {
-	static BOOL running = FALSE;
-	if (! running) {
-		running = TRUE;
-		DialogBox(hInstance, "IDD_FOCUS_MONITOR", HWND_DESKTOP, (DLGPROC) SharpnessDlgProc);
-		running = FALSE;
-	}
-	return;
-}
-#endif
-
-
 #ifdef USE_NUMATO
 
 /* ===========================================================================
@@ -2446,6 +2458,15 @@ BOOL CALLBACK NUMATODlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 -- Standard windows dialog
 =========================================================================== */
 #ifdef USE_FOCUS
+static void show_sharpness_dialog_thread(void *arglist) {
+	static BOOL running = FALSE;
+	if (! running) {
+		running = TRUE;
+		DialogBox(hInstance, "IDD_FOCUS_MONITOR", HWND_DESKTOP, (DLGPROC) SharpnessDlgProc);
+		running = FALSE;
+	}
+	return;
+}
 
 #define	TIMER_FOCUS_GRAPH_REDRAW	1
 
@@ -3268,7 +3289,7 @@ int InitializeScrollBars(HWND hdlg, WND_INFO *wnd) {
 	int i, wID;
 
 	/* Set up the scroll bar for the frame rate */
-	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETRANGE, FALSE, MAKELPARAM(10,10*MAX_FPS));	/* In 0.1 Hz increments */
+	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETRANGE, FALSE, MAKELPARAM(0,200));			/* In about 0.1 Hz increments */
 	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_CLEARTICS, FALSE, 0);
 	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETTICFREQ, 10, 0);
 	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETLINESIZE, 0, 10);
@@ -3723,8 +3744,6 @@ static int DCx_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 -- Usage: static void RenderImageThread(void *arglist);
 --        static void ActualRenderThread(void *arglist);
 =========================================================================== */
-#define	MAX_DCX_FRAME_DISPLAY_HZ		(8)			/* Limit CPU consumed rendering images */
-
 static void DCx_ImageThread(void *arglist) {
 	static char *rname = "DCx_ImageThread";
 
@@ -3774,7 +3793,7 @@ static void DCx_ImageThread(void *arglist) {
 
 		/* Skip processing if (i) so requested or (ii) too many per second */
 		if (wnd->PauseImageRendering) continue;
-		if (HiResTimerDelta(timer) < 1.0/MAX_DCX_FRAME_DISPLAY_HZ) continue;
+		if (HiResTimerDelta(timer) < 1.0/MAX_FRAME_DISPLAY_HZ) continue;
 
 		/* Reset timer to control overall allowed display rate */
 		HiResTimerReset(timer, 0.00);
@@ -4017,8 +4036,6 @@ static int TL_CameraOpen(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl) {
 --       to change cameras.  Use WM_TIMER instead to update statistics
 --       and frame counts
 =========================================================================== */
-#define	MAX_TL_FRAME_DISPLAY_HZ		(8)					/* Limit CPU consumed rendering images */
-
 static void TL_ImageThread(void *arglist) {
 	static char *rname = "TL_ImageThread";
 
@@ -4055,7 +4072,7 @@ static void TL_ImageThread(void *arglist) {
 
 		/* Skip processing if (i) so requested or (ii) too many per second */
 		if (wnd->PauseImageRendering) continue;
-		if (HiResTimerDelta(timer) < 1.0/MAX_TL_FRAME_DISPLAY_HZ) continue;
+		if (HiResTimerDelta(timer) < 1.0/MAX_FRAME_DISPLAY_HZ) continue;
 
 		/* Reset timer to control overall allowed display rate */
 		HiResTimerReset(timer, 0.00);
@@ -4064,6 +4081,9 @@ static void TL_ImageThread(void *arglist) {
 		Camera_ShowImage(wnd, -1, &delta_max);				/* Call to ShowImage adds cross-hairs for me */
 		if (! IsWindow(wnd->hdlg)) continue;
 
+#ifdef USE_FOCUS
+		Update_Focus_Dialog(delta_max);
+#endif
 	}
 	TL_Process_Image_Thread_Active = FALSE;				/* Once out of loop, no more chance of lockup */
 
