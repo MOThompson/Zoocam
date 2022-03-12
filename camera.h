@@ -54,6 +54,7 @@ typedef struct _TRIGGER_CAPABILITIES {
 	BOOL bArmDisarm:1;
 	BOOL bForceExtTrigger:1;
 	BOOL bMultipleFramesPerTrigger:1;
+	BOOL bExtTrigSlope:1;
 } TRIGGER_CAPABILITIES;
 
 /* Only used in Camera_ArmDisarm() functions */
@@ -135,6 +136,7 @@ TRIGGER_MODE Camera_GetTriggerMode(WND_INFO *wnd, TRIGGER_INFO *info);
 
 int Camera_GetRingInfo(WND_INFO *wnd, RING_INFO *info);
 int Camera_SetRingBufferSize(WND_INFO *wnd, int nBuf);
+int Camera_ResetRingCounters(WND_INFO *wnd);
 
 int Camera_GetImageData(WND_INFO *wnd, int frame, void **image_data, int *length);
 int Camera_GetImageInfo(WND_INFO *wnd, int frame, IMAGE_INFO *info);

@@ -144,6 +144,7 @@ TRIGGER_MODE DCx_GetTriggerMode(DCX_CAMERA *dcx, TRIGGER_INFO *info);
 int DCx_GetRingInfo(DCX_CAMERA *dcx, int *nBuffers, int *nValid, int *iLast, int *iShow);
 int DCx_SetRingBufferSize(DCX_CAMERA *dcx, int nBuf);
 int DCx_ReleaseRingBuffers(DCX_CAMERA *dcx);
+int DCx_ResetRingCounters(DCX_CAMERA *dcx);
 
 int FindImageIndexFromPID(DCX_CAMERA *dcx, int PID);
 int FindImageIndexFrompMem(DCX_CAMERA *dcx, char *pMem);

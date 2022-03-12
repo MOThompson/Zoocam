@@ -626,6 +626,29 @@ int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf) {
 }
 
 /* ===========================================================================
+-- Reset the ring buffer counters so the next image will be in location 0
+-- Primarily a Client/Server call for burst mode operation.  While other
+-- commands may also reset these counters, this routine ensures a reset.
+--
+-- Usage: int TL_ResetRingCounters(TL_CAMERA *tl);
+--
+-- Inputs: camera - pointer to valid opened camera
+--
+-- Output: Resets buffers so next image will be 0
+--
+-- Return: 0 on success, !0 if errors (not initialized?)
+=========================================================================== */
+int TL_ResetRingCounters(TL_CAMERA *tl) {
+	static char *rname = "TL_ResetRingCounters";
+	
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return 1;
+
+	/* Simple since this code manages where the data goes */
+	tl->nValid = tl->iLast = tl->iShow = 0;
+	return 0;
+}
+
+/* ===========================================================================
 -- Routine to close a camera and release associated resources
 --
 -- Usage: int TL_CloseCamera(TL_CAMERA *tl);
@@ -2451,7 +2474,7 @@ TRIGGER_MODE TL_SetTriggerMode(TL_CAMERA *tl, TRIGGER_MODE mode, TRIGGER_INFO *i
 		/* These are identical as far as setting trigger mode is concerned ... handle with image capture */
 		case TRIG_EXTERNAL:
 		case TRIG_SS:
-			if (tl->trigger.ext_slope != TRIG_EXT_POS || tl->trigger.ext_slope != TRIG_EXT_NEG) tl->trigger.ext_slope = TRIG_EXT_POS;
+			if (tl->trigger.ext_slope != TRIG_EXT_POS && tl->trigger.ext_slope != TRIG_EXT_NEG) tl->trigger.ext_slope = TRIG_EXT_POS;
 			if (tl->trigger.frames_per_trigger <= 0) tl->trigger.frames_per_trigger = 1;
 
 			if ( (rc = tl_camera_set_operation_mode(tl->handle, TL_CAMERA_OPERATION_MODE_HARDWARE_TRIGGERED)) != 0)

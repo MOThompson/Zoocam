@@ -1,4 +1,4 @@
-/* DCx_client.c */
+/* ZooCam_client.c */
 
 /* ------------------------------ */
 /* Feature test macros            */
@@ -109,7 +109,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	/* Test querying camera information */
-	if ( (rc = Remote_Get_Camera_Info(&info)) == 0) {
+	if ( (rc = ZooCam_Get_Camera_Info(&info)) == 0) {
 		printf("Camera information\n");
 		printf("  Type: %s\n", info.type == CAMERA_DCX ? "DCx" : info.type == CAMERA_TL ? "TL" : "unknown");
 		printf("  Name: %s\n", info.name);
@@ -127,69 +127,69 @@ int main(int argc, char *argv[]) {
 
 	/* Test changing exposure time */
 #if 0
-	printf("Exposure information (rc=%d)\n", Remote_Get_Exposure(&exposure)); fflush(stdout);
+	printf("Exposure information (rc=%d)\n", ZooCam_Get_Exposure(&exposure)); fflush(stdout);
 	printf("   Exposure=%.3f ms  fps=%.3f  gamma=%f  master=%f  rgb=(%f %f %f)\n", exposure.exposure, exposure.fps, exposure.gamma, exposure.master_gain, exposure.red_gain, exposure.green_gain, exposure.blue_gain); fflush(stdout);
 	hold = exposure.exposure;
 
-	printf("Exposure = 300 ms  (rc=%d)\n", Remote_Set_Exposure(300, 0, &exposure)); fflush(stdout);
+	printf("Exposure = 300 ms  (rc=%d)\n", ZooCam_Set_Exposure(300, 0, &exposure)); fflush(stdout);
 	printf("Exposure=%.3f ms  fps=%.3f  gamma=%.3f  master=%f  rgb=(%f %f %f)\n", exposure.exposure, exposure.fps, exposure.gamma, exposure.master_gain, exposure.red_gain, exposure.green_gain, exposure.blue_gain); fflush(stdout);
-	printf("Trigger (rc=%d)\n", Remote_Trigger()); fflush(stdout);
+	printf("Trigger (rc=%d)\n", ZooCam_Trigger()); fflush(stdout);
 	Sleep(1000);
 
-	printf("Exposure = 50 ms  (rc=%d)\n", Remote_Set_Exposure(50, 0, &exposure)); fflush(stdout);
+	printf("Exposure = 50 ms  (rc=%d)\n", ZooCam_Set_Exposure(50, 0, &exposure)); fflush(stdout);
 	printf("Exposure=%.3f ms  fps=%.3f  gamma=%f  master=%f  rgb=(%f %f %f)\n", exposure.exposure, exposure.fps, exposure.gamma, exposure.master_gain, exposure.red_gain, exposure.green_gain, exposure.blue_gain); fflush(stdout);
-	printf("Trigger (rc=%d)\n", Remote_Trigger()); fflush(stdout);
+	printf("Trigger (rc=%d)\n", ZooCam_Trigger()); fflush(stdout);
 	Sleep(1000);
 
-	printf("Reset exposure (rc=%d)\n", Remote_Set_Exposure(hold, 0, NULL)); fflush(stdout);
-	printf("Trigger (rc=%d)\n", Remote_Trigger()); fflush(stdout);
+	printf("Reset exposure (rc=%d)\n", ZooCam_Set_Exposure(hold, 0, NULL)); fflush(stdout);
+	printf("Trigger (rc=%d)\n", ZooCam_Trigger()); fflush(stdout);
 	Sleep(1000);
 #endif
 
 	/* Test changing gains */
 #if 0
-	printf("Gain information (rc=%d): gamma=%.3f  master=%f  rgb=(%f %f %f)\n", Remote_Get_Gains(&exposure), exposure.gamma, exposure.master_gain, exposure.red_gain, exposure.green_gain, exposure.blue_gain); fflush(stdout);
+	printf("Gain information (rc=%d): gamma=%.3f  master=%f  rgb=(%f %f %f)\n", ZooCam_Get_Gains(&exposure), exposure.gamma, exposure.master_gain, exposure.red_gain, exposure.green_gain, exposure.blue_gain); fflush(stdout);
 	expose2 = exposure;
-	printf("Exposure = 20 ms (rc=%d)\n", Remote_Set_Exposure(20.0, 0, NULL)); fflush(stdout);
-	printf("Set gains (50 25,30,25) (rc=%d): gamma=%.3f  master=%f  rgb=(%f %f %f)", Remote_Set_Gains(-1,50,30,25,35, &exposure), exposure.gamma, exposure.master_gain, exposure.red_gain, exposure.green_gain, exposure.blue_gain); fflush(stdout);
-	printf("Trigger (rc=%d)\n", Remote_Trigger()); fflush(stdout);
+	printf("Exposure = 20 ms (rc=%d)\n", ZooCam_Set_Exposure(20.0, 0, NULL)); fflush(stdout);
+	printf("Set gains (50 25,30,25) (rc=%d): gamma=%.3f  master=%f  rgb=(%f %f %f)", ZooCam_Set_Gains(-1,50,30,25,35, &exposure), exposure.gamma, exposure.master_gain, exposure.red_gain, exposure.green_gain, exposure.blue_gain); fflush(stdout);
+	printf("Trigger (rc=%d)\n", ZooCam_Trigger()); fflush(stdout);
 	Sleep(1000);
-	printf("Reset exposure (rc=%d)\n", Remote_Set_Exposure(hold, 0, NULL)); fflush(stdout);
-	printf("Reset gains (rc=%d)\n", Remote_Set_Gains(expose2.gamma, expose2.master_gain, expose2.red_gain, expose2.green_gain, expose2.blue_gain, NULL)); fflush(stdout);
-	printf("Trigger (rc=%d)\n", Remote_Trigger()); fflush(stdout);
+	printf("Reset exposure (rc=%d)\n", ZooCam_Set_Exposure(hold, 0, NULL)); fflush(stdout);
+	printf("Reset gains (rc=%d)\n", ZooCam_Set_Gains(expose2.gamma, expose2.master_gain, expose2.red_gain, expose2.green_gain, expose2.blue_gain, NULL)); fflush(stdout);
+	printf("Trigger (rc=%d)\n", ZooCam_Trigger()); fflush(stdout);
 	Sleep(1000);
 #endif
 
 	/* Test reading ring information */
 #if 0
-	rc = Remote_Get_Ring_Info(&rings);
+	rc = ZooCam_Get_Ring_Info(&rings);
 	fprintf(stderr, "Ring info: nBuffers=%d  nValid=%d  iLast=%d  iShow=%d\n", rings.nBuffers, rings.nValid, rings.iLast, rings.iShow); fflush(stderr);
-	fprintf(stderr, "Ring size: %d\n", Remote_Get_Ring_Size()); fflush(stderr);
-	fprintf(stderr, "Frame count: %d\n", Remote_Get_Ring_Frame_Cnt()); fflush(stderr);
+	fprintf(stderr, "Ring size: %d\n", ZooCam_Get_Ring_Size()); fflush(stderr);
+	fprintf(stderr, "Frame count: %d\n", ZooCam_Get_Ring_Frame_Cnt()); fflush(stderr);
 #endif
 
 	/* Test changing ring size and collecting frames by triggering */
 #if 0
-	old_ring_size = Remote_Get_Ring_Size();
-	printf("Set ring size: %d\n", Remote_Set_Ring_Size(50)); fflush(stdout);
-	for (i=0; i<10; i++) { Remote_Trigger(); Sleep(200); }
+	old_ring_size = ZooCam_Get_Ring_Size();
+	printf("Set ring size: %d\n", ZooCam_Set_Ring_Size(50)); fflush(stdout);
+	for (i=0; i<10; i++) { ZooCam_Trigger(); Sleep(200); }
 	Sleep(1000);
-	for (i=0; i<10; i++) { Remote_Trigger(); Sleep(200); }
+	for (i=0; i<10; i++) { ZooCam_Trigger(); Sleep(200); }
 	Sleep(1000);
-	printf("Resetting ring size: %d\n", Remote_Set_Ring_Size(old_ring_size)); fflush(stdout);
+	printf("Resetting ring size: %d\n", ZooCam_Set_Ring_Size(old_ring_size)); fflush(stdout);
 #endif
 
 	/* Test transferring images */
 #if 0
-	for (i=0; i<18; i++) { Remote_Trigger(); Sleep(200); }		/* Collect an unusual number */
-	rc = Remote_Get_Image_Info(-1, &image_info);
+	for (i=0; i<18; i++) { ZooCam_Trigger(); Sleep(200); }		/* Collect an unusual number */
+	rc = ZooCam_Get_Image_Info(-1, &image_info);
 	printf("Last image info (rc=%d): %s frame=%d times: %lld / %.3f  w/h: %d/%d pitch: %d exposure: %f\n", rc, 
 			 info.type == CAMERA_DCX ? "DCx" : info.type == CAMERA_TL ? "TL" : "unknown",
 			 image_info.frame,
 			 image_info.timestamp, image_info.camera_time, 
 			 image_info.width, image_info.height, image_info.memory_pitch, image_info.exposure);	fflush(stdout);
-	for (i=0; i<Remote_Get_Ring_Frame_Cnt(); i++) {
-		rc = Remote_Get_Image_Info(i, &image);
+	for (i=0; i<ZooCam_Get_Ring_Frame_Cnt(); i++) {
+		rc = ZooCam_Get_Image_Info(i, &image);
 		printf("Image info %d: (rc=%d): %s frame=%d times: %lld / %.3f  w/h: %d/%d pitch: %d exposure: %f\n", 
 				 i, rc,
 				 info.type == CAMERA_DCX ? "DCx" : info.type == CAMERA_TL ? "TL" : "unknown",
@@ -202,10 +202,10 @@ int main(int argc, char *argv[]) {
 
 	/* Test data transfer */
 #if 0
-	for (i=0; i<5; i++) { Remote_Trigger(); Sleep(200); }		/* Collect an unusual number */
+	for (i=0; i<5; i++) { ZooCam_Trigger(); Sleep(200); }		/* Collect an unusual number */
 
-	rc = Remote_Get_Image_Info(-1, &image_info);
-	rc = Remote_Get_Image_Data(-1, &image_data, &length);
+	rc = ZooCam_Get_Image_Info(-1, &image_info);
+	rc = ZooCam_Get_Image_Data(-1, &image_data, &length);
 	printf("Last image data (rc=%d): image_data = %p  length = %d\n", rc, image_data, length); fflush(stdout);
 	for (i=0; i<10; i++) {
 		printf(" [%d]: ", i);
@@ -214,8 +214,8 @@ int main(int argc, char *argv[]) {
 	}
 	free(image_data);
 
-	for (i=0; i<Remote_Get_Ring_Frame_Cnt(); i++) {
-		rc = Remote_Get_Image_Data(i, &image_data, &length);
+	for (i=0; i<ZooCam_Get_Ring_Frame_Cnt(); i++) {
+		rc = ZooCam_Get_Image_Data(i, &image_data, &length);
 		printf("Image data %d: (rc=%d): image_data = %p  length = %d\n", i, rc, image_data, length); fflush(stdout);
 		free(image_data);
 	}
@@ -224,51 +224,51 @@ int main(int argc, char *argv[]) {
 	
 	/* Test saving data to files */
 #if 0
-	printf("Save file (rc=%d)\n", Remote_Save_Frame(-1, "burst/test.png", FILE_DFLT)); fflush(stdout);
-	printf("Save file (rc=%d)\n", Remote_Save_Frame(-1, "burst/test.jpg", FILE_DFLT)); fflush(stdout);
-	printf("Save file (rc=%d)\n", Remote_Save_Frame(-1, "burst/test.bmp", FILE_DFLT)); fflush(stdout);
+	printf("Save file (rc=%d)\n", ZooCam_Save_Frame(-1, "burst/test.png", FILE_DFLT)); fflush(stdout);
+	printf("Save file (rc=%d)\n", ZooCam_Save_Frame(-1, "burst/test.jpg", FILE_DFLT)); fflush(stdout);
+	printf("Save file (rc=%d)\n", ZooCam_Save_Frame(-1, "burst/test.bmp", FILE_DFLT)); fflush(stdout);
 
 	/* Test saving all the data */
-	printf("Save burst (rc=%d)\n", Remote_Save_All("burst/basename", FILE_PNG)); fflush(stdout);
+	printf("Save burst (rc=%d)\n", ZooCam_Save_All("burst/basename", FILE_PNG)); fflush(stdout);
 #endif
 
 	/* Test arm / disarm */
 #if 0
-	printf("Current arm mode: %d\n", Remote_Arm(TRIG_ARM_QUERY)); fflush(stdout);
-	printf("Arming: %d\n", Remote_Arm(TRIG_ARM)); fflush(stdout);
+	printf("Current arm mode: %d\n", ZooCam_Arm(TRIG_ARM_QUERY)); fflush(stdout);
+	printf("Arming: %d\n", ZooCam_Arm(TRIG_ARM)); fflush(stdout);
 	Sleep(1000);
-	printf("Disarming: %d\n", Remote_Arm(TRIG_DISARM)); fflush(stdout);
+	printf("Disarming: %d\n", ZooCam_Arm(TRIG_DISARM)); fflush(stdout);
 	Sleep(1000);
-	printf("Arming: %d\n", Remote_Arm(TRIG_ARM)); fflush(stdout);
+	printf("Arming: %d\n", ZooCam_Arm(TRIG_ARM)); fflush(stdout);
 	Sleep(1000);
-	printf("Current arm mode: %d\n", Remote_Arm(TRIG_ARM_QUERY)); fflush(stdout);
+	printf("Current arm mode: %d\n", ZooCam_Arm(TRIG_ARM_QUERY)); fflush(stdout);
 #endif
 
-	rc = Remote_Get_Trigger_Mode(&trigger_info);
+	rc = ZooCam_Get_Trigger_Mode(&trigger_info);
 	printf("Trigger mode: %d  mode: %d armed: %d\n", rc, trigger_info.mode, trigger_info.bArmed); fflush(stdout);
 
 	memset(&trigger_info, 0, sizeof(trigger_info));
-	rc = Remote_Set_Trigger_Mode(TRIG_SOFTWARE, &trigger_info);
+	rc = ZooCam_Set_Trigger_Mode(TRIG_SOFTWARE, &trigger_info);
 	printf("Trigger SOFTWARE: %d  mode: %d armed: %d\n", rc, trigger_info.mode, trigger_info.bArmed); fflush(stdout);
 	Sleep(1000);
-	for (i=0; i<5; i++) { Remote_Trigger(); Sleep(1000); }
+	for (i=0; i<5; i++) { ZooCam_Trigger(); Sleep(1000); }
 
 	memset(&trigger_info, 0, sizeof(trigger_info));
-	rc = Remote_Set_Trigger_Mode(TRIG_FREERUN, &trigger_info);
+	rc = ZooCam_Set_Trigger_Mode(TRIG_FREERUN, &trigger_info);
 	printf("Trigger FREERUN: %d  mode: %d armed: %d\n", rc, trigger_info.mode, trigger_info.bArmed); fflush(stdout);
 
 #if 0
-	fprintf(stderr, "Burst arm:    %d\n", DCxRemote_Burst_Arm());
+	fprintf(stderr, "Burst arm:    %d\n", DCxZooCam_Burst_Arm());
 	for (i=0; i<20; i++) {							/* Wait for up to 20 seconds for completion */
-		if ( (rc = DCxRemote_Burst_Wait(1000)) == 0) break;
+		if ( (rc = DCxZooCam_Burst_Wait(1000)) == 0) break;
 	}
 	fprintf(stderr, "Burst wait:   %d\n", rc);
-	rc = DCxRemote_Burst_Status();
+	rc = DCxZooCam_Burst_Status();
 	fprintf(stderr, "Burst status: %d\n", rc);
 	if (rc != 3) {
 		fprintf(stderr, "Burst failed to complete.  Aborting ...\n"); fflush(stderr);
-		fprintf(stderr, "Burst abort:  %d\n", DCxRemote_Burst_Abort()); fflush(stderr);
-		fprintf(stderr, "Burst status: %d\n", DCxRemote_Burst_Status()); fflush(stderr);
+		fprintf(stderr, "Burst abort:  %d\n", DCxZooCam_Burst_Abort()); fflush(stderr);
+		fprintf(stderr, "Burst status: %d\n", DCxZooCam_Burst_Status()); fflush(stderr);
 	} else {
 
 	rc = ZooCam_Remote_Get_Ring_Info(&rings);
@@ -279,9 +279,9 @@ int main(int argc, char *argv[]) {
 		
 /* Exercise the LED */
 #if 0
-	fprintf(stderr, "Turning on  LED: %d\n", Remote_LED_Set_State(1));	fflush(stderr);
+	fprintf(stderr, "Turning on  LED: %d\n", ZooCam_LED_Set_State(1));	fflush(stderr);
 	Sleep(1000);
-	fprintf(stderr, "Turning off LED: %d\n", Remote_LED_Set_State(0));	fflush(stderr);
+	fprintf(stderr, "Turning off LED: %d\n", ZooCam_LED_Set_State(0));	fflush(stderr);
 #endif
 
 	return 0;
@@ -291,7 +291,7 @@ int main(int argc, char *argv[]) {
 
 
 /* ===========================================================================
--- Routine to open and initialize the socket to the DCx server
+-- Routine to open and initialize the socket to the ZooCam server
 --
 -- Usage: int Init_ZooCam_Client(char *IP_address);
 --
@@ -324,7 +324,7 @@ int Init_ZooCam_Client(char *IP_address) {
 	/* Shutdown sockets if already open (reinitialization allowed) */
 	if (ZooCam_Remote != NULL) { CloseServerConnection(ZooCam_Remote); ZooCam_Remote = NULL; }
 
-	if ( (ZooCam_Remote = ConnectToServer("DCx", IP_address, DCX_ACCESS_PORT, &rc)) == NULL) {
+	if ( (ZooCam_Remote = ConnectToServer("ZooCam", IP_address, ZOOCAM_ACCESS_PORT, &rc)) == NULL) {
 		fprintf(stderr, "ERROR[%s]: Failed to connect to the server\n", rname); fflush(stderr);
 		return -1;
 	}
@@ -339,7 +339,31 @@ int Init_ZooCam_Client(char *IP_address) {
 	}
 
 	/* Report success, and if not close everything that has been started */
-	fprintf(stderr, "INFO: Connected to DCx server on %s\n", IP_address); fflush(stderr);
+	fprintf(stderr, "INFO: Connected to ZooCam server on %s\n", IP_address); fflush(stderr);
+	return 0;
+}
+
+/* ===========================================================================
+-- Routine to shutdown cleanly an open interface to ZooCam server
+--
+-- Usage: int Shutdown_ZooCam_Client(void);
+--
+-- Inputs: none
+--
+-- Output: closes an open connection
+--
+-- Return:  0 - successful (and client was active)
+--          1 - client already closed or never initialized
+=========================================================================== */
+int Shutdown_ZooCam_Client(void) {
+	static char *rname = "Shutdown_ZooCam_Client"; 
+
+	/* Nop if already closed */
+	if (ZooCam_Remote == NULL) return 1;				/* Already closed */
+
+	/* Shutdown sockets and mark closed */
+	CloseServerConnection(ZooCam_Remote); 
+	ZooCam_Remote = NULL;
 	return 0;
 }
 
@@ -408,7 +432,7 @@ int ZooCam_Query_Server_Version(void) {
 /* ===========================================================================
 --	Routine to return information on the camera
 --
---	Usage:  int Remote_Get_Camera_Info(DCX_STATUS *status);
+--	Usage:  int ZooCam_Get_Camera_Info(CAMERA_STATUS *status);
 --
 --	Inputs: status - pointer to variable to receive information
 --		
@@ -417,7 +441,7 @@ int ZooCam_Query_Server_Version(void) {
 -- Return: 0 if successful, otherwise error code from call
 --         1 ==> no camera connected
 =========================================================================== */
-int Remote_Get_Camera_Info(CAMERA_INFO *info) {
+int ZooCam_Get_Camera_Info(CAMERA_INFO *info) {
 	CS_MSG request, reply;
 	CAMERA_INFO *my_info = NULL;
 	int rc;
@@ -445,7 +469,7 @@ int Remote_Get_Camera_Info(CAMERA_INFO *info) {
 /* ===========================================================================
 --	Routine to return information on an image
 --
---	Usage:  int Remote_Get_Image_Info(int frame, IMAGE_INFO *info);
+--	Usage:  int ZooCam_Get_Image_Info(int frame, IMAGE_INFO *info);
 --
 --	Inputs: frame - image frame for information (-1 ==> current)
 --         info  - pointer to structure to receive information
@@ -456,7 +480,7 @@ int Remote_Get_Camera_Info(CAMERA_INFO *info) {
 --           1 ==> no camera connected
 --           2 ==> frame invalid
 =========================================================================== */
-int Remote_Get_Image_Info(int frame, IMAGE_INFO *info) {
+int ZooCam_Get_Image_Info(int frame, IMAGE_INFO *info) {
 	CS_MSG request, reply;
 	IMAGE_INFO *my_info = NULL;
 	int rc;
@@ -486,7 +510,7 @@ int Remote_Get_Image_Info(int frame, IMAGE_INFO *info) {
 /* ===========================================================================
 --	Routine to return data for the image
 --
---	Usage:  int Remote_Get_Image_Data(int frame, unsigned char **data, size_t *length);
+--	Usage:  int ZooCam_Get_Image_Data(int frame, unsigned char **data, size_t *length);
 --
 --	Inputs: frame  - image frame for information (-1 ==> current)
 --         data   - pointer to get malloc'd raw data (caller must free())
@@ -499,7 +523,7 @@ int Remote_Get_Image_Info(int frame, IMAGE_INFO *info) {
 --           1 ==> no camera connected
 --           2 ==> frame invalid
 =========================================================================== */
-int Remote_Get_Image_Data(int frame, void **image_data, size_t *length) {
+int ZooCam_Get_Image_Data(int frame, void **image_data, size_t *length) {
 	CS_MSG request, reply;
 	IMAGE_INFO *my_info = NULL;
 	int rc;
@@ -527,7 +551,7 @@ int Remote_Get_Image_Data(int frame, void **image_data, size_t *length) {
 /* ===========================================================================
 --	Save a frame to specified filename in specified format
 --
---	Usage:  int Remote_Save_Frame(int frame, char *path, FILE_FORMAT format);
+--	Usage:  int ZooCam_Save_Frame(int frame, char *path, FILE_FORMAT format);
 --
 --	Inputs: frame  - frame to save (-1 for last)
 --         path   - filename (possibly fully qualified UNC)
@@ -542,8 +566,8 @@ int Remote_Get_Image_Data(int frame, void **image_data, size_t *length) {
 -- Note: If path is blank, will query via dialog box on remote computer.
 --          This will block if remote is truly remote
 =========================================================================== */
-int Remote_Save_Frame(int frame, char *path, FILE_FORMAT format) {
-	char static *rname = "Remote_Save_Frame";
+int ZooCam_Save_Frame(int frame, char *path, FILE_FORMAT format) {
+	char static *rname = "ZooCam_Save_Frame";
 
 	CS_MSG request, reply;
 	FILE_SAVE_PARMS parms;
@@ -568,7 +592,7 @@ int Remote_Save_Frame(int frame, char *path, FILE_FORMAT format) {
 /* ===========================================================================
 --	Save all valid frame using a specific filename pattern
 --
---	Usage:  int Remote_Save_All(char *pattern, FILE_FORMAT format);
+--	Usage:  int ZooCam_Save_All(char *pattern, FILE_FORMAT format);
 --
 --	Inputs: pattern - root name for images ... append ddd.jpg
 --         format  - format to save (FILE_DFLT will use FILE_BMP)
@@ -580,8 +604,8 @@ int Remote_Save_Frame(int frame, char *path, FILE_FORMAT format) {
 --          -1 => Server exchange failed
 --          >0 => value from Camera_SaveImage call
 =========================================================================== */
-int Remote_Save_All(char *pattern, FILE_FORMAT format) {
-	char static *rname = "Remote_Save_All";
+int ZooCam_Save_All(char *pattern, FILE_FORMAT format) {
+	char static *rname = "ZooCam_Save_All";
 
 	CS_MSG request, reply;
 	FILE_SAVE_PARMS parms;
@@ -608,7 +632,7 @@ int Remote_Save_All(char *pattern, FILE_FORMAT format) {
 /* ===========================================================================
 --	Routine to acquire an image (local save)
 --
---	Usage:  int DCxRemote_Acquire_Image(DCX_IMAGE_INFO *info, char **image);
+--	Usage:  int DCxZooCam_Acquire_Image(DCX_IMAGE_INFO *info, char **image);
 --
 --	Inputs: info - pointer to buffer to receive information about image
 --         image - pointer to get malloc'd memory with the image itself
@@ -624,7 +648,7 @@ int Remote_Save_All(char *pattern, FILE_FORMAT format) {
 --         (2) ZOOCAM_GET_IMAGE_INFO  [transmits information about image]
 --         (3) ZOOCAM_GET_IMAGE_DATA  [transmits actual image bytes]
 =========================================================================== */
-int DCxRemote_Acquire_Image(IMAGE_INFO *info, char **image) {
+int DCxZooCam_Acquire_Image(IMAGE_INFO *info, char **image) {
 	CS_MSG request, reply;
 	IMAGE_INFO *my_info = NULL;
 	int rc;
@@ -665,8 +689,8 @@ int DCxRemote_Acquire_Image(IMAGE_INFO *info, char **image) {
 --	Query image capture information (exposure, fps, gains, gamma)
 -- Since both are returned in one structure, have alternate entries for user
 --
---	Usage:  int Remote_Get_Exposure(EXPOSURE_PARMS *exposure);
---	        int Remote_Get_Gains(EXPOSURE_PARMS *exposure);
+--	Usage:  int ZooCam_Get_Exposure(EXPOSURE_PARMS *exposure);
+--	        int ZooCam_Get_Gains(EXPOSURE_PARMS *exposure);
 --
 --	Inputs: exposure - pointer to buffer for exposure information
 -- 
@@ -676,11 +700,11 @@ int DCxRemote_Acquire_Image(IMAGE_INFO *info, char **image) {
 --         -1 => Server exchange failed
 --         On error *exposure will be zero
 =========================================================================== */
-static int Remote_Get_Gains(EXPOSURE_PARMS *exposure) {
-	return Remote_Get_Exposure(exposure);
+static int ZooCam_Get_Gains(EXPOSURE_PARMS *exposure) {
+	return ZooCam_Get_Exposure(exposure);
 }
 
-static int Remote_Get_Exposure(EXPOSURE_PARMS *exposure) {
+static int ZooCam_Get_Exposure(EXPOSURE_PARMS *exposure) {
 	CS_MSG request, reply;
 	EXPOSURE_PARMS *my_parms = NULL;
 	int rc;
@@ -706,7 +730,7 @@ static int Remote_Get_Exposure(EXPOSURE_PARMS *exposure) {
 /* ===========================================================================
 --	Set the exposure and/or frames per second values
 --
---	Usage:  int Remote_Set_Exposure(double ms_expose, double fps, EXPOSURE_PARMS *rvalues);
+--	Usage:  int ZooCam_Set_Exposure(double ms_expose, double fps, EXPOSURE_PARMS *rvalues);
 --
 --	Inputs: ms_expose - if >0, requested exposure time in ms
 --         fps       - if >0, requested frames per second (exposure has priority if conflict)
@@ -719,7 +743,7 @@ static int Remote_Get_Exposure(EXPOSURE_PARMS *exposure) {
 --         -1 => Server exchange failed
 --         On error *rvalues will be zero
 =========================================================================== */
-int Remote_Set_Exposure(double ms_exposure, double fps, EXPOSURE_PARMS *rvalues) {
+int ZooCam_Set_Exposure(double ms_exposure, double fps, EXPOSURE_PARMS *rvalues) {
 	CS_MSG request, reply;
 	EXPOSURE_PARMS parms, *my_parms = NULL;
 	int rc;
@@ -751,7 +775,7 @@ int Remote_Set_Exposure(double ms_exposure, double fps, EXPOSURE_PARMS *rvalues)
 /* ===========================================================================
 --	Set imaging gamma and gains
 --
---	Usage:  int Remote_Set_Gains(double gamma, double master, double red, double green, double blue,
+--	Usage:  int ZooCam_Set_Gains(double gamma, double master, double red, double green, double blue,
 --										  EXPOSURE_PARMS *rvalues);
 --
 --	Inputs: gamma  - if >=0, sets gamma value
@@ -767,7 +791,7 @@ int Remote_Set_Exposure(double ms_exposure, double fps, EXPOSURE_PARMS *rvalues)
 -- Return: 0 if successful, other error indication
 --         On error *rvalues will be zero
 =========================================================================== */
-int Remote_Set_Gains(double gamma, double master, double red, double green, double blue, EXPOSURE_PARMS *rvalues) {
+int ZooCam_Set_Gains(double gamma, double master, double red, double green, double blue, EXPOSURE_PARMS *rvalues) {
 	CS_MSG request, reply;
 	EXPOSURE_PARMS parms, *my_parms = NULL;
 	int rc;
@@ -807,21 +831,21 @@ int Remote_Set_Gains(double gamma, double master, double red, double green, doub
 /* ===========================================================================
 --	Query image ring buffer information (number, valid, current, etc.)
 --
---	Usage:  int Remote_Get_Ring_Info(RING_INFO *rings);
---         int Remote_Get_Ring_Size(void);
---         int Remote_Get_Ring_Frame_Cnt(void);
+--	Usage:  int ZooCam_Get_Ring_Info(RING_INFO *rings);
+--         int ZooCam_Get_Ring_Size(void);
+--         int ZooCam_Get_Ring_Frame_Cnt(void);
 --
 --	Inputs: rings - pointer to buffer for ring information
 -- 
 --	Output: structure filled with ring buffer information (detail)
 --
--- Return: For Remote_Get_Ring_Info, 
+-- Return: For ZooCam_Get_Ring_Info, 
 --             0 if successful, otherwise error with *ring set to zero
 --         For others,
 --             Returns requested value ... or -n on error
 =========================================================================== */
-int Remote_Get_Ring_Info(RING_INFO *rings) {
-	static char *rname = "Remote_Get_Ring_Info";
+int ZooCam_Get_Ring_Info(RING_INFO *rings) {
+	static char *rname = "ZooCam_Get_Ring_Info";
 
 	CS_MSG request, reply;
 	RING_INFO *my_info = NULL;
@@ -846,8 +870,8 @@ int Remote_Get_Ring_Info(RING_INFO *rings) {
 }
 
 /* --------------------------------------------------------------------------- */
-int Remote_Get_Ring_Size(void) {
-	static char *rname = "Remote_Get_Ring_Size";
+int ZooCam_Get_Ring_Size(void) {
+	static char *rname = "ZooCam_Get_Ring_Size";
 
 	CS_MSG request, reply;
 	int rc;
@@ -862,7 +886,7 @@ int Remote_Get_Ring_Size(void) {
 }
 
 /* --------------------------------------------------------------------------- */
-int Remote_Get_Ring_Frame_Cnt(void) {
+int ZooCam_Get_Ring_Frame_Cnt(void) {
 	CS_MSG request, reply;
 	int rc;
 
@@ -878,7 +902,7 @@ int Remote_Get_Ring_Frame_Cnt(void) {
 /* ===========================================================================
 --	Set ring buffer size
 --
---	Usage:  int Remote_Set_Ring_Size(int nbuf);
+--	Usage:  int ZooCam_Set_Ring_Size(int nbuf);
 --
 --	Inputs: nbuf - number of ring buffers desired
 -- 
@@ -886,8 +910,8 @@ int Remote_Get_Ring_Frame_Cnt(void) {
 --
 -- Return: actual number of rings, or negative on errors
 =========================================================================== */
-int Remote_Set_Ring_Size(int nbuf) {
-	static char *rname = "Remote_Set_Ring_Size";
+int ZooCam_Set_Ring_Size(int nbuf) {
+	static char *rname = "ZooCam_Set_Ring_Size";
 	
 	CS_MSG request, reply;
 	int rc;
@@ -903,9 +927,35 @@ int Remote_Set_Ring_Size(int nbuf) {
 }
 
 /* ===========================================================================
+--	Reset the ring buffer so next image will be in buffer 0
+--
+--	Usage:  int ZooCam_Reset_Ring_Count(void);
+--
+--	Inputs: nbuf - number of ring buffers desired
+-- 
+--	Output: resets the number (as long as >0)
+--
+-- Return: actual number of rings, or negative on errors
+=========================================================================== */
+int ZooCam_Reset_Ring_Count(void) {
+	static char *rname = "ZooCam_Reset_Ring_Count";
+
+	CS_MSG request, reply;
+	int rc;
+
+	/* Query the exposure parameters */
+	memset(&request, 0, sizeof(request));
+	request.msg = ZOOCAM_RING_RESET_COUNT;
+	rc = StandardServerExchange(ZooCam_Remote, request, NULL, &reply, NULL);
+	if (Error_Check(rc, &reply, ZOOCAM_RING_RESET_COUNT) != 0) return -1;
+
+	return reply.rc;
+}
+
+/* ===========================================================================
 --	Arm, disarm or quesry status
 --
---	Usage: int Remote_Arm(TRIG_ARM_ACTION action);
+--	Usage: int ZooCam_Arm(TRIG_ARM_ACTION action);
 --
 --	Inputs: action - one of TRIG_ARM_QUERY, TRIG_ARM, TRIG_DISARM, 
 -- 
@@ -913,8 +963,8 @@ int Remote_Set_Ring_Size(int nbuf) {
 --
 -- Return: current armed state (TRIG_ARM, TRIG_DISARM or TRIG_UNKNOWN)
 =========================================================================== */
-int Remote_Arm(TRIG_ARM_ACTION action) {
-	static char *rname = "Remote_Arm";
+int ZooCam_Arm(TRIG_ARM_ACTION action) {
+	static char *rname = "ZooCam_Arm";
 
 	CS_MSG request, reply;
 	int rc;
@@ -933,7 +983,7 @@ int Remote_Arm(TRIG_ARM_ACTION action) {
 /* ===========================================================================
 --	Query trigger information
 --
---	Usage: TRIGGER_MODE Remote_Get_Trigger_Mode(TRIGGER_INFO *info);
+--	Usage: TRIGGER_MODE ZooCam_Get_Trigger_Mode(TRIGGER_INFO *info);
 --
 --	Inputs: info - pointer to structure to receive information
 -- 
@@ -941,8 +991,8 @@ int Remote_Arm(TRIG_ARM_ACTION action) {
 --
 -- Return: mode (or -1 on error)
 =========================================================================== */
-TRIGGER_MODE Remote_Get_Trigger_Mode(TRIGGER_INFO *info) {
-	static char *rname = "Remote_Get_Trigger_Mode";
+TRIGGER_MODE ZooCam_Get_Trigger_Mode(TRIGGER_INFO *info) {
+	static char *rname = "ZooCam_Get_Trigger_Mode";
 
 	CS_MSG request, reply;
 	int rc;
@@ -966,7 +1016,7 @@ TRIGGER_MODE Remote_Get_Trigger_Mode(TRIGGER_INFO *info) {
 /* ===========================================================================
 --	Set trigger information
 --
---	Usage: TRIGGER_MODE Remote_Set_Trigger_Mode(TRIGGER_MODE mode, TRIGGER_INFO *info);
+--	Usage: TRIGGER_MODE ZooCam_Set_Trigger_Mode(TRIGGER_MODE mode, TRIGGER_INFO *info);
 --
 --	Inputs: info - pointer to structure with possibly details for trigger
 --                should be set to 0 to avoid changing anything but mode
@@ -975,8 +1025,8 @@ TRIGGER_MODE Remote_Get_Trigger_Mode(TRIGGER_INFO *info) {
 --
 -- Return: mode (or -1 on error)
 =========================================================================== */
-TRIGGER_MODE Remote_Set_Trigger_Mode(TRIGGER_MODE mode, TRIGGER_INFO *info) {
-	static char *rname = "Remote_Get_Trigger_Mode";
+TRIGGER_MODE ZooCam_Set_Trigger_Mode(TRIGGER_MODE mode, TRIGGER_INFO *info) {
+	static char *rname = "ZooCam_Get_Trigger_Mode";
 
 	CS_MSG request, reply;
 	int rc;
@@ -1003,7 +1053,7 @@ TRIGGER_MODE Remote_Set_Trigger_Mode(TRIGGER_MODE mode, TRIGGER_INFO *info) {
 /* ===========================================================================
 --	Remotely trigger once
 --
---	Usage: int Remote_Trigger(void);
+--	Usage: int ZooCam_Trigger(void);
 --
 --	Inputs: none
 -- 
@@ -1011,8 +1061,8 @@ TRIGGER_MODE Remote_Set_Trigger_Mode(TRIGGER_MODE mode, TRIGGER_INFO *info) {
 --
 -- Return: 0 on success
 =========================================================================== */
-int Remote_Trigger(void) {
-	static char *rname = "Remote_Trigger";
+int ZooCam_Trigger(void) {
+	static char *rname = "ZooCam_Trigger";
 
 	CS_MSG request, reply;
 	int rc;
@@ -1030,10 +1080,10 @@ int Remote_Trigger(void) {
 /* ===========================================================================
 --	Routines to handle the burst mode capture
 --
---	Usage:  int DCxRemote_Burst_Arm(void);
---	        int DCxRemote_Burst_Abort(void);
---	        int DCxRemote_Burst_Status(void);
---	        int DCxRemote_Burst_Wait(int msTimeout);
+--	Usage:  int DCxZooCam_Burst_Arm(void);
+--	        int DCxZooCam_Burst_Abort(void);
+--	        int DCxZooCam_Burst_Status(void);
+--	        int DCxZooCam_Burst_Wait(int msTimeout);
 --
 --	Inputs: msTimeout - maximum time in ms to wait for the burst
 --                     capture to start and complete. (<= 1000 ms)
@@ -1041,9 +1091,9 @@ int Remote_Trigger(void) {
 --	Output: modifies Burst capture parameters
 -
 -- Return: All return -1 on error
---         DCxRemote_Burst_Arm and DCxRemote_Burst_Abort return 0 if successful
---         DCxRemote_Burst_Wait returns 0 if action complete, or 1 on timeout
---         DCxRemote_Burst_Status returns a flag value indication current status
+--         DCxZooCam_Burst_Arm and DCxZooCam_Burst_Abort return 0 if successful
+--         DCxZooCam_Burst_Wait returns 0 if action complete, or 1 on timeout
+--         DCxZooCam_Burst_Status returns a flag value indication current status
 --				(0) BURST_STATUS_INIT				Initial value on program start ... no request ever received
 --				(1) BURST_STATUS_ARM_REQUEST		An arm request received ... but thread not yet running
 --				(2) BURST_STATUS_ARMED				Armed and awaiting a stripe start message
@@ -1052,7 +1102,7 @@ int Remote_Trigger(void) {
 --				(5) BURST_STATUS_ABORT				Capture was aborted
 --				(6) BURST_STATUS_FAIL				Capture failed for other reason (no semaphores, etc.)
 =========================================================================== */
-int DCxRemote_Burst_Arm(void) {
+int DCxZooCam_Burst_Arm(void) {
 	CS_MSG request, reply;
 	int rc;
 
@@ -1065,7 +1115,7 @@ int DCxRemote_Burst_Arm(void) {
 	return reply.rc;
 }
 
-int DCxRemote_Burst_Abort(void) {
+int DCxZooCam_Burst_Abort(void) {
 	CS_MSG request, reply;
 	int rc;
 
@@ -1078,7 +1128,7 @@ int DCxRemote_Burst_Abort(void) {
 	return reply.rc;
 }
 
-int DCxRemote_Burst_Status(void) {
+int DCxZooCam_Burst_Status(void) {
 	CS_MSG request, reply;
 	int rc;
 
@@ -1091,7 +1141,7 @@ int DCxRemote_Burst_Status(void) {
 	return reply.rc;
 }
 
-int DCxRemote_Burst_Wait(int msTimeout) {
+int DCxZooCam_Burst_Wait(int msTimeout) {
 	CS_MSG request, reply;
 	int rc;
 
@@ -1108,7 +1158,7 @@ int DCxRemote_Burst_Wait(int msTimeout) {
 /* ===========================================================================
 --	Routines to set and query the LED enable state
 --
---	Usage:  int Remote_LED_Set_State(int state);
+--	Usage:  int ZooCam_LED_Set_State(int state);
 --
 --	Inputs: state - 0 ==> disable
 --                 1 ==> enable
@@ -1119,7 +1169,7 @@ int DCxRemote_Burst_Wait(int msTimeout) {
 -- Return: Returns -1 on client/server error
 --         Otherwise TRUE (1) / FALSE (0) for current/new LED status
 =========================================================================== */
-int Remote_LED_Set_State(int state) {
+int ZooCam_LED_Set_State(int state) {
 	CS_MSG request, reply;
 	int rc;
 
@@ -1136,7 +1186,7 @@ int Remote_LED_Set_State(int state) {
 /* ===========================================================================
 --	Routines to set and query the live video state
 --
---	Usage:  BOOL DCxRemote_Video_Enable(BOOL enable);
+--	Usage:  BOOL DCxZooCam_Video_Enable(BOOL enable);
 --
 --	Inputs: enable  0 ==> attempt to "turn on" video
 --                 1 ==> attempt to "turn off" video
@@ -1148,7 +1198,7 @@ int Remote_LED_Set_State(int state) {
 --         Otherwise TRUE (1) / FALSE (0) indicating if video is live
 =========================================================================== */
 #if 0
-int DCxRemote_Video_Enable(int state) {
+int DCxZooCam_Video_Enable(int state) {
 	CS_MSG request, reply;
 	int rc;
 

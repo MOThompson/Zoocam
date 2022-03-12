@@ -5,13 +5,13 @@ CFLAGS = /nologo /W3 /WX- /O2 /Ob1 /GF /MD /GS /Gy /fp:precise /Zc:forScope /Gd
 LFLAGS = /nologo /subsystem:windows
 RFLAGS = /nologo
 
-DCx_LIB = \code\lab\DCx\Lib\uc480.lib
+DCx_LIB = \code\lab\Cameras\DCx_SDK\Lib\uc480.lib
 NI488_LIB = "c:\Program Files (x86)\National Instruments\Shared\ExternalCompilerSupport\C\lib32\msvc\ni4882.obj"
 NI488_LIB = \code\lab\LaserRange\ni4882.obj
 
 SYSLIBS = wsock32.lib user32.lib gdi32.lib comdlg32.lib comctl32.lib advapi32.lib vfw32.lib shell32.lib
 
-TL_SDK_INCLUDE = -I/code/lab/DCx/tl_sdk\include -I/code/lab/DCx/tl_sdk/load_dll_helpers
+TL_SDK_INCLUDE = -I/code/lab/Cameras/tl_sdk/include -I/code/lab/Cameras/tl_sdk/load_dll_helpers
 
 OBJS = ZooCam.obj camera.obj dcx.obj tl.obj ZooCam_server.obj numato_dio.obj focus_client.obj win32ex.obj graph.obj ki224.obj server_support.obj tl_camera_sdk_load.obj tl_mono_to_color_processing_load.obj timer.obj
 
@@ -23,7 +23,7 @@ INSTALL: z:\lab\exes\ZooCam.exe
 CLEAN: 
 	rm *.exe *.obj *.res
 	rm timer.c timer.h win32ex.c win32ex.h graph.c graph.h server_support.c server_support.h 
-	rm focus_client.c focus_client.h
+	rm focus_client.c focus_client.h ki224.c ki224.h
 	rm tl_camera_sdk_load.c tl_mono_to_color_processing_load.c tl_mono_to_color_processing_load.h
 
 # Distribution for the lab use
@@ -55,7 +55,7 @@ ZooCam_server.obj : ZooCam_server.c
 numato_dio.obj : numato_dio.c
 	cl -c $(CFLAGS) numato_dio.c
 
-ki224.obj : ki224.c
+ki224.obj : ki224.c ki224.h
 	cl -I\code\NI488.nt -c $(CFLAGS) ki224.c
 
 ZooCam.exe : $(OBJS) ZooCam.res
@@ -91,6 +91,14 @@ timer.c : \code\lab\TimeFncs\timer.c
 	copy $** $@
 
 timer.obj : timer.c timer.h
+
+ki224.h : \code\lab\ki\ki224.h
+	copy $** $@
+
+ki224.c : \code\lab\ki\ki224.c
+	copy $** $@
+
+ki224.obj : ki224.c ki224.h
 
 server_support.c : \code\lab\Server_Support\server_support.c
 	copy $** $@

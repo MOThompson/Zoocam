@@ -1142,6 +1142,8 @@ static void VerifyLastImage(DCX_CAMERA *dcx) {
 -- Output: Set => sets camera triggering mode based on 
 --
 -- Return: Mode in camera or -1 on error
+--
+-- Note: If changing, verify everything still okay in DCx_ResetRingCounters()
 =========================================================================== */
 static int ms_to_wait(int msWait) {						/* Returns wait parameter for is_xxx calls */
 	int rc;
@@ -1218,6 +1220,9 @@ TRIGGER_MODE DCx_SetTriggerMode(DCX_CAMERA *dcx, TRIGGER_MODE mode, TRIGGER_INFO
 			break;
 
 		case TRIG_SOFTWARE:
+			is_SetExternalTrigger(dcx->hCam, IS_SET_TRIGGER_SOFTWARE);
+			is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+			is_StopLiveVideo(dcx->hCam, IS_FORCE_VIDEO_STOP);
 			is_SetExternalTrigger(dcx->hCam, IS_SET_TRIGGER_SOFTWARE);
 			dcx->trigger.bArmed = TRUE;
 			break;
@@ -1420,6 +1425,58 @@ int DCx_SetRingBufferSize(DCX_CAMERA *dcx, int nRequest) {
 	return rval;
 }
 
+
+/* ===========================================================================
+-- Reset the ring buffer counters so the next image will be in location 0
+-- Primarily a Client/Server call for burst mode operation.  While other
+-- commands may also reset these counters, this routine ensures a reset.
+--
+-- Usage: int DCx_ResetRingCounters(DCX_CAMERA *dcx);
+--
+-- Inputs: dcx  - structure associated with a camera
+--
+-- Output: Resets buffers so next image will be 0
+--
+-- Return: 0 on success, !0 if errors (not initialized?)
+--
+-- Note: Verify these remain compatible with whatever is done in SetTrigger()
+=========================================================================== */
+int DCx_ResetRingCounters(DCX_CAMERA *dcx) {
+	static char *rname = "DCx_ResetRingCounters";
+	
+	/* Must be valid structure */
+	if (dcx == NULL || dcx->hCam <= 0) return 1;
+
+	/* This isn't as easy as for the TL cameras */
+	/* Best way seems to be to go momentarily into live video and then immediately stop */
+	/* Very painful depending on the trigger mode */
+	switch (dcx->trigger.mode) {
+		case TRIG_FREERUN:							/* Just stop and restart */
+			is_StopLiveVideo(dcx->hCam, IS_FORCE_VIDEO_STOP);
+			is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+			break;
+		case TRIG_SOFTWARE:
+			is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+			is_StopLiveVideo(dcx->hCam, IS_FORCE_VIDEO_STOP);
+			break;
+		case TRIG_EXTERNAL:
+		case TRIG_SS:
+			is_StopLiveVideo(dcx->hCam, IS_FORCE_VIDEO_STOP);
+			is_SetExternalTrigger(dcx->hCam, IS_SET_TRIGGER_SOFTWARE);
+			is_CaptureVideo(dcx->hCam, IS_DONT_WAIT);
+			is_StopLiveVideo(dcx->hCam, IS_FORCE_VIDEO_STOP);
+			is_SetExternalTrigger(dcx->hCam, dcx->trigger.ext_slope == TRIG_EXT_POS ? IS_SET_TRIGGER_HI_LO : IS_SET_TRIGGER_LO_HI);
+			break;
+			
+		case TRIG_BURST:							/* Will happen automatically when gets a is_CaptureVideo() */
+		default:
+			break;
+	}
+
+	/* Should be able to claim now that is reset */
+	dcx->nValid = dcx->iLast = dcx->iShow = 0;
+	return 0;
+}
 
 /* ===========================================================================
 -- Release ring buffers / memory associated with a camera.

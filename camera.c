@@ -1111,6 +1111,49 @@ int Camera_SetRingBufferSize(WND_INFO *wnd, int nBuf) {
 }
 
 /* ===========================================================================
+-- Reset the ring buffer counters so the next image will be in location 0
+-- Primarily a Client/Server call for burst mode operation.  While other
+-- commands may also reset these counters, this routine ensures a reset.
+--
+-- Usage: int Camera_ResetRingCounters(WND_INFO *wnd);
+--
+-- Inputs: wnd - handle to the main information structure
+--
+-- Output: Resets buffers so next image will be 0
+--
+-- Return: 0 on success
+=========================================================================== */
+int Camera_ResetRingCounters(WND_INFO *wnd) {
+	static char *rname = "Camera_ResetRingCounters";
+
+	int rc;
+	TL_CAMERA *camera;
+	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
+
+	/* Make sure we have valid structures */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
+	if (wnd == NULL) return 0;
+
+	switch (wnd->Camera.driver) {
+		case DCX:
+			dcx = wnd->dcx;
+			rc = DCx_ResetRingCounters(dcx);
+			break;
+
+		case TL:
+			camera = (TL_CAMERA *) wnd->Camera.details;
+			rc = TL_ResetRingCounters(camera);
+			break;
+
+		default:
+			rc = 0;
+			break;
+	}
+	return rc;
+}
+
+/* ===========================================================================
 -- Determine formats that camera supports for writing
 --
 -- Usage: int Camera_GetSaveFormatFlag(WND_INFO *wnd);

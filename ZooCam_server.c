@@ -97,8 +97,8 @@ int Init_ZooCam_Server(void) {
 	DebugSockets(2);									/* All warnings and errors */
 
 /* Bring up the message based server */
-	if ( ! (ZooCam_Msg_Server_Up = (RunServerThread("DCx", DCX_ACCESS_PORT, server_msg_handler, NULL) == 0)) ) {
-		fprintf(stderr, "ERROR[%s]: Unable to start the DCx message based remote server\n", rname); fflush(stderr);
+	if ( ! (ZooCam_Msg_Server_Up = (RunServerThread("ZooCam", ZOOCAM_ACCESS_PORT, server_msg_handler, NULL) == 0)) ) {
+		fprintf(stderr, "ERROR[%s]: Unable to start the ZooCam message based remote server\n", rname); fflush(stderr);
 		return 2;
 	}
 
@@ -283,6 +283,11 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				reply.rc = Remote_Ring_Actions(RING_SET_SIZE, request.option, NULL);
 				break;
 
+			case ZOOCAM_RING_RESET_COUNT:
+				fprintf(stderr, "  ZooCam msg server: ZOOCAM_RING_RESET_COUNT\n");	fflush(stderr);
+				Camera_ResetRingCounters(NULL);
+				break;
+				
 			case ZOOCAM_RING_GET_FRAME_CNT:
 				fprintf(stderr, "  ZooCam msg server: ZOOCAM_RING_GET_FRAME_CNT()\n");	fflush(stderr);
 				reply.rc = Remote_Ring_Actions(RING_GET_ACTIVE_CNT, 0, NULL);

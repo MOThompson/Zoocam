@@ -5,19 +5,18 @@ CFLAGS = /nologo /W3 /WX- /O2 /Ob1 /GF /MD /GS /Gy /fp:precise /Zc:forScope /Gd
 LFLAGS = /nologo /subsystem:windows
 RFLAGS = /nologo
 
-DCx_LIB = \code\lab\DCx\Lib\uc480.lib
+DCx_LIB = \code\lab\Cameras\DCx_SDK\Lib\uc480.lib
 NI488_LIB = "c:\Program Files (x86)\National Instruments\Shared\ExternalCompilerSupport\C\lib32\msvc\ni4882.obj"
 NI488_LIB = \code\lab\LaserRange\ni4882.obj
 
 SYSLIBS = wsock32.lib user32.lib gdi32.lib comdlg32.lib comctl32.lib advapi32.lib vfw32.lib shell32.lib
 
-TL_SDK_INCLUDE = -I/code/lab/DCx/tl_sdk\include -I/code/lab/DCx/tl_sdk/load_dll_helpers
+TL_SDK_INCLUDE = -I/code/lab/Cameras/tl_sdk/include -I/code/lab/Cameras/tl_sdk/load_dll_helpers
 
 OBJS = ZooCam.obj camera.obj dcx.obj tl.obj ZooCam_server.obj numato_dio.obj focus_client.obj win32ex.obj graph.obj ki224.obj server_support.obj tl_camera_sdk_load.obj tl_mono_to_color_processing_load.obj timer.obj
 
 # server.exe  -- removed since must now be able to access the dialog box
-# client.exe  -- removed for the moment
-ALL: ZooCam.exe
+ALL: ZooCam.exe client.exe
 
 INSTALL: z:\lab\exes\ZooCam.exe
 

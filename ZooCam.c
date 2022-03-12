@@ -125,7 +125,7 @@ static int TL_ShowImage(WND_INFO *wnd, int index, int *pSharp);
 
 static void Camera_Info_Thread(void *arglist);
 
-int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, unsigned char *pMem, int *pSharp);
+int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, int index, unsigned char *rgb, int *pSharp);
 static FILE_FORMAT GetDfltImageFormat(HWND hdlg);
 
 /* DCx thread for monitor sequence events */
@@ -185,6 +185,7 @@ int AllCameraControls[] = {
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
 	IDC_LIVE, IDB_TRIGGER, IDC_ARM,
 	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
+	IDR_TRIG_POS, IDR_TRIG_NEG, IDB_BURST_ARM,
 	IDB_SAVE, IDB_SAVE_BURST,
 	IDV_RING_SIZE, IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDB_SHARPNESS_DIALOG, IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
@@ -203,6 +204,7 @@ int AllCameraControls[] = {
 int CameraOffControls[] = { 
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
 	IDC_LIVE, IDB_TRIGGER, IDC_ARM,
+	IDR_TRIG_POS, IDR_TRIG_NEG, IDB_BURST_ARM,
 	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
 	IDB_SAVE, IDB_SAVE_BURST,
 	IDV_RING_SIZE, IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
@@ -803,14 +805,15 @@ void Final_Closeout(void) {
 /* ===========================================================================
 -- Routine consolidating all statistics run on the images
 --
--- Usage: int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, unsigned char *pMem, int *pSharp);
+-- Usage: int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, int index, unsigned char *rgb, int *pSharp);
 --
 -- Inputs: wnd     - structure with all the info
 --         width   - width of the image
 --         height  - height of the image
 --         pitch   - bytes bewteen successful rows of the image
 --         iscolor - TRUE if image is in RGB format (3 bytes/pixel), FALSE if greyscale (1 byte/pixel)
---         pMem    - pointer to the image buffer in memory
+--         index   - for TL camera, index for the image
+--         rgb     - pointer to the RGB image buffer in memory (byte only)
 --         pSharp  - pointer to variable to get sharpness estimate (if ! NULL)
 --
 -- Output: *pSharp - estimate of the sharpness (in some units)
@@ -834,7 +837,8 @@ struct {
 	int sharpness;							/* Sharpness estimate */
 } stats;
 
-int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, unsigned char *pMem, int *pSharp) {
+int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, int index, unsigned char *rgb, int *pSharp) {
+	static char *rname = "CalcStatistics";
 
 	int i, j, col, line, w_max;
 	int sharpness;
@@ -857,23 +861,63 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	memset(green->y, 0, green->npt*sizeof(*green->y));
 	memset(blue->y,  0, blue->npt *sizeof(*blue->y));
 
-	for (line=0; line<height; line++) {
+	/* At this point, split based on the camera ... DCx versus TL */
+	/* The TL will use the raw structure rather than bmp conversion for statistics */
+	if (wnd->Camera.driver == TL) {
 		int b,g,r,w;									/* Values of R,G,B and W (grey) intensities */
-		aptr = pMem + line*pitch;					/* Pointer to this line */
-		w_max = 0;
-		for (col=0; col<width; col++) {
-			if (iscolor) {
-				b = aptr[3*col+0]; if (b < 0) b = 0; if (b > 255) b = 255; blue->y[b]++;
-				g = aptr[3*col+1]; if (g < 0) g = 0; if (g > 255) g = 255; green->y[g]++;
-				r = aptr[3*col+2]; if (r < 0) r = 0; if (r > 255) r = 255; red->y[r]++;
-				w = (b+g+r)/3;
-			} else {
-				w = aptr[col]; if (w < 0) w = 0; if (w > 255) w = 255; red->y[w]++;
+		TL_CAMERA *tl;
+		SHORT *data;
+
+		tl = (TL_CAMERA *) wnd->Camera.details;
+		if (index < 0) index = tl->iLast;
+		data = tl->images[index].raw;			/* Image data */
+
+		if (! iscolor) {
+			w_max = 0;
+			for (i=0; i<height*width; i++) {
+				w = max(0, min(data[i]/16+8, 255)); red->y[w]++;
+				if (w > w_max) w_max = w;
 			}
-			if (w > w_max) w_max = w;				/* Track maximum for centroid calculations */
+		} else {
+			w_max = 0;
+			for (i=0; i<height; i++) {
+				for (j=0; j<width; j+=2) {
+					g = (i%2 == 0) ? data[i*width+j] : data[i*width+j+1];
+					g = max(0, min(g/16+8, 255)); green->y[g] += 2;
+					if (i%2 == 0) {							/* Line with red */
+						r = data[i*width+j+1];
+						r = max(0, min(r/16+8, 255)); red->y[r] += 4;
+					} else {
+						b = data[i*width+j];
+						b = max(0, min(b/16+8, 255)); blue->y[b] += 4;
+					}
+					w = (r+g+b)/3;
+					if (w > w_max) w_max = w;
+				}
+			}
+		}
+
+	/* Default is just to look at the RGB */
+	} else {
+		for (line=0; line<height; line++) {
+			int b,g,r,w;									/* Values of R,G,B and W (grey) intensities */
+			aptr = rgb + line*pitch;					/* Pointer to this line */
+			w_max = 0;
+			for (col=0; col<width; col++) {
+				if (iscolor) {
+					b = aptr[3*col+0]; if (b < 0) b = 0; if (b > 255) b = 255; blue->y[b]++;
+					g = aptr[3*col+1]; if (g < 0) g = 0; if (g > 255) g = 255; green->y[g]++;
+					r = aptr[3*col+2]; if (r < 0) r = 0; if (r > 255) r = 255; red->y[r]++;
+					w = (b+g+r)/3;
+				} else {
+					w = aptr[col]; if (w < 0) w = 0; if (w > 255) w = 255; red->y[w]++;
+				}
+				if (w > w_max) w_max = w;				/* Track maximum for centroid calculations */
+			}
 		}
 	}
 
+	/* Now process the information */
 	if (iscolor) {
 		stats.R_sat = (100.0*red->y[255]  )/(1.0*height*width);
 		stats.G_sat = (100.0*green->y[255])/(1.0*height*width);
@@ -900,7 +944,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 		double z0,xz,yz,zi;
 		xz = yz = z0 = 0;
 		for (line=0; line<height; line++) {
-			aptr = pMem + line*pitch;					/* Pointer to this line */
+			aptr = rgb + line*pitch;					/* Pointer to this line */
 			for (col=0; col<width; col++) {
 				if (iscolor) {
 					zi = aptr[3*col+0]+aptr[3*col+1]+aptr[3*col+2];
@@ -946,7 +990,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	horz->npt = horz_r->npt = horz_g->npt = horz_b->npt = horz_sum->npt = width;
 
 	/* Copy the profile at the cross-hair */
-	aptr = pMem + pitch*((int) (height*wnd->cursor_posn.y+0.5));			/* Pointer to target line */
+	aptr = rgb + pitch*((int) (height*wnd->cursor_posn.y+0.5));			/* Pointer to target line */
 	for (i=0; i<width; i++) {
 		horz->x[i] = horz_r->x[i] = horz_g->x[i] = horz_b->x[i] = i;
 		if (iscolor) {
@@ -962,7 +1006,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	total_max = 0;
 	for (i=0; i<width; i++) {horz_sum->x[i] = i; horz_sum->y[i] = 0; }
 	for (i=0; i<width; i++) {					/* Sum all pixels in this column */
-		aptr = pMem + (iscolor ? 3*i : i);
+		aptr = rgb + (iscolor ? 3*i : i);
 		for (j=0; j<height; j++) {
 			if (iscolor) {
 				horz_sum->y[i] += aptr[j*pitch+0] + aptr[j*pitch+1] + aptr[j*pitch+2];
@@ -1009,13 +1053,13 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	for (i=0; i<height; i++) {
 		vert->y[i] = vert_r->y[i] = vert_g->y[i] = vert_b->y[i] = height-1-i;
 		if (iscolor) {
-			aptr = pMem + i*pitch + 3*((int) (width*wnd->cursor_posn.x+0.5));	/* Access first of the column */
+			aptr = rgb + i*pitch + 3*((int) (width*wnd->cursor_posn.x+0.5));	/* Access first of the column */
 			vert->x[i] = (3*256 - (aptr[0] + aptr[1] + aptr[2])) / 3.0;
 			vert_r->x[i] = 256 - aptr[2];
 			vert_g->x[i] = 256 - aptr[1];
 			vert_b->x[i] = 256 - aptr[0];
 		} else {
-			aptr = pMem + i*pitch + ((int) (width*wnd->cursor_posn.x+0.5));		/* Access first of the column */
+			aptr = rgb + i*pitch + ((int) (width*wnd->cursor_posn.x+0.5));		/* Access first of the column */
 			vert->x[i] = vert_r->x[i] = vert_g->x[i] = vert_b->x[i] = 256 - aptr[0];
 		}
 	}
@@ -1024,7 +1068,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	total_max = 0;
 	for (i=0; i<height; i++) {vert_sum->y[i] = height-1-i; vert_sum->x[i] = 0; }
 	for (i=0; i<height; i++) {					/* Sum all pixels in this row */
-		aptr = pMem + i*pitch;
+		aptr = rgb + i*pitch;
 		for (j=0; j<width; j++) {
 			if (iscolor) {
 				vert_sum->x[i] += aptr[3*j+0] + aptr[3*j+1] + aptr[3*j+2];
@@ -1047,7 +1091,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	/* TIMER_STATS_UPDATE sends WMP_SET_SCALES and WMP_REDRAW messages */
 
 	/* Calculate the sharpness - largest delta between pixels */
-	stats.sharpness = sharpness = CalcSharpness(wnd, width, height, pitch, iscolor, pMem);
+	stats.sharpness = sharpness = CalcSharpness(wnd, width, height, pitch, iscolor, rgb);
 	if (pSharp != NULL) *pSharp = sharpness;
 	
 	stats.updated = TRUE;
@@ -1524,6 +1568,8 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			/* Enable a floating window */
 			EnableDlgItem(hdlg, IDC_FLOAT, TRUE);
 
+			/* Have a random button on screen for debug ... bottom left of dialog box */
+			ShowDlgItem(hdlg, IDB_DEBUG, FALSE);		/* Make TRUE for debug work ... can be anything */
 			rcode = TRUE; break;
 
 		case WM_CLOSE:
@@ -1828,7 +1874,8 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			mode = Camera_GetTriggerMode(wnd, &trigger_info);
 			if (mode < 0) {
 				static int wIDs[] = {IDB_TRIGGER, IDC_ARM,
-											IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST};
+											IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST,
+											IDR_TRIG_POS, IDR_TRIG_NEG};
 				for (i=0; i<sizeof(wIDs)/sizeof(wIDs[0]); i++) EnableDlgItem(hdlg, wIDs[i], FALSE);
 				wnd->LiveVideo = FALSE;
 				SetDlgItemText(hdlg, IDC_LIVE, "Live");
@@ -1845,12 +1892,19 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				EnableDlgItem(hdlg, IDB_TRIGGER,       trigger_info.bArmed && ((mode == TRIG_SOFTWARE) || (mode == TRIG_BURST) || ((mode == TRIG_EXTERNAL || mode == TRIG_SS) && caps->bForceExtTrigger)));
 				EnableDlgItem(hdlg, IDC_ARM, caps->bArmDisarm && (mode != TRIG_BURST));
 
+				bFlag = (mode == TRIG_EXTERNAL || mode == TRIG_SS) && caps->bExtTrigSlope;
+				ShowDlgItem(hdlg, IDR_TRIG_POS, bFlag); EnableDlgItem(hdlg, IDR_TRIG_POS, bFlag);
+				ShowDlgItem(hdlg, IDR_TRIG_NEG, bFlag); EnableDlgItem(hdlg, IDR_TRIG_NEG, bFlag);
+				SetRadioButton(hdlg, IDR_TRIG_POS, IDR_TRIG_NEG, (trigger_info.ext_slope == TRIG_EXT_NEG) ? IDR_TRIG_NEG : IDR_TRIG_POS);
+
 				bFlag = (mode == TRIG_SOFTWARE || mode == TRIG_EXTERNAL || mode == TRIG_SS) && caps->bMultipleFramesPerTrigger;
 				ShowDlgItem(hdlg, IDT_TRIG_COUNT, bFlag); EnableDlgItem(hdlg, IDT_TRIG_COUNT, bFlag);
 				ShowDlgItem(hdlg, IDV_TRIG_COUNT, bFlag); EnableDlgItem(hdlg, IDV_TRIG_COUNT, bFlag);
 				SetDlgItemInt(hdlg, IDV_TRIG_COUNT, Camera_GetFramesPerTrigger(wnd), FALSE);
 				
-				ShowDlgItem(hdlg, IDB_BURST_ARM, mode == TRIG_BURST || mode == TRIG_SS);						/* Different meanings, but both real */
+				bFlag = mode == TRIG_BURST || mode == TRIG_SS;
+				ShowDlgItem(hdlg, IDB_BURST_ARM, bFlag );						/* Different meanings, but both real */
+				EnableDlgItem(hdlg, IDB_BURST_ARM, bFlag);
 
 				if (mode != TRIG_BURST) {
 					SetDlgItemCheck(hdlg, IDC_ARM, trigger_info.bArmed);
@@ -1905,6 +1959,10 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 			rcode = FALSE;												/* Assume we don't process */
 			switch (wID) {
+				case IDB_DEBUG:										/* Special purpose testing button (normally invisible) */
+					Camera_ResetRingCounters(wnd);
+					rcode = TRUE; break;
+
 				case IDOK:												/* Default response for pressing <ENTER> */
 					hwndTest = GetFocus();							/* Just see if we use to change focus */
 					for (hptr=DfltEnterList; *hptr!=ID_NULL; hptr++) {
@@ -2284,6 +2342,12 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
 					rcode = TRUE; break;
 
+				case IDR_TRIG_POS:
+				case IDR_TRIG_NEG:
+					Camera_GetTriggerMode(wnd, &trigger_info);
+					trigger_info.ext_slope = GetDlgItemCheck(hdlg, IDR_TRIG_POS) ? TRIG_EXT_POS : TRIG_EXT_NEG ;
+					rcode = TRUE; break;
+					
 				case IDV_TRIG_COUNT:
 					if (EN_KILLFOCUS == wNotifyCode) 
 						rc = Camera_SetFramesPerTrigger(wnd, GetDlgItemIntEx(hdlg, IDV_TRIG_COUNT));
@@ -3654,7 +3718,7 @@ static int TL_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 	if (IsWindow(wnd->thumbnail)) {
 		TL_RenderFrame(tl, index, wnd->thumbnail);
 		GenerateCrosshair(wnd, wnd->thumbnail);
-		CalcStatistics(wnd, tl->width, tl->height, tl->IsSensorColor ? 3*tl->width : tl->width, tl->IsSensorColor, tl->rgb24, pSharp);
+		CalcStatistics(wnd, tl->width, tl->height, tl->IsSensorColor ? 3*tl->width : tl->width, tl->IsSensorColor, index, tl->rgb24, pSharp);
 
 		image = &tl->images[tl->iShow];							/* Currently shown image (after render) */
 		sprintf_s(szBuf, sizeof(szBuf), "[%6d] %2.2d:%2.2d:%2.2d.%3.3d", image->imageID,
@@ -3717,7 +3781,7 @@ static int DCx_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 		is_RenderBitmap(dcx->hCam, PID, wnd->thumbnail, IS_RENDER_FIT_TO_WINDOW);
 		GenerateCrosshair(wnd, wnd->thumbnail);
 		rc = is_GetImageMemPitch(dcx->hCam, &pitch);
-		CalcStatistics(wnd, wnd->width, wnd->height, pitch, wnd->dcx->IsSensorColor, pMem, pSharp);
+		CalcStatistics(wnd, wnd->width, wnd->height, pitch, wnd->dcx->IsSensorColor, 0, pMem, pSharp);
 
 		is_GetImageInfo(dcx->hCam, PID, &ImageInfo, sizeof(ImageInfo));
 		sprintf_s(szBuf, sizeof(szBuf), "[%6lld] %2.2d:%2.2d:%2.2d.%3.3d", ImageInfo.u64FrameNumber,
@@ -3923,6 +3987,7 @@ static int DCx_CameraOpen(HWND hdlg, WND_INFO *wnd, DCX_CAMERA *dcx, UC480_CAMER
 	dcx->trigger.capabilities.bBurst      = TRUE;
 	dcx->trigger.capabilities.bForceExtTrigger = TRUE;
 	dcx->trigger.capabilities.bArmDisarm  = TRUE;
+	dcx->trigger.capabilities.bExtTrigSlope = TRUE;
 	SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
 
 	/* Camera now active in freerun triggering - tell window */
@@ -3988,7 +4053,6 @@ static int TL_CameraOpen(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl) {
 	EnableDlgItem(hdlg, IDS_GREEN_GAIN,  tl->IsSensorColor);
 	EnableDlgItem(hdlg, IDS_BLUE_GAIN,   tl->IsSensorColor);
 	EnableDlgItem(hdlg, IDB_RESET_GAINS, tl->bGainControl || tl->IsSensorColor);
-
 	EnableDlgItem(hdlg, IDV_FRAME_RATE, tl->bFrameRateControl);
 	EnableDlgItem(hdlg, IDS_FRAME_RATE, tl->bFrameRateControl);
 
@@ -4009,6 +4073,8 @@ static int TL_CameraOpen(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl) {
 	tl->trigger.capabilities.bBurst      = TRUE;
 	tl->trigger.capabilities.bArmDisarm  = TRUE;
 	tl->trigger.capabilities.bMultipleFramesPerTrigger = TRUE;
+	tl->trigger.capabilities.bExtTrigSlope = TRUE;
+
 	SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
 
 	/* Camera now active in freerun triggering - tell window */

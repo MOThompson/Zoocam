@@ -158,6 +158,7 @@ int TL_SetCameraName(TL_CAMERA *tl, char *name);
 
 int TL_GetRingInfo(TL_CAMERA *tl, int *nBuffers, int *nValid, int *iLast, int *iShow);
 int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf);
+int TL_ResetRingCounters(TL_CAMERA *tl);
 
 int TL_FindAllCameras(TL_CAMERA **list[]);
 int TL_CloseAllCameras(void);

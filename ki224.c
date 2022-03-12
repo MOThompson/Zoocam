@@ -72,18 +72,19 @@ static int OpenKeithley(HWND hdlg, int gpib_chan);
 /* ------------------------------- */
 static KI224_INFO info = {
 	FALSE,											/* active */
-	NULL, NULL,										/* Handle to last and current dialog window */
+	NULL,												/* Handle to dialog window */
 	GPIB_BOARD_ID, DEFAULT_GPIB_CHAN,		/* board and gpib address */
 	0,													/* handle to the GPIB device */
 	1.0, 0.0,										/* Set values for compliance and voltage */
 	0.0, 0.0											/* Current readings */
 };
 KI224_INFO *ki224_info = &info;
-HWND hwnd_Keith224 = NULL;						/* Handle to last started dialog box */
 
 /* ------------------------------- */
 /* Locally defined global vars     */
 /* ------------------------------- */
+static HWND hdlgMain = NULL;					/* Handle to primary dialog box */
+
 static HINSTANCE hInstance=NULL;
 
 static HBITMAP m_GreenLED  = NULL;
@@ -105,7 +106,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst, LPSTR lpszArgs, int
 
 	/* Load the class for the graph and bitmap windows */
 	/* And show the dialog box */
-	DialogBox(hThisInst, "IDD_KEITHLEY_224", HWND_DESKTOP, (DLGPROC) KeithleyDlgProc);
+	DialogBox(hThisInst, "IDD_KEITHLEY_224", HWND_DESKTOP, (DLGPROC) Keith224DlgProc);
 
 	return 0;
 }
@@ -213,14 +214,12 @@ INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPar
 			SendDlgItemMessage(hdlg, ID_LED, STM_SETIMAGE, (WPARAM) IMAGE_BITMAP, (LPARAM) (ki224_info->active ? (ki224_info->enabled ? m_GreenLED : m_RedLED) : m_YellowLED) );
 
 			/* Store the current handle for direct responses */
-			ki224_info->last = hwnd_Keith224;				/* Save last one active */
-			ki224_info->hdlg = hwnd_Keith224 = hdlg;		/* And mark this one as last initiated */
+			ki224_info->hdlg = hdlg;
 			rcode = TRUE; break;
 
 		case WM_CLOSE:
 			EndDialog(hdlg,0);
-			hwnd_Keith224 = ki224_info->last;		/* And mark last opened as closed */
-			ki224_info->hdlg = NULL;					/* We are not active now */
+			ki224_info->hdlg = NULL;
 			rcode = TRUE; break;
 
 		case WM_TIMER:
@@ -246,14 +245,10 @@ INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPar
 			switch (wID) {
 				case IDOK:												/* Default response for pressing <ENTER> */
 					hwndTest = GetFocus();							/* Just see if we use to change focus */
-					if (GetDlgItem(hdlg, IDOK) == hwndTest) {
-						SendMessage(hdlg, WM_CLOSE, 0, 0);
-					} else {
-						for (hptr=DfltEnterList; *hptr!=IDC_STATIC; hptr++) {
-							if (GetDlgItem(hdlg, *hptr) == hwndTest) {
-								PostMessage(hdlg, WM_NEXTDLGCTL, 0, 0L);
-								break;
-							}
+					for (hptr=DfltEnterList; *hptr!=IDC_STATIC; hptr++) {
+						if (GetDlgItem(hdlg, *hptr) == hwndTest) {
+							PostMessage(hdlg, WM_NEXTDLGCTL, 0, 0L);
+							break;
 						}
 					}
 					rcode = TRUE; break;
@@ -344,17 +339,13 @@ INT_PTR CALLBACK Keith224DlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPar
 					rcode = TRUE; break;
 					
 				case IDC_CONNECT:
-					if (GetDlgItemCheck(hdlg, IDC_CONNECT)) {
-						if (OpenKeithley(hdlg, ki224_info->address) != 0) {
-							SetDlgItemCheck(hdlg, IDC_CONNECT, FALSE);
-						} else {
-							ki224_info->active = TRUE;
-							for (i=0; i<sizeof(ControlList)/sizeof(*ControlList); i++) EnableDlgItem(hdlg, ControlList[i], TRUE);
-							EnableDlgItem(hdlg, IDC_GPIB, FALSE);
-							SetDlgItemCheck(hdlg, IDC_STATUS_ON, FALSE);
-							UpdateStatus(hdlg);
-						}
-					} else if (ki224_info->active) {
+					if (GetDlgItemCheck(hdlg, IDC_CONNECT) && OpenKeithley(hdlg, ki224_info->address) == 0) {
+						ki224_info->active = TRUE;
+						for (i=0; i<sizeof(ControlList)/sizeof(*ControlList); i++) EnableDlgItem(hdlg, ControlList[i], TRUE);
+						EnableDlgItem(hdlg, IDC_GPIB, FALSE);
+						SetDlgItemCheck(hdlg, IDC_STATUS_ON, FALSE);
+						UpdateStatus(hdlg);
+					} else {
 						ki224_info->active  = FALSE;								/* No longer active */
 						ki224_info->enabled = FALSE;								/* No longer know the state */
 						ki224_info->V = ki224_info->I = 0;
@@ -476,7 +467,7 @@ static int OpenKeithley(HWND hdlg, int gpib_chan) {
 	ibwrtex("G0U0X", 0);
 	ibrdex(szBuf, sizeof(szBuf));
 	fprintf(stderr, "Status (G0U0): \"%s\"\n", szBuf); fflush(stderr);
-	if (strncmp(szBuf, "224", 3) != 0) {
+	if (strncmp(szBuf, "224", 3) != 0 && strncmp(szBuf, "220", 3) != 0) {
 		sprintf_s(errmsg, sizeof(errmsg),
 					 "Device at GPIB address %d does not\n"
 					 "appear to be a Keithley 224 current source\n"
