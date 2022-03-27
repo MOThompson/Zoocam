@@ -87,7 +87,7 @@ int main(int argc, char *argv[]) {
 	double hold;
 
 	server_IP = LOOPBACK_SERVER_IP_ADDRESS;	/* Local test (server on same machine) */
-//	server_IP = "128.253.129.74";					/* zoo-chess.mse.cornell.edu */
+	server_IP = "128.253.129.74";					/* zoo-chess.mse.cornell.edu */
 //	server_IP = "128.253.129.71";					/* zoo-lsa.mse.cornell.edu */
 
 	if (argc > 1) server_IP = argv[1];			/* Use the first argument on command line if given */
@@ -183,28 +183,35 @@ int main(int argc, char *argv[]) {
 #if 0
 	for (i=0; i<18; i++) { ZooCam_Trigger(); Sleep(200); }		/* Collect an unusual number */
 	rc = ZooCam_Get_Image_Info(-1, &image_info);
+	printf("image_info size: %d\n", sizeof(image_info));
 	printf("Last image info (rc=%d): %s frame=%d times: %lld / %.3f  w/h: %d/%d pitch: %d exposure: %f\n", rc, 
 			 info.type == CAMERA_DCX ? "DCx" : info.type == CAMERA_TL ? "TL" : "unknown",
 			 image_info.frame,
 			 image_info.timestamp, image_info.camera_time, 
 			 image_info.width, image_info.height, image_info.memory_pitch, image_info.exposure);	fflush(stdout);
-	for (i=0; i<ZooCam_Get_Ring_Frame_Cnt(); i++) {
-		rc = ZooCam_Get_Image_Info(i, &image);
-		printf("Image info %d: (rc=%d): %s frame=%d times: %lld / %.3f  w/h: %d/%d pitch: %d exposure: %f\n", 
-				 i, rc,
-				 info.type == CAMERA_DCX ? "DCx" : info.type == CAMERA_TL ? "TL" : "unknown",
-				 image_info.frame,
-				 image_info.timestamp, image_info.camera_time, 
-				 image_info.width, image_info.height, image_info.memory_pitch, image_info.exposure);	
-	}
+//	for (i=0; i<ZooCam_Get_Ring_Frame_Cnt(); i++) {
+//		rc = ZooCam_Get_Image_Info(i, &image_info);
+//		printf("Image info %d: (rc=%d): %s frame=%d times: %lld / %.3f  w/h: %d/%d pitch: %d exposure: %f\n", 
+//				 i, rc,
+//				 info.type == CAMERA_DCX ? "DCx" : info.type == CAMERA_TL ? "TL" : "unknown",
+//				 image_info.frame,
+//				 image_info.timestamp, image_info.camera_time, 
+//				 image_info.width, image_info.height, image_info.memory_pitch, image_info.exposure);	
+//	}
 	fflush(stdout);
 #endif
 
 	/* Test data transfer */
-#if 0
-	for (i=0; i<5; i++) { ZooCam_Trigger(); Sleep(200); }		/* Collect an unusual number */
+#if 1
+//	for (i=0; i<5; i++) { ZooCam_Trigger(); Sleep(200); }		/* Collect an unusual number */
 
 	rc = ZooCam_Get_Image_Info(-1, &image_info);
+	printf("image_info size: %d\n", sizeof(image_info));
+	printf("Last image info (rc=%d): %s frame=%d times: %lld / %.3f  w/h: %d/%d pitch: %d exposure: %f\n", rc, 
+			 info.type == CAMERA_DCX ? "DCx" : info.type == CAMERA_TL ? "TL" : "unknown",
+			 image_info.frame,
+			 image_info.timestamp, image_info.camera_time, 
+			 image_info.width, image_info.height, image_info.memory_pitch, image_info.exposure);	fflush(stdout);
 	rc = ZooCam_Get_Image_Data(-1, &image_data, &length);
 	printf("Last image data (rc=%d): image_data = %p  length = %d\n", rc, image_data, length); fflush(stdout);
 	for (i=0; i<10; i++) {
@@ -214,11 +221,11 @@ int main(int argc, char *argv[]) {
 	}
 	free(image_data);
 
-	for (i=0; i<ZooCam_Get_Ring_Frame_Cnt(); i++) {
-		rc = ZooCam_Get_Image_Data(i, &image_data, &length);
-		printf("Image data %d: (rc=%d): image_data = %p  length = %d\n", i, rc, image_data, length); fflush(stdout);
-		free(image_data);
-	}
+//	for (i=0; i<ZooCam_Get_Ring_Frame_Cnt(); i++) {
+//		rc = ZooCam_Get_Image_Data(i, &image_data, &length);
+//		printf("Image data %d: (rc=%d): image_data = %p  length = %d\n", i, rc, image_data, length); fflush(stdout);
+//		free(image_data);
+//	}
 	fflush(stdout);
 #endif
 	
@@ -244,6 +251,7 @@ int main(int argc, char *argv[]) {
 	printf("Current arm mode: %d\n", ZooCam_Arm(TRIG_ARM_QUERY)); fflush(stdout);
 #endif
 
+#if 0
 	rc = ZooCam_Get_Trigger_Mode(&trigger_info);
 	printf("Trigger mode: %d  mode: %d armed: %d\n", rc, trigger_info.mode, trigger_info.bArmed); fflush(stdout);
 
@@ -256,6 +264,7 @@ int main(int argc, char *argv[]) {
 	memset(&trigger_info, 0, sizeof(trigger_info));
 	rc = ZooCam_Set_Trigger_Mode(TRIG_FREERUN, &trigger_info);
 	printf("Trigger FREERUN: %d  mode: %d armed: %d\n", rc, trigger_info.mode, trigger_info.bArmed); fflush(stdout);
+#endif
 
 #if 0
 	fprintf(stderr, "Burst arm:    %d\n", DCxZooCam_Burst_Arm());

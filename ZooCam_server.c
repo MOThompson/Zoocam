@@ -320,7 +320,7 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				break;
 
 			default:
-				fprintf(stderr, "ERROR: DCx server message received (%d) that was not recognized.\n"
+				fprintf(stderr, "ERROR: ZooCam server message received (%d) that was not recognized.\n"
 						  "       Will be ignored with rc=-1 return code.\n", request.msg);
 				fflush(stderr);
 				reply.rc = -1;
@@ -331,7 +331,7 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 
 		/* Send the standard response and any associated data */
 		if (SendStandardServerResponse(block, reply, reply_data) != 0) {
-			fprintf(stderr, "ERROR: DCx server failed to send response we requested.\n");
+			fprintf(stderr, "ERROR: ZooCam server failed to send response we requested.\n");
 			fflush(stderr);
 		}
 	}

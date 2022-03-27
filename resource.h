@@ -165,10 +165,10 @@
 #define IDT_FPS_MAX                     2119
 #define IDT_FPS_MIN                     2120
 #define IDR_TRIG_POS                    2121
-#define IDC_RADIO2                      2122
 #define IDR_TRIG_NEG                    2122
-#define IDC_BUTTON1                     2123
 #define IDB_DEBUG                       2123
+#define IDB_RESET_FRAME                 2124
+#define IDB_RESET_RING                  2124
 #define IDC_GPIB                        2401
 #define IDC_STATIC                      -1
 
@@ -179,7 +179,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        144
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2124
+#define _APS_NEXT_CONTROL_VALUE         2125
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

@@ -187,7 +187,7 @@ int AllCameraControls[] = {
 	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
 	IDR_TRIG_POS, IDR_TRIG_NEG, IDB_BURST_ARM,
 	IDB_SAVE, IDB_SAVE_BURST,
-	IDV_RING_SIZE, IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
+	IDV_RING_SIZE, IDB_RESET_RING, IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDB_SHARPNESS_DIALOG, IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDR_COLOR_DISABLE, IDR_COLOR_ENABLE, IDR_COLOR_BG40, IDR_COLOR_HQ, IDR_COLOR_AUTO_IR, 
 	IDG_COLOR_CORRECTION, IDV_COLOR_CORRECT_FACTOR, IDS_TEXT_0,
@@ -207,7 +207,7 @@ int CameraOffControls[] = {
 	IDR_TRIG_POS, IDR_TRIG_NEG, IDB_BURST_ARM,
 	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
 	IDB_SAVE, IDB_SAVE_BURST,
-	IDV_RING_SIZE, IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
+	IDV_RING_SIZE, IDB_RESET_RING, IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDB_SHARPNESS_DIALOG, IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDR_COLOR_DISABLE, IDR_COLOR_ENABLE, IDR_COLOR_BG40, IDR_COLOR_HQ, IDR_COLOR_AUTO_IR, 
 	IDG_COLOR_CORRECTION, IDV_COLOR_CORRECT_FACTOR, IDS_TEXT_0,
@@ -226,7 +226,7 @@ int CameraOnControls[] = {
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
 	IDC_SHOW_INTENSITY, IDC_SHOW_RGB, IDC_SHOW_SUM, IDC_TRACK_CENTROID,
-	IDB_SHARPNESS_DIALOG, IDV_RING_SIZE,
+	IDB_SHARPNESS_DIALOG, IDV_RING_SIZE, IDB_RESET_RING,
 	IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 #ifdef USE_RINGS
 	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
@@ -241,7 +241,7 @@ int BurstArmControlsDisable[] = {
 	IDC_LIVE, IDB_TRIGGER,
 	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
 	IDB_SAVE, IDB_SAVE_BURST,
-	IDC_FLOAT, IDB_SHARPNESS_DIALOG, IDV_RING_SIZE,
+	IDC_FLOAT, IDB_SHARPNESS_DIALOG, IDV_RING_SIZE, IDB_RESET_RING,
 	IDB_NEXT_FRAME, IDB_PREV_FRAME,
 	ID_NULL
 };
@@ -250,7 +250,7 @@ int BurstArmControlsReenable[] = {
 	IDC_CAMERA_LIST, IDC_CAMERA_MODES,
 	IDB_SAVE_PARAMETERS, IDB_LOAD_PARAMETERS,
 	IDB_SAVE, IDB_SAVE_BURST,
-	IDC_FLOAT, IDB_SHARPNESS_DIALOG, IDV_RING_SIZE,
+	IDC_FLOAT, IDB_SHARPNESS_DIALOG, IDV_RING_SIZE, IDB_RESET_RING,
 	IDB_NEXT_FRAME, IDB_PREV_FRAME,
 	ID_NULL
 };
@@ -1504,6 +1504,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			EnableDlgItem(hdlg, IDB_SAVE_BURST, FALSE);
 			EnableDlgItem(hdlg, IDB_NEXT_FRAME, FALSE);
 			EnableDlgItem(hdlg, IDB_PREV_FRAME, FALSE);
+			EnableDlgItem(hdlg, IDB_RESET_RING, FALSE);
 #endif
 
 			/* Now, initialize the rest of the windows (will fill in parts of dcx) */
@@ -1569,7 +1570,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			EnableDlgItem(hdlg, IDC_FLOAT, TRUE);
 
 			/* Have a random button on screen for debug ... bottom left of dialog box */
-			ShowDlgItem(hdlg, IDB_DEBUG, FALSE);		/* Make TRUE for debug work ... can be anything */
+//			ShowDlgItem(hdlg, IDB_DEBUG, TRUE);		/* Uncomment for debug work ... can be anything */
 			rcode = TRUE; break;
 
 		case WM_CLOSE:
@@ -1609,13 +1610,10 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 #endif		
 			}
 
+			/* Need to release memory associated with the curves */
 			printf(" calling EndDialog ..."); fflush(stdout);
 			EndDialog(hdlg,0);
 			printf(" returning\n"); fflush(stdout);
-			rcode = TRUE; break;
-
-			/* Need to release memory associated with the curves */
-			EndDialog(hdlg,0);
 			rcode = TRUE; break;
 
 		case WM_TIMER:
@@ -1960,7 +1958,6 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			rcode = FALSE;												/* Assume we don't process */
 			switch (wID) {
 				case IDB_DEBUG:										/* Special purpose testing button (normally invisible) */
-					Camera_ResetRingCounters(wnd);
 					rcode = TRUE; break;
 
 				case IDOK:												/* Default response for pressing <ENTER> */
@@ -2287,6 +2284,11 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 						Sleep(200); wnd->PauseImageRendering = FALSE;
 					}
 #endif
+					rcode = TRUE; break;
+
+				/* Reset the ring counters so next frame is zero */
+				case IDB_RESET_RING:
+					Camera_ResetRingCounters(wnd);
 					rcode = TRUE; break;
 
 				/** Complex operations 
@@ -3720,12 +3722,12 @@ static int TL_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 		GenerateCrosshair(wnd, wnd->thumbnail);
 		CalcStatistics(wnd, tl->width, tl->height, tl->IsSensorColor ? 3*tl->width : tl->width, tl->IsSensorColor, index, tl->rgb24, pSharp);
 
-		image = &tl->images[tl->iShow];							/* Currently shown image (after render) */
+		image = &tl->images[index];							/* Currently shown image (after render) */
 		sprintf_s(szBuf, sizeof(szBuf), "[%6d] %2.2d:%2.2d:%2.2d.%3.3d", image->imageID,
 					 image->system_time.wHour, image->system_time.wMinute, image->system_time.wSecond, image->system_time.wMilliseconds);
 		SetDlgItemText(wnd->hdlg, IDT_IMAGE_INFO, szBuf);
 	}
-	tl->iShow = index;		/* Also done in the TL_RenderFrame code */
+	tl->iShow = index;				/* Also done in the TL_RenderFrame code */
 
 	/* Identify the particular ring entry on the main dialog window */
 	SetDlgItemInt(wnd->hdlg, IDV_CURRENT_FRAME, tl->iShow, FALSE);

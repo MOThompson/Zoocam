@@ -389,6 +389,7 @@ TL_CAMERA *TL_FindCamera(char *ID, int *rcode) {
 	if ( (rc = tl_camera_get_sensor_pixel_height         (handle, &tl->pixel_height_um))  != 0) TL_CameraErrMsg(rc, "Error determining pixel height for camera", rname);
 	if ( (rc = tl_camera_get_sensor_pixel_width          (handle, &tl->pixel_width_um))   != 0) TL_CameraErrMsg(rc, "Error determining pixel width for camera", rname);
 	if ( (rc = tl_camera_get_sensor_pixel_size_bytes     (handle, &tl->pixel_bytes))      != 0) TL_CameraErrMsg(rc, "Error determining pixel bytes for camera", rname);
+	tl->image_bytes = tl->pixel_bytes * tl->width * tl->height;
 
 	if ( (rc = tl_camera_get_exposure_time_range         (handle, &tl->us_expose_min, &tl->us_expose_max)) != 0) TL_CameraErrMsg(rc, "Error determining min/max exposure time for camera", rname);
 	if ( (rc = tl_camera_get_exposure_time               (handle, &tl->us_expose))        != 0) TL_CameraErrMsg(rc, "Unable to set exposure time for camera", rname);
@@ -1092,7 +1093,8 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 
 		/* Save where we are and increment the number of valid (up to nBuffers) */
 		tl->iLast = ibuf;
-		tl->nValid = max(tl->nValid, ibuf);					/* Number now valid */
+		tl->nValid = max(tl->nValid, ibuf+1);				/* Number now valid */
+//		fprintf(stderr, "Reseting iLast and nValid: %d %d\n", tl->iLast, tl->nValid); fflush(stderr);
 
 		/* Copy raw data from sensor (<0.45 ms) and generate metadata */
 		/* Image timestamp documentation (page 42) incorrect ... clock seems to be exactly 99 MHz, not reported value */
@@ -1127,7 +1129,6 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 
 	return;
 }
-
 
 /* ===========================================================================
 -- Convert the raw buffer in camera structure to separated red, green and blue
