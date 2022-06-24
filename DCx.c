@@ -61,7 +61,7 @@
 /* ------------------------------- */
 /* My internal function prototypes */
 /* ------------------------------- */
-static time_t TimeFromUC480Time(const UC480TIME *pTime);
+static __time64_t TimeFromUC480Time(const UC480TIME *pTime);
 
 /* ------------------------------- */
 /* My usage of other external fncs */
@@ -2207,7 +2207,7 @@ int DCx_CaptureImage(DCX_CAMERA *dcx, char *fname, FILE_FORMAT format, int quali
 /* ===========================================================================
 -- Convert UC480TIME structure to standard UNIX time
 =========================================================================== */
-static time_t TimeFromUC480Time(const UC480TIME *pTime) {
+static __time64_t TimeFromUC480Time(const UC480TIME *pTime) {
 
 	struct tm tm;
 
@@ -2221,6 +2221,6 @@ static time_t TimeFromUC480Time(const UC480TIME *pTime) {
 	tm.tm_sec  = pTime->wSecond;
 	tm.tm_isdst = -1;							/* Let system determine if DST */
 
-	return mktime(&tm);
+	return _mktime64(&tm);
 }
 

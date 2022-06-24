@@ -5,9 +5,14 @@
 /* Camera/window information structure */
 typedef struct _WND_INFO WND_INFO;
 
+#ifndef PATH_MAX
+	#define	PATH_MAX	(260)
+#endif
+
 /* Global identifier of my window handle */
 HWND ZooCam_main_hdlg;
 WND_INFO *main_wnd;
+FILE *fdebug;
 
 /* Special calls to the display thread */
 #define	WMP_SHOW_FRAMERATE				(WM_APP+3)
@@ -181,6 +186,13 @@ typedef struct _WND_INFO {
 		double x,y;								/* Fraction of [0,1) the way across image for the cursor (in screen coordinates) */
 		BOOL fullwidth;						/* Cursor should extend over full range of image */
 	} cursor_posn;
+
+	struct {										/* Autosave files in external and SS modes? */
+		BOOL enable;							/* Enabled for autosave? */
+		char template[PATH_MAX];			/* What is template for save */
+		char directory[PATH_MAX];			/* Directory for saving files */
+		int next_index;						/* Next index to use */
+	} autosave;
 
 	/* Should we generate error reports */
 	BOOL EnableErrorReports;				/* Do we want error reports as message boxes? */

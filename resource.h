@@ -55,6 +55,7 @@
 #define IDT_CAMERA_IMAGE_SIZE           2017
 #define IDT_CAMERA_PIXEL_PITCH          2018
 #define IDT_CAMERA_VERSION              2019
+#define IDT_CAMERA_SENSOR_SIZE          2019
 #define IDT_CAMERA_DATE                 2020
 #define IDT_CAMERA_COLOR_MODE           2021
 #define IDS_FRAME_RATE                  2022
@@ -169,6 +170,30 @@
 #define IDB_DEBUG                       2123
 #define IDB_RESET_FRAME                 2124
 #define IDB_RESET_RING                  2124
+#define IDC_AUTOSAVE                    2125
+#define IDT_AUTOSAVE_FNAME              2126
+#define IDV_TEMPLATE                    2127
+#define IDV_NEXT_INDEX                  2128
+#define IDV_DIRECTORY                   2129
+#define IDB_BROWSE                      2130
+#define IDC_BUTTON1                     2131
+#define IDB_ROI                         2131
+#define IDB_FULL_FRAME                  2131
+#define IDT_ROI_INFO                    2132
+#define IDB_HALF_FRAME                  2132
+#define IDB_QUARTER_FRAME               2133
+#define IDB_EIGHTH_FRAME                2134
+#define IDB_SIXTEENTH_FRAME             2135
+#define IDB_TINY                        2136
+#define IDV_WIDTH                       2137
+#define IDV_HEIGHT                      2138
+#define IDV_X_OFFSET                    2139
+#define IDV_Y_OFFSET                    2140
+#define IDS_YMIN                        2141
+#define IDS_XMIN                        2142
+#define IDS_XRANGE                      2143
+#define IDS_YRANGE                      2144
+#define ID_SETROI                       2145
 #define IDC_GPIB                        2401
 #define IDC_STATIC                      -1
 
@@ -177,9 +202,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        144
+#define _APS_NEXT_RESOURCE_VALUE        146
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2125
+#define _APS_NEXT_CONTROL_VALUE         2146
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

@@ -89,6 +89,7 @@ int main(int argc, char *argv[]) {
 	server_IP = LOOPBACK_SERVER_IP_ADDRESS;	/* Local test (server on same machine) */
 	server_IP = "128.253.129.74";					/* zoo-chess.mse.cornell.edu */
 //	server_IP = "128.253.129.71";					/* zoo-lsa.mse.cornell.edu */
+	server_IP = "128.84.183.184";
 
 	if (argc > 1) server_IP = argv[1];			/* Use the first argument on command line if given */
 
@@ -183,7 +184,6 @@ int main(int argc, char *argv[]) {
 #if 0
 	for (i=0; i<18; i++) { ZooCam_Trigger(); Sleep(200); }		/* Collect an unusual number */
 	rc = ZooCam_Get_Image_Info(-1, &image_info);
-	printf("image_info size: %d\n", sizeof(image_info));
 	printf("Last image info (rc=%d): %s frame=%d times: %lld / %.3f  w/h: %d/%d pitch: %d exposure: %f\n", rc, 
 			 info.type == CAMERA_DCX ? "DCx" : info.type == CAMERA_TL ? "TL" : "unknown",
 			 image_info.frame,

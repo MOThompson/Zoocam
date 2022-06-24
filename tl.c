@@ -64,6 +64,7 @@
 static void camera_connect_callback(char* camera_ID, enum TL_CAMERA_USB_PORT_TYPE usb_bus_speed, void* context);
 static void camera_disconnect_callback(char* camera_ID, void* context);
 static void frame_available_callback(void* sender, unsigned short* image_buffer, int frame_count, unsigned char* metadata, int metadata_size_in_bytes, void* context);
+static int set_image_size_and_buffers(TL_CAMERA *tl);
 
 static int TL_CameraErrMsg(int rc, char *msg, char *routine);
 
@@ -82,6 +83,8 @@ TL_CAMERA *tl_camera_list[TL_MAX_CAMERAS] = {NULL, NULL, NULL, NULL, NULL, NULL,
 /* ------------------------------- */
 /* Locally defined global vars     */
 /* ------------------------------- */
+static FILE *tl_debug = NULL;								/* If !NULL, pointer to some open logfile for debugging */
+
 static BOOL is_camera_sdk_open        = FALSE,		/* Have we opened the SDK */
 				is_camera_dll_open        = FALSE,		/* Have we linked to the DLLs */
 				is_mono_to_color_sdk_open = FALSE;		/* Has the color processing sdk been opened */
@@ -151,8 +154,10 @@ int TL_Initialize(void) {
 -- Routine to set debug mode within this driver.  Safe to call multiple times.
 -- 
 -- Usage: int TL_SetDebug(BOOL debug);
+--        int TL_SetDebugLog(FILE *fdebug)
 --
--- Inputs: debug - TRUE to print error messages
+-- Inputs: debug  - TRUE to print error messages
+--         fdebug - if !NULL, open file handle to receive dbug reports
 --
 -- Output: sets internal information
 --
@@ -162,6 +167,12 @@ int TL_SetDebug(BOOL debug) {
 	static char *rname = "TL_SetDebug";
 
 	/* Not sure how to implement ... really have to track the rc messages */
+	return 0;
+}
+
+int TL_SetDebugLog(FILE *fdebug) {
+	static char *rname = "TL_SetDebugLog";
+	tl_debug = fdebug;
 	return 0;
 }
 
@@ -382,6 +393,10 @@ TL_CAMERA *TL_FindCamera(char *ID, int *rcode) {
 	if ( (rc = tl_camera_get_color_correction_matrix     (handle,  tl->color_correction)) != 0) TL_CameraErrMsg(rc, "Error determining color correction for camera", rname);
 	if ( (rc = tl_camera_get_default_white_balance_matrix(handle,  tl->white_balance))    != 0) TL_CameraErrMsg(rc, "Error determining white balance for camera", rname);
 
+	if ( (rc = tl_camera_get_sensor_width                 (handle, &tl->sensor_width))    != 0) TL_CameraErrMsg(rc, "Unable to get sensor width", rname);
+	if ( (rc = tl_camera_get_sensor_height                (handle, &tl->sensor_height))   != 0) TL_CameraErrMsg(rc, "Unable to get sensor height", rname);
+	fprintf(stderr, "Camera enumeration: sensor size %d x %d\n", tl->sensor_width, tl->sensor_height); fflush(stderr);
+
 	if ( (rc = tl_camera_get_image_width                 (handle, &tl->width))            != 0) TL_CameraErrMsg(rc, "Unable to get image width", rname);
 	if ( (rc = tl_camera_get_image_height                (handle, &tl->height))           != 0) TL_CameraErrMsg(rc, "Unable to get image height", rname);
 	if ( (rc = tl_camera_get_bit_depth                   (handle, &tl->bit_depth))        != 0) TL_CameraErrMsg(rc, "Error determining bit depth for camera", rname);
@@ -390,6 +405,7 @@ TL_CAMERA *TL_FindCamera(char *ID, int *rcode) {
 	if ( (rc = tl_camera_get_sensor_pixel_width          (handle, &tl->pixel_width_um))   != 0) TL_CameraErrMsg(rc, "Error determining pixel width for camera", rname);
 	if ( (rc = tl_camera_get_sensor_pixel_size_bytes     (handle, &tl->pixel_bytes))      != 0) TL_CameraErrMsg(rc, "Error determining pixel bytes for camera", rname);
 	tl->image_bytes = tl->pixel_bytes * tl->width * tl->height;
+	fprintf(stderr, "Camera enumeration: image size %d x %d\n", tl->width, tl->height); fflush(stderr);
 
 	if ( (rc = tl_camera_get_exposure_time_range         (handle, &tl->us_expose_min, &tl->us_expose_max)) != 0) TL_CameraErrMsg(rc, "Error determining min/max exposure time for camera", rname);
 	if ( (rc = tl_camera_get_exposure_time               (handle, &tl->us_expose))        != 0) TL_CameraErrMsg(rc, "Unable to set exposure time for camera", rname);
@@ -421,6 +437,168 @@ TL_CAMERA *TL_FindCamera(char *ID, int *rcode) {
 	return tl;
 }
 
+
+/* ===========================================================================
+-- Routine to select one of the ROI modes (partial frames)
+--
+-- Usage: int TL_SetROI(TL_CAMERA *tl, int mode);
+--        int TL_SetROI(TL_CAMERA *tl, int x0, int y0, int x1, int y1);
+--
+-- Inputs: tl   - data structure from TL_FindCamera()
+--         mode - one of the allowed modes ... 0 ==> full frame
+--         x0,y0 - smallest x,y value of corners (upper left)
+--         x1,y1 - largest x,y values of corners (lower right)
+--
+-- Output: Resets the ROI of the camera, modifying tl as necessary
+--
+-- Return: 0 if successful, otherwise error
+--           1 => the set ROI command failed
+=========================================================================== */
+int TL_SetROIMode(TL_CAMERA *tl, int mode) {
+	static char *rname = "TL_SetROIMode";
+
+	typedef struct _ROI_INFO {
+		char name[32];						/* Text to describe the sub-mode */
+		int width, height;				/* Pixel start and width/height (will be centered) */
+		int ulx, uly, lrx, lry;			/* Actual positions of corners */
+		double fps_max;					/* Measured maximum frame rate */
+		int fps_scale;						/* Appropriate value for slider */
+	} ROI_INFO;
+
+	ROI_INFO roi_list[] = {
+		{"Full frame", 1920, 1200,     0,    0, 1919, 1199,  39.68,  40 },
+		{"1/2 frame",   960,  600,   480,  300, 1439,  899,  75.75,  75 },
+		{"1/4 frame",   480,  302,   720,  448, 1199,  751, 137.35, 150 },
+		{"1/8 frame",   240,  152,   840,  524, 1079,  675, 235.85, 250 },
+		{"1/16 frame",  120,   80,   900,  560, 1019,  639, 357.10, 400 },
+		{"1/32 frame",   92,   40,   912,  580, 1003,  619, 499.97, 500 }
+	} ;
+	ROI_INFO *roi;
+	#define	N_ROI	(sizeof(roi_list)/sizeof(*roi_list))
+
+	/* Validate structure and camera active */
+	if (mode < 0) mode = 0;
+	if (mode >= N_ROI) mode = N_ROI - 1;
+
+	/* Make the request */
+	roi = roi_list+mode;
+	return TL_SetROI(tl, roi->ulx, roi->uly, roi->lrx, roi->lry);
+}
+
+int TL_SetROI(TL_CAMERA *tl, int x0, int y0, int x1, int y1) {
+	static char *rname = "TL_SetROI";
+
+	FILE *handle;
+	int rc, trig_mode;
+	int ulx, uly, lrx, lry;			/* upper-left and lower-right of ROI */
+	int width, height;				/* Image size */
+
+	/* Validate structure and camera active */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC || tl->handle == NULL) return 1;
+
+	/* Make my life a bit easier */
+	handle = tl->handle;
+
+	/* Get current ROI and skip if no changes */
+	tl_camera_get_roi(handle, &ulx, &uly, &lrx, &lry);
+	if ( ulx == x0 && uly == y0 && lrx == x1 && lry == y1) return 0;
+
+	/* Stop camera if armed, suspend image processing, and take control of image buffers */
+	if (tl->trigger.bArmed) tl_camera_disarm(handle);
+	tl->suspend_image_processing++;
+	WaitForSingleObject(tl->image_mutex, TL_IMAGE_ACCESS_TIMEOUT);
+
+	if ( (rc = tl_camera_set_roi(handle, x0,y0, x1,y1)) != 0) {		/* reset ROI */
+		TL_CameraErrMsg(rc, "Failed to set ROI", rname);
+		return 1;
+	} 
+
+	/* Query the actual ROI and image width/height.  Resize buffers if needed */
+	tl_camera_get_roi(handle, &tl->roi.ulx, &tl->roi.uly, &tl->roi.lrx, &tl->roi.lry);
+	tl->roi.dx = (int) ((tl->roi.ulx+tl->roi.lrx-(tl->sensor_width-1))  / 2.0);
+	tl->roi.dy = (int) ((tl->roi.uly+tl->roi.lry-(tl->sensor_height-1)) / 2.0);
+
+	tl_camera_get_image_width(handle, &width);
+	tl_camera_get_image_height(handle, &height);
+	if (width != tl->width || height != tl->height) set_image_size_and_buffers(tl);
+//	fprintf(stderr, "Requested ROI: (%d,%d) (%d,%d)  Actual ROI: (%d,%d) x (%d,%d)\n", x0,y0, x1,y1, tl->roi.ulx,tl->roi.uly, tl->roi.lrx,tl->roi.lry); fflush(stderr);
+
+	/* Release mutex, re-enable image processing, and re-arm if had been armed */
+	ReleaseMutex(tl->image_mutex);
+	tl->suspend_image_processing--;
+
+	/* And reset the triggering */
+	trig_mode = tl->trigger.mode; tl->trigger.mode = -1;					/* Save trigger mode and set so different */
+	TL_SetTriggerMode(tl, trig_mode, NULL);									/* Should restart */
+
+	return 0;
+}
+
+/* ===========================================================================
+-- Internal routine to deal with all parameters in tl associated with image size
+-- and image buffers
+--
+-- Usage: int set_image_size_and_buffers(TL_CAMERA *tl);
+--
+-- Inputs: tl - a partially completed structure from TL_FindCamera()
+--
+-- Output: Queries the camera for image size and then sets parameters in tl
+--         that depend on size, and allocate buffers within the tl structure.
+--         
+-- Return: 0 if successful, !0 otherwise (no checks currently)
+--
+-- Notes: Assumes that thread owns the memory and nothing is running
+=========================================================================== */
+static int set_image_size_and_buffers(TL_CAMERA *tl) {
+	static char *rname = "set_image_size_and_buffers";
+
+	FILE *handle;
+	int i;
+	
+	handle = tl->handle;
+
+	/* Query image size information */
+	tl_camera_get_image_width(handle, &tl->width);
+	tl_camera_get_image_height(handle, &tl->height);
+	tl_camera_get_sensor_pixel_size_bytes(handle, &tl->pixel_bytes);
+	tl->image_bytes = tl->pixel_bytes * tl->width * tl->height;
+
+	/* set number of pixels and image buffer byte size (assume 16-bit values) */
+	tl->npixels = tl->width * tl->height;
+	tl->nbytes_raw = sizeof(unsigned short) * tl->npixels;
+
+	/* If color sensor, create RGB channels for a separation of a raw frame */
+	if (tl->IsSensorColor) {
+		tl->nbytes_red   = tl->nbytes_raw / 4;
+		tl->nbytes_green = tl->nbytes_raw / 2;
+		tl->nbytes_blue  = tl->nbytes_raw / 4;
+		tl->red   = realloc(tl->red,   tl->nbytes_red);
+		tl->green = realloc(tl->green, tl->nbytes_green);
+		tl->blue  = realloc(tl->blue,  tl->nbytes_blue);
+	}
+
+	/* If color sensor, create RGB combined buffer */
+	if (tl->IsSensorColor) {
+		tl->rgb24_nbytes = 3 * tl->width * tl->height;
+		tl->rgb24 = realloc(tl->rgb24, tl->rgb24_nbytes);
+	}
+
+	/* Clear the timestamps on separations just in case */
+	tl->rgb24_imageID = tl->separations_imageID = -1;
+
+	/* If we have buffers allocated, free them and recreate */
+	tl->nValid = tl->iLast = tl->iShow = 0;
+	for (i=0; i<tl->nBuffers; i++) { free(tl->images[i].raw); tl->images[i].raw = NULL; }
+	for (i=0; i<tl->nBuffers; i++) { 
+		if ( (tl->images[i].raw = malloc(tl->nbytes_raw)) == NULL) {
+			fprintf(stderr, "[%s] Only able to allocate %d buffers for this ROI size\n", rname, i); fflush(stderr);
+			tl->nBuffers = i;
+			break;
+		}
+	}
+
+	return 0;
+}
 
 /* ===========================================================================
 -- Routine to open a camera for use (active)
@@ -487,43 +665,33 @@ int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 	/* Simple flag to indicate if we are color or B/W */
 	tl->IsSensorColor = tl->sensor_type == TL_CAMERA_SENSOR_TYPE_BAYER;
 
-	/* Create a semaphore for access to the data itself */
-	tl->image_mutex = CreateMutex(NULL, FALSE, NULL);
-
-	/* Figure out how big image buffer needs to be (assume 16-bit values) */
-	tl->npixels = tl->width * tl->height;
-	tl->nbytes_raw = sizeof(unsigned short) * tl->npixels;
-
-	/* Allocate buffers using common code (same as change) */
-	TL_SetRingBufferSize(tl, nBuf);			/* mutex has to be defined first */
-	
-	/* If color sensor, create RGB channels for a separation of a raw frame */
-	if (tl->IsSensorColor) {
-		tl->nbytes_red   = tl->nbytes_raw / 4;
-		tl->nbytes_green = tl->nbytes_raw / 2;
-		tl->nbytes_blue  = tl->nbytes_raw / 4;
-		tl->red   = realloc(tl->red,   tl->nbytes_red);
-		tl->green = realloc(tl->green, tl->nbytes_green);
-		tl->blue  = realloc(tl->blue,  tl->nbytes_blue);
-	}
-	/* If color sensor, create RGB combined buffer */
-	if (tl->IsSensorColor) {
-		tl->rgb24_nbytes = 3 * tl->width * tl->height;
-		tl->rgb24 = realloc(tl->rgb24, tl->rgb24_nbytes);
-	}
-
 	/* Query the initial gains so could be reset later */
 	TL_GetMasterGain(tl, &tl->db_dflt);
 	TL_GetRGBGains(tl, &tl->red_dflt, &tl->green_dflt, &tl->blue_dflt);
 
-	/* Register the routine that will process images */
+	/* Create and grab semaphore for access to buffers (for set_iamge_size_and_buffers) */
+	tl->image_mutex = CreateMutex(NULL, TRUE, NULL);
+
+	/* Go full-frame and generate buffers */
+	tl_camera_set_roi(handle, 0, 0, tl->sensor_width, tl->sensor_height);
+	tl_camera_get_roi(handle, &tl->roi.ulx, &tl->roi.uly, &tl->roi.lrx, &tl->roi.lry);
+	tl->roi.dx = (int) ((tl->roi.ulx+tl->roi.lrx-(tl->sensor_width-1))  / 2.0);
+	tl->roi.dy = (int) ((tl->roi.uly+tl->roi.lry-(tl->sensor_height-1)) / 2.0);
+
+	/* Set buffers */
+	set_image_size_and_buffers(tl);								/* Commmon routine to deal with everything about image size and buffers */
+
+	/* Allocate buffers using common code (needs image_mutex and all image size info) */
+	TL_SetRingBufferSize(tl, nBuf);			/* mutex has to be defined first */
+	
+	/* Register routine that will process images */
 	if ( (rc = tl_camera_set_frame_available_callback(handle, frame_available_callback, 0)) != 0) { 
 		TL_CameraErrMsg(rc, "Unable to set frame_available_callback", rname);
 		rcode |= 0x10;
 	}
 
-	/* Clear the timestamps on separations just in case */
-	tl->rgb24_imageID = tl->separations_imageID = -1;
+	/* And now release the memory */
+	ReleaseMutex(tl->image_mutex);
 
 	/* Return either 0 or one/more of errors 0x04 and/or 0x08 */
 	return rcode;
@@ -582,7 +750,8 @@ int TL_GetCameraInfo(TL_CAMERA *tl, CAMERA_INFO *info) {
 --
 -- Return: Number of buffers or 0 on fatal errors
 --
--- Note: A request can be ignored and will return previous size
+-- Note: (1) A request can be ignored and will return previous size
+--       (2) set_image_size_and_buffers may free the images and then call to reset 
 =========================================================================== */
 int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf) {
 	static char *rname = "TL_SetRingBufferSize";
@@ -604,8 +773,11 @@ int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf) {
 	/* If shrinking, release image memory but TL_IMAGE too small to bother releasing unused image[]	*/
 	/* If expanding, assume getting nBuf but may end up having unneeded space in tl->images[] also	*/
 	if (nBuf < tl->nBuffers) {
-		for (i=nBuf; i<tl->nBuffers; i++) free(tl->images[i].raw);							/* Release image buffer (big)	*/
-
+		for (i=nBuf; i<tl->nBuffers; i++) {
+			if (tl_debug != NULL) { fprintf(tl_debug, "  Free[%d]: %p\n", i, tl->images[i].raw); fflush(tl_debug); }
+			free(tl->images[i].raw);							/* Release image buffer (big)	*/
+		}
+		
 	} else if (nBuf > tl->nBuffers) {																/* Increase number of buffers	*/
 		tl->images = realloc(tl->images, nBuf*sizeof(*tl->images));							/* Space for full request		*/
 		memset(tl->images+tl->nBuffers, 0, (nBuf-tl->nBuffers)*sizeof(*tl->images));	/* Clear new TL_IMAGE blocks	*/
@@ -616,6 +788,8 @@ int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf) {
 				fprintf(stderr, "[%s] Only able to increase buffer size to %d\n", rname, i); fflush(stderr);
 				nBuf = i;
 				break;
+			} else if (tl_debug != NULL) {
+				fprintf(tl_debug, "  Allocated[%d]: %p\n", i, tl->images[i].raw); fflush(tl_debug); 
 			}
 		}
 	}
@@ -1078,6 +1252,9 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 		fprintf(stderr, "ERROR: Unable to identify the camera for this callback\n"); fflush(stderr);
 		return;
 	}
+	
+	/* Are we "suspended" from processing images */
+	if (tl->suspend_image_processing) return;
 
 	/* Take control of the memory buffers */
 	if (WAIT_OBJECT_0 == WaitForSingleObject(tl->image_mutex, TL_IMAGE_ACCESS_TIMEOUT)) {
@@ -1100,7 +1277,7 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 		/* Image timestamp documentation (page 42) incorrect ... clock seems to be exactly 99 MHz, not reported value */
 		tl->images[ibuf].imageID = imageID;
 		GetLocalTime(&tl->images[ibuf].system_time);
-		tl->images[ibuf].timestamp = time(NULL);
+		tl->images[ibuf].timestamp = _time64(NULL);
 		tl->images[ibuf].camera_time = timestamp.value/99000000.0;
 		memcpy(tl->images[ibuf].raw, image_buffer, tl->nbytes_raw);
 

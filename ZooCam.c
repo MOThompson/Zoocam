@@ -109,6 +109,8 @@ static void show_sharpness_dialog_thread(void *arglist);
 BOOL CALLBACK DCX_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 BOOL CALLBACK NUMATODlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
+BOOL CALLBACK AutoSaveInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
+BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 
 /* Camera functionsn ... just split to handle the multiple optional drivers */
 static int Camera_Open(HWND hdlg, WND_INFO *wnd, CAMERA *camera);
@@ -125,7 +127,7 @@ static int TL_ShowImage(WND_INFO *wnd, int index, int *pSharp);
 
 static void Camera_Info_Thread(void *arglist);
 
-int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, int index, unsigned char *rgb, int *pSharp);
+int CalcStatistics(WND_INFO *wnd, int index, unsigned char *rgb, int *pSharp);
 static FILE_FORMAT GetDfltImageFormat(HWND hdlg);
 
 /* DCx thread for monitor sequence events */
@@ -144,21 +146,29 @@ int Init_Known_Resolution(HWND hdlg, WND_INFO *wnd, HCAM hCam);
 /* ------------------------------- */
 /* My share of  global vars		  */
 /* ------------------------------- */
+HWND ZooCam_main_hdlg = NULL;											/* Global identifier of my window handle */
 WND_INFO *main_wnd = NULL;
 
 /* ------------------------------- */
 /* Locally defined global vars     */
 /* ------------------------------- */
-HWND ZooCam_main_hdlg = NULL;											/* Global identifier of my window handle */
-BOOL abort_all_threads = FALSE;									/* Global signal on shutdown to abort everything */
+BOOL abort_all_threads = FALSE;										/* Global signal on shutdown to abort everything */
+
+static sig_atomic_t CalcStatistics_Active = FALSE;				/* Are we already processing statistics ... just skip call */
 
 static sig_atomic_t TL_Process_Image_Thread_Active = FALSE;	/* For monitoring when done */
 static sig_atomic_t TL_Process_Image_Thread_Abort  = FALSE;	/* Abort when no longer needed */
+
 static HANDLE TL_Process_Image_Thread_Trigger = NULL;
 static void TL_ImageThread(void *arglist);
 
 static HINSTANCE hInstance=NULL;
 static HWND float_image_hwnd;										/* Handle to free-floating image window */
+
+/* Structure returning values from ROIDlgProc */
+static struct {
+	int ulx, uly, lrx, lry;
+} setroi;
 
 /* This list must match order of radio buttons in resources.h (get index of stack) */
 static int ColorCorrectionModes[] = { COLOR_DISABLE, COLOR_ENABLE, COLOR_BG40, COLOR_HQ, COLOR_AUTO_IR };
@@ -197,6 +207,7 @@ int AllCameraControls[] = {
 	IDC_SHOW_INTENSITY, IDC_SHOW_RGB, IDC_SHOW_SUM, IDC_TRACK_CENTROID,
 	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
 	IDR_IMAGE_BMP, IDR_IMAGE_RAW, IDR_IMAGE_JPG, IDR_IMAGE_PNG,
+	IDB_ROI, IDT_ROI_INFO,
 	ID_NULL
 };
 
@@ -217,6 +228,7 @@ int CameraOffControls[] = {
 	IDC_SHOW_INTENSITY, IDC_SHOW_RGB, IDC_SHOW_SUM, IDC_TRACK_CENTROID,
 	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
 	IDR_IMAGE_BMP, IDR_IMAGE_RAW, IDR_IMAGE_JPG, IDR_IMAGE_PNG,
+	IDB_ROI, IDT_ROI_INFO,
 	ID_NULL
 };
 
@@ -411,21 +423,28 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 -- Return: estimate of sharpness (in some units) or 0 on error
 =========================================================================== */
 int CalcSharpness(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, unsigned char *pMem) {
-	int ix0, iy0, col, line, delta, delta_max;
+	int ix0, iy0, col, line, delta, delta_max, xspan, yspan;
 	unsigned char *aptr;
 
 	if (wnd == NULL || pMem == NULL) return 0;
 
 #define	SCAN_BLOCK	(128)																	/* edge of box measured */
-	ix0 = ((int) (width *wnd->cursor_posn.x+0.5)) - SCAN_BLOCK/2;				/* First column of test */
-	iy0 = ((int) (height*wnd->cursor_posn.y+0.5)) - SCAN_BLOCK/2;				/* First row of test */
+
+	/* Set up a rectangular region to scan for derivative */
+	xspan = (width  >= SCAN_BLOCK) ? SCAN_BLOCK : width ;							/* How wide is the regions explored? */
+	yspan = (height >= SCAN_BLOCK) ? SCAN_BLOCK : height ;
+
+	ix0 = ((int) (width *wnd->cursor_posn.x+0.5)) - xspan/2;						/* First column of test */
 	if (ix0 < 0) ix0 = 0;
+	if ((ix0 + xspan) > width)  ix0 = width-xspan;
+
+	iy0 = ((int) (height*wnd->cursor_posn.y+0.5)) - yspan/2;						/* First row of test */
 	if (iy0 < 0) iy0 = 0;
-	if ((ix0 + SCAN_BLOCK) > width)  ix0 = width-SCAN_BLOCK;
-	if ((iy0 + SCAN_BLOCK) > height) iy0 = height-SCAN_BLOCK;
+	if ((iy0 + yspan) > height) iy0 = height-yspan;
+
 	delta_max = 0;
-	for (col=ix0; col<ix0+SCAN_BLOCK-1; col++) {
-		for (line=iy0; line<iy0+SCAN_BLOCK-1; line++) {
+	for (col=ix0; col<ix0+xspan; col++) {
+		for (line=iy0; line<iy0+yspan; line++) {
 			aptr = pMem + line*pitch;
 			/* Consider horizontal changes */
 			if (iscolor) {
@@ -456,7 +475,7 @@ int CalcSharpness(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor,
 static void AutoExposureThread(void *arglist) {
 	static char *rname="AutoExposureThread";
 
-	static BOOL active=FALSE;
+	static sig_atomic_t active=FALSE;
 
 	int i, try;
 	char msg[20];
@@ -612,7 +631,7 @@ static void trigger_burst_mode(void *arglist) {
 	char szTmp[256];
 	int rc;
 
-	static BOOL active=FALSE;
+	static sig_atomic_t active=FALSE;
 
 	/* Get a pointer to the data structure */
 	wnd = (WND_INFO*) arglist;
@@ -805,12 +824,11 @@ void Final_Closeout(void) {
 /* ===========================================================================
 -- Routine consolidating all statistics run on the images
 --
--- Usage: int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, int index, unsigned char *rgb, int *pSharp);
+-- Usage: int CalcStatistics(WND_INFO *wnd, int index, unsigned char *rgb, int *pSharp);
 --
 -- Inputs: wnd     - structure with all the info
 --         width   - width of the image
 --         height  - height of the image
---         pitch   - bytes bewteen successful rows of the image
 --         iscolor - TRUE if image is in RGB format (3 bytes/pixel), FALSE if greyscale (1 byte/pixel)
 --         index   - for TL camera, index for the image
 --         rgb     - pointer to the RGB image buffer in memory (byte only)
@@ -818,7 +836,9 @@ void Final_Closeout(void) {
 --
 -- Output: *pSharp - estimate of the sharpness (in some units)
 --
--- Return: 0 if successful, otherwise error (typically nothing to do)
+-- Return: 0 if successful, otherwise error
+--           1 ==> nothing to do
+--           2 ==> already processing statistics for another image
 --
 -- Notes: Only sets parameters ih the stats structure due to threading
 --        problems.  TIMER_STATS_UPDATE in main window procedure actually 
@@ -837,13 +857,17 @@ struct {
 	int sharpness;							/* Sharpness estimate */
 } stats;
 
-int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, int index, unsigned char *rgb, int *pSharp) {
+int CalcStatistics(WND_INFO *wnd, int index, unsigned char *rgb, int *pSharp) {
 	static char *rname = "CalcStatistics";
 
 	int i, j, col, line, w_max;
 	int sharpness;
 	unsigned char *aptr;
 	double total_max;
+
+	/* Image information (look up from driver) */
+	int height, width, pitch;
+	BOOL is_color;
 
 	GRAPH_CURVE *red, *green, *blue;
 	GRAPH_CURVE *vert, *vert_r, *vert_g, *vert_b, *vert_sum;
@@ -852,6 +876,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 
 	/* If the main window isn't a window, don't bother with the histogram calculations */
 	if (wnd == NULL || ! IsWindow(wnd->hdlg)) return 1;
+	CalcStatistics_Active = TRUE;
 
 	/* Split based on RGB or only monochrome */
 	red    = wnd->red_hist;
@@ -868,11 +893,19 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 		TL_CAMERA *tl;
 		SHORT *data;
 
+		/* Get camera information */
 		tl = (TL_CAMERA *) wnd->Camera.details;
+
+		/* Look up the image size info */
+		height = tl->height; width = tl->width;
+		is_color = tl->IsSensorColor;
+		pitch = is_color ? 3*width : width;
+
+		/* validate the image index and get pointer to raw data */
 		if (index < 0) index = tl->iLast;
 		data = tl->images[index].raw;			/* Image data */
 
-		if (! iscolor) {
+		if (! is_color) {
 			w_max = 0;
 			for (i=0; i<height*width; i++) {
 				w = max(0, min(data[i]/16+8, 255)); red->y[w]++;
@@ -897,14 +930,24 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 			}
 		}
 
-	/* Default is just to look at the RGB */
-	} else {
+	/* DCX looks at the RGB */
+	} else if (wnd->Camera.driver == DCX) {
+		DCX_CAMERA *dcx;
+
+		/* Get camera information */
+		dcx = wnd->Camera.details;
+
+		/* Look up the image size info */
+		height = wnd->height; width = wnd->width;
+		is_GetImageMemPitch(dcx->hCam, &pitch);
+		is_color = wnd->dcx->IsSensorColor;
+
 		for (line=0; line<height; line++) {
 			int b,g,r,w;									/* Values of R,G,B and W (grey) intensities */
 			aptr = rgb + line*pitch;					/* Pointer to this line */
 			w_max = 0;
 			for (col=0; col<width; col++) {
-				if (iscolor) {
+				if (is_color) {
 					b = aptr[3*col+0]; if (b < 0) b = 0; if (b > 255) b = 255; blue->y[b]++;
 					g = aptr[3*col+1]; if (g < 0) g = 0; if (g > 255) g = 255; green->y[g]++;
 					r = aptr[3*col+2]; if (r < 0) r = 0; if (r > 255) r = 255; red->y[r]++;
@@ -915,10 +958,13 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 				if (w > w_max) w_max = w;				/* Track maximum for centroid calculations */
 			}
 		}
+	} else {
+		CalcStatistics_Active = FALSE;
+		return 2;
 	}
 
 	/* Now process the information */
-	if (iscolor) {
+	if (is_color) {
 		stats.R_sat = (100.0*red->y[255]  )/(1.0*height*width);
 		stats.G_sat = (100.0*green->y[255])/(1.0*height*width);
 		stats.B_sat = (100.0*blue->y[255] )/(1.0*height*width);
@@ -946,7 +992,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 		for (line=0; line<height; line++) {
 			aptr = rgb + line*pitch;					/* Pointer to this line */
 			for (col=0; col<width; col++) {
-				if (iscolor) {
+				if (is_color) {
 					zi = aptr[3*col+0]+aptr[3*col+1]+aptr[3*col+2];
 				} else {
 					zi = aptr[col];
@@ -975,7 +1021,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	horz_g   = wnd->horz_g;
 	horz_b   = wnd->horz_b;
 	horz_sum = wnd->horz_sum;
-	if (horz->npt < width) {
+	if (horz->nptmax < width) {
 		horz->x     = realloc(horz->x, width*sizeof(*horz->x));
 		horz->y     = realloc(horz->y, width*sizeof(*horz->y));
 		horz_r->x   = realloc(horz_r->x, width*sizeof(*horz_r->x));
@@ -986,6 +1032,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 		horz_b->y   = realloc(horz_b->y, width*sizeof(*horz_b->y));
 		horz_sum->x = realloc(horz_sum->x, width*sizeof(*horz_sum->x));
 		horz_sum->y = realloc(horz_sum->y, width*sizeof(*horz_sum->y));
+		horz->nptmax = horz_r->nptmax = horz_g->nptmax = horz_b->nptmax = horz_sum->nptmax = width;
 	}
 	horz->npt = horz_r->npt = horz_g->npt = horz_b->npt = horz_sum->npt = width;
 
@@ -993,7 +1040,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	aptr = rgb + pitch*((int) (height*wnd->cursor_posn.y+0.5));			/* Pointer to target line */
 	for (i=0; i<width; i++) {
 		horz->x[i] = horz_r->x[i] = horz_g->x[i] = horz_b->x[i] = i;
-		if (iscolor) {
+		if (is_color) {
 			horz->y[i] = (aptr[3*i+0] + aptr[3*i+1] + aptr[3*i+2])/3.0 ;		/* Average intensity */
 			horz_r->y[i] = aptr[3*i+2];
 			horz_g->y[i] = aptr[3*i+1];
@@ -1006,9 +1053,9 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	total_max = 0;
 	for (i=0; i<width; i++) {horz_sum->x[i] = i; horz_sum->y[i] = 0; }
 	for (i=0; i<width; i++) {					/* Sum all pixels in this column */
-		aptr = rgb + (iscolor ? 3*i : i);
+		aptr = rgb + (is_color ? 3*i : i);
 		for (j=0; j<height; j++) {
-			if (iscolor) {
+			if (is_color) {
 				horz_sum->y[i] += aptr[j*pitch+0] + aptr[j*pitch+1] + aptr[j*pitch+2];
 			} else {
 				horz_sum->y[i] += aptr[j*pitch];
@@ -1035,7 +1082,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	vert_g   = wnd->vert_g;
 	vert_b   = wnd->vert_b;
 	vert_sum = wnd->vert_sum;
-	if (vert->npt < height) {
+	if (vert->nptmax < height) {
 		vert->x = realloc(vert->x, height*sizeof(*vert->x));
 		vert->y = realloc(vert->y, height*sizeof(*vert->y));
 		vert_r->x = realloc(vert_r->x, height*sizeof(*vert_r->x));
@@ -1046,13 +1093,14 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 		vert_b->y = realloc(vert_b->y, height*sizeof(*vert_b->y));
 		vert_sum->x = realloc(horz_sum->x, height*sizeof(*horz_sum->x));
 		vert_sum->y = realloc(horz_sum->y, height*sizeof(*horz_sum->y));
+		vert->nptmax = vert_r->nptmax = vert_g->nptmax = vert_b->nptmax = vert_sum->nptmax = height;
 	}
 	vert->npt = vert_r->npt = vert_g->npt = vert_b->npt = vert_sum->npt = height;
 
 	/* Copy the profile at the cross-hair */
 	for (i=0; i<height; i++) {
 		vert->y[i] = vert_r->y[i] = vert_g->y[i] = vert_b->y[i] = height-1-i;
-		if (iscolor) {
+		if (is_color) {
 			aptr = rgb + i*pitch + 3*((int) (width*wnd->cursor_posn.x+0.5));	/* Access first of the column */
 			vert->x[i] = (3*256 - (aptr[0] + aptr[1] + aptr[2])) / 3.0;
 			vert_r->x[i] = 256 - aptr[2];
@@ -1070,7 +1118,7 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	for (i=0; i<height; i++) {					/* Sum all pixels in this row */
 		aptr = rgb + i*pitch;
 		for (j=0; j<width; j++) {
-			if (iscolor) {
+			if (is_color) {
 				vert_sum->x[i] += aptr[3*j+0] + aptr[3*j+1] + aptr[3*j+2];
 			} else {
 				vert_sum->x[i] += aptr[j];
@@ -1091,10 +1139,12 @@ int CalcStatistics(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor
 	/* TIMER_STATS_UPDATE sends WMP_SET_SCALES and WMP_REDRAW messages */
 
 	/* Calculate the sharpness - largest delta between pixels */
-	stats.sharpness = sharpness = CalcSharpness(wnd, width, height, pitch, iscolor, rgb);
+	stats.sharpness = sharpness = CalcSharpness(wnd, width, height, pitch, is_color, rgb);
 	if (pSharp != NULL) *pSharp = sharpness;
 	
 	stats.updated = TRUE;
+
+	CalcStatistics_Active = FALSE;
 	return 0;
 }
 
@@ -1310,6 +1360,8 @@ static int Camera_Close(HWND hdlg, WND_INFO *wnd) {
 				if (i >= 5) { fprintf(stderr, "[%s] Failed to see processing thread terminate\n", rname); fflush(stderr); }
 				rc = TL_CloseCamera(tl);
 			}
+			EnableDlgItem(hdlg, IDB_ROI, FALSE);		ShowDlgItem(hdlg, IDB_ROI, FALSE);
+			EnableDlgItem(hdlg, IDT_ROI_INFO, FALSE);	ShowDlgItem(hdlg, IDT_ROI_INFO, FALSE);
 			break;
 		default:
 			fprintf(stderr, "[%s] Driver from camera structure invalid (%d)\n", rname, wnd->Camera.driver); fflush(stderr);
@@ -1518,6 +1570,13 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			SetDlgItemText(hdlg, IDT_MID_EXPOSURE, ExposureList[0].str_mid);
 			SetDlgItemText(hdlg, IDT_MAX_EXPOSURE, ExposureList[0].str_max);
 
+			/* Autosave parameters */
+			SetDlgItemCheck(hdlg, IDC_AUTOSAVE, wnd->autosave.enable);
+			EnableDlgItem(hdlg, IDT_AUTOSAVE_FNAME, wnd->autosave.enable);
+			if (*wnd->autosave.template  == '\0') strcpy_m(wnd->autosave.template,  sizeof(wnd->autosave.template),  "image");
+			if (*wnd->autosave.directory == '\0') strcpy_m(wnd->autosave.directory, sizeof(wnd->autosave.directory), ".");
+			if (wnd->autosave.next_index < 0) wnd->autosave.next_index = 0;
+
 			/* Initialize DCx driver and set error reporting mode */
 			DCx_Initialize();									/* Safe to call multiple times */
 			TL_Initialize();
@@ -1570,7 +1629,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			EnableDlgItem(hdlg, IDC_FLOAT, TRUE);
 
 			/* Have a random button on screen for debug ... bottom left of dialog box */
-//			ShowDlgItem(hdlg, IDB_DEBUG, TRUE);		/* Uncomment for debug work ... can be anything */
+			ShowDlgItem(hdlg, IDB_DEBUG, TRUE);		/* Uncomment for debug work ... can be anything */
 			rcode = TRUE; break;
 
 		case WM_CLOSE:
@@ -2074,6 +2133,31 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					}
 					rcode = TRUE; break;
 					
+				case IDB_ROI:
+					if ( wnd != NULL && wnd->Camera.driver == TL && wnd->Camera.details != NULL) {
+						TL_CAMERA *tl;
+						tl = (TL_CAMERA *) wnd->Camera.details;
+
+						if (DialogBoxParam(hInstance, "IDD_ROI", HWND_DESKTOP, (DLGPROC) ROIDlgProc, (LPARAM) wnd) == IDOK) {
+#if 0
+							for (i=0; i<5 && TL_Process_Image_Thread_Active; i++) {
+								fprintf(stderr, "[%s] [%d] Aborting TL_Image_Thread.  Abort=%d  Active=%d\n", rname, i, TL_Process_Image_Thread_Abort, TL_Process_Image_Thread_Active); fflush(stderr);
+								TL_Process_Image_Thread_Abort = TRUE;	
+								SetEvent(TL_Process_Image_Thread_Trigger);	/* Re-trigger */
+								Sleep(100);
+							}
+							if (i >= 5) { fprintf(stderr, "[%s] Failed to see processing thread terminate\n", rname); fflush(stderr); }
+							_beginthread(TL_ImageThread, 0, (void *) tl);
+#else
+							TL_SetROI(tl, setroi.ulx, setroi.uly, setroi.lrx, setroi.lry);
+#endif
+							sprintf_s(szBuf, sizeof(szBuf), "%dx%d @ (%d,%d)", tl->width, tl->height, tl->roi.dx, tl->roi.dy);
+							SetDlgItemText(hdlg, IDT_ROI_INFO, szBuf);
+						}
+					}
+
+					rcode = TRUE; break;
+					
 				case IDB_CAMERA_DETAILS:
 					if (BN_CLICKED == wNotifyCode) _beginthread(Camera_Info_Thread, 0, (void *) wnd);
 					rcode = TRUE; break;
@@ -2364,6 +2448,18 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					if (BN_CLICKED == wNotifyCode) Camera_SaveAll(wnd, NULL, GetDfltImageFormat(hdlg));
 					rcode = TRUE; break;
 
+				case IDC_AUTOSAVE:
+					if (BN_CLICKED == wNotifyCode) {
+						if (! GetDlgItemCheck(hdlg, wID)) {
+							wnd->autosave.enable = FALSE;
+						} else {
+							rc = DialogBoxParam(hInstance, "IDD_AUTOSAVE", HWND_DESKTOP, (DLGPROC) AutoSaveInfoDlgProc, (LPARAM) wnd);
+							if ( ! (wnd->autosave.enable = (rc == IDOK)) ) SetDlgItemCheck(hdlg, wID, FALSE);
+						}
+						EnableDlgItem(hdlg, IDT_AUTOSAVE_FNAME, wnd->autosave.enable);
+					}
+					rcode = TRUE; break;
+								
 				/* Process the LED control values */
 				case IDB_LED_CONFIGURE:
 					if (BN_CLICKED == wNotifyCode) {
@@ -2400,6 +2496,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				case IDT_FRAME_COUNT:
 				case IDT_FRAME_VALID:
 				case IDT_SHARPNESS:
+				case IDT_ROI_INFO:
 					break;
 
 				default:
@@ -2411,6 +2508,306 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 	}
 	return rcode;
 }
+
+/* ===========================================================================
+BOOL CALLBACK AutoSaveInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
+=========================================================================== */
+BOOL CALLBACK AutoSaveInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+	static char *rname = "AutoSaveInfoDlgProc";
+
+	WND_INFO *wnd;
+	char szTmp[PATH_MAX];
+	int wID, wNotifyCode, rcode;
+	OPENFILENAME ofn;
+	char pathname[PATH_MAX];
+
+	/* Save the directory identified for future calls */
+	static char directory[PATH_MAX] = "";
+
+/* Recover the information data associated with this window */
+	if (msg != WM_INITDIALOG) {
+		wnd = (WND_INFO *) GetWindowLongPtr(hdlg, GWLP_USERDATA);
+	}
+
+/* The message loop */
+	rcode = FALSE;
+	switch (msg) {
+
+		case WM_INITDIALOG:
+			/* Recover the window pointer and save for this control */
+			wnd = (WND_INFO *) lParam;											/* Recover pointer */
+			if (wnd == NULL) wnd = main_wnd;
+			SetWindowLongPtr(hdlg, GWLP_USERDATA, (LONG_PTR) wnd);
+
+			/* Center the window for working */
+			DlgCenterWindowEx(hdlg, wnd->hdlg);
+			
+			/* Fill in initial values */
+			SetDlgItemText(hdlg, IDV_TEMPLATE, wnd->autosave.template);
+			SetDlgItemText(hdlg, IDV_DIRECTORY, wnd->autosave.directory);
+			SetDlgItemInt(hdlg, IDV_NEXT_INDEX, wnd->autosave.next_index, FALSE);
+			rcode = TRUE; break;
+
+		case WM_CLOSE:
+			GetDlgItemText(hdlg, IDV_TEMPLATE,  wnd->autosave.template,  sizeof(wnd->autosave.template));
+			GetDlgItemText(hdlg, IDV_DIRECTORY, wnd->autosave.directory, sizeof(wnd->autosave.directory));
+			wnd->autosave.next_index = GetDlgItemIntEx(hdlg, IDV_NEXT_INDEX);
+			EndDialog(hdlg, IDOK);
+			rcode = TRUE; break;
+
+		case WM_COMMAND:
+			wID = LOWORD(wParam);									/* Control sending message	*/
+			wNotifyCode = HIWORD(wParam);							/* Type of notification		*/
+
+			switch (wID) {
+				case IDCANCEL:
+					EndDialog(hdlg, wID);
+					rcode = TRUE; break;
+
+				case IDOK:												/* Default response for pressing <ENTER> */
+					SendMessage(hdlg, WM_CLOSE, 0, 0);			/* Handle above with X out */
+					rcode = TRUE; break;
+
+				case IDV_TEMPLATE:
+					if (EN_KILLFOCUS == wNotifyCode) {
+						GetDlgItemText(hdlg, wID, szTmp, sizeof(szTmp));
+						if (_stricmp(szTmp, wnd->autosave.template) != 0) SetDlgItemInt(hdlg, IDV_NEXT_INDEX, 0, FALSE);
+					}
+					rcode = TRUE; break;
+
+				case IDB_BROWSE:
+					if (BN_CLICKED == wNotifyCode) {
+
+						strcpy_m(pathname, sizeof(pathname), "dummy");	/* Pathname must be initialized with a value */
+						ofn.lStructSize       = sizeof(OPENFILENAME);
+						ofn.hwndOwner         = hdlg;
+						ofn.lpstrTitle        = "Choose directory via dummy file";
+						ofn.lpstrFilter       = "raw (*.raw)\0*.raw\0All files (*.*)\0*.*\0\0";
+						ofn.lpstrCustomFilter = NULL;
+						ofn.nMaxCustFilter    = 0;
+						ofn.nFilterIndex      = 1;
+						ofn.lpstrFile         = pathname;				/* Full path */
+						ofn.nMaxFile          = sizeof(pathname);
+						ofn.lpstrFileTitle    = NULL;						/* Partial path */
+						ofn.nMaxFileTitle     = 0;
+						ofn.lpstrDefExt       = "raw";
+						ofn.lpstrInitialDir   = (*directory == '\0') ? NULL : directory;
+						ofn.Flags = OFN_LONGNAMES | OFN_NOCHANGEDIR | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
+
+						/* Query a filename ... if abandoned, just return now with no complaints */
+						if (GetSaveFileName(&ofn)) {
+							pathname[ofn.nFileOffset-1] = '\0';
+							SetDlgItemText(hdlg, IDV_DIRECTORY, pathname);
+							strcpy_m(directory, sizeof(directory), pathname);
+						}
+					}
+					rcode = TRUE; break;
+
+				case IDV_DIRECTORY:
+				case IDV_NEXT_INDEX:
+				default:
+					printf("Unused wID in %s: %d\n", rname, wID); fflush(stdout);
+					break;
+			}
+
+			return rcode;
+	}
+	return 0;
+}
+
+
+/* ===========================================================================
+BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
+=========================================================================== */
+#define	WMP_SET_ROI				(WM_APP+1)
+#define	WMP_UPDATE_LIMITS		(WM_APP+2)
+
+BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+	static char *rname = "ROIDlgProc";
+
+	WND_INFO *wnd;
+	int i, width, height, ixoff, iyoff, wID, wNotifyCode, rcode;
+	char szBuf[256];
+	TL_CAMERA *tl;
+
+	static int DfltEnterList[] = {					
+		IDV_WIDTH, IDV_HEIGHT, IDV_X_OFFSET, IDV_Y_OFFSET,
+		ID_NULL
+	};
+	HWND hwndTest;
+	int *hptr;
+
+	/* Recover the information data associated with this window */
+	if (msg != WM_INITDIALOG) {
+		wnd = (WND_INFO *) GetWindowLongPtr(hdlg, GWLP_USERDATA);
+		tl = (wnd != NULL) ? (TL_CAMERA *) wnd->Camera.details : NULL ;
+	}
+
+	/* The message loop */
+	rcode = FALSE;
+	switch (msg) {
+
+		case WM_INITDIALOG:
+			/* Recover the window pointer and save for this control */
+			wnd = (WND_INFO *) lParam;											/* Recover pointer */
+			if (wnd == NULL) wnd = main_wnd;
+			SetWindowLongPtr(hdlg, GWLP_USERDATA, (LONG_PTR) wnd);
+
+			/* Recover the camera information */
+			tl = (wnd != NULL) ? (TL_CAMERA *) wnd->Camera.details : NULL ;
+
+			/* Center the window for working */
+			DlgCenterWindowEx(hdlg, wnd->hdlg);
+
+			/* Fill in initial values */
+			if (tl != NULL) {
+				SetDlgItemInt(hdlg, IDV_WIDTH,    tl->width,  FALSE);
+				SetDlgItemInt(hdlg, IDV_HEIGHT,   tl->height, FALSE);
+				SetDlgItemInt(hdlg, IDV_X_OFFSET, tl->roi.dx, TRUE);
+				SetDlgItemInt(hdlg, IDV_Y_OFFSET, tl->roi.dy, TRUE);
+				SendMessage(hdlg, WMP_UPDATE_LIMITS, 0, 0);
+			}
+			rcode = TRUE; break;
+
+		case WM_CLOSE:
+			EndDialog(hdlg, IDCANCEL);
+			rcode = TRUE; break;
+
+		/* Set one of the default value sets */
+		case WMP_SET_ROI:
+			static struct { 
+				int width, height;				/* Pixel start and width/height (will be centered) */
+				int ulx, uly, lrx, lry;			/* Actual positions of corners */
+				double fps_max;					/* Measured maximum frame rate */
+				int fps_scale;						/* Appropriate value for slider */
+			} roi[] = {
+				{ 1920, 1200,     0,    0, 1919, 1199,  39.68,  40 },
+				{  960,  600,   480,  300, 1439,  899,  75.75,  75 },
+				{  480,  302,   720,  448, 1199,  751, 137.35, 150 },
+				{  240,  152,   840,  524, 1079,  675, 235.85, 250 },
+				{  120,   80,   900,  560, 1019,  639, 357.10, 400 },
+				{   92,   40,   912,  580, 1003,  619, 499.97, 500 } };
+#define	N_ROI	(sizeof(roi)/sizeof(*roi))
+
+				i = max(0, min(N_ROI-1, (int) lParam));
+				setroi.ulx = roi[i].ulx;	setroi.uly = roi[i].uly;
+				setroi.lrx = roi[i].lrx;	setroi.lry = roi[i].lry;
+				EndDialog(hdlg, IDOK);
+				rcode = TRUE; break;
+
+		case WMP_UPDATE_LIMITS:
+			width = max(72, min(tl->sensor_width, GetDlgItemIntEx(hdlg, IDV_WIDTH)));
+			height = max(4, min(tl->sensor_height, GetDlgItemIntEx(hdlg, IDV_HEIGHT)));
+
+			/* Fill in text limits for offset */
+			sprintf_s(szBuf, sizeof(szBuf), "%d < x < %d", -(tl->sensor_width-width)/2, (tl->sensor_width-width)/2);
+			SetDlgItemText(hdlg, IDS_XRANGE, szBuf);
+			sprintf_s(szBuf, sizeof(szBuf), "%d < y < %d", -(tl->sensor_height-height)/2, (tl->sensor_height-height)/2);
+			SetDlgItemText(hdlg, IDS_YRANGE, szBuf);
+
+			/* Validate the offsets */
+			ixoff = GetDlgItemIntEx(hdlg, IDV_X_OFFSET);
+			if (abs(ixoff) > (tl->sensor_width-width)/2) {
+				ixoff = (ixoff < 0) ? -(tl->sensor_width-width)/2 : (tl->sensor_width-width)/2 ;
+				SetDlgItemInt(hdlg, IDV_X_OFFSET, ixoff, TRUE);
+			}
+			iyoff = GetDlgItemIntEx(hdlg, IDV_Y_OFFSET);
+			if (abs(ixoff) > (tl->sensor_height-height)/2) {
+				iyoff = (iyoff < 0) ? -(tl->sensor_height-height)/2 : (tl->sensor_height-height)/2 ;
+				SetDlgItemInt(hdlg, IDV_Y_OFFSET, iyoff, TRUE);
+			}
+			rcode = TRUE; break;
+				
+		case WM_COMMAND:
+			wID = LOWORD(wParam);									/* Control sending message	*/
+			wNotifyCode = HIWORD(wParam);							/* Type of notification		*/
+
+			switch (wID) {
+				case IDOK:
+					hwndTest = GetFocus();							/* Just see if we use to change focus */
+					for (hptr=DfltEnterList; *hptr!=ID_NULL; hptr++) {
+						if (GetDlgItem(hdlg, *hptr) == hwndTest) {
+							PostMessage(hdlg, WM_NEXTDLGCTL, 0, 0L);
+							break;
+						}
+					}
+					rcode = 0; break;
+
+				case IDCANCEL:
+					EndDialog(hdlg, wID);
+					rcode = TRUE; break;
+
+				case ID_SETROI:										/* OK button, but not ENTER */
+					width  = GetDlgItemIntEx(hdlg, IDV_WIDTH);
+					height = GetDlgItemIntEx(hdlg, IDV_HEIGHT);
+					ixoff  = GetDlgItemIntEx(hdlg, IDV_X_OFFSET);
+					iyoff  = GetDlgItemIntEx(hdlg, IDV_Y_OFFSET);
+					setroi.ulx = (tl->sensor_width  - width)  / 2 + ixoff;
+					setroi.uly = (tl->sensor_height - height) / 2 + iyoff;
+					setroi.lrx = setroi.ulx + width  - 1;
+					setroi.lry = setroi.uly + height - 1;
+					EndDialog(hdlg, IDOK);
+					rcode = TRUE; break;
+
+				case IDV_WIDTH:
+					if (EN_KILLFOCUS == wNotifyCode) {
+						width = max(72, min(tl->sensor_width, GetDlgItemIntEx(hdlg, wID)));
+						SetDlgItemInt(hdlg, wID, width, FALSE);
+						SendMessage(hdlg, WMP_UPDATE_LIMITS, 0, 0);
+					}
+					rcode = TRUE; break;
+					
+				case IDV_HEIGHT:
+					if (EN_KILLFOCUS == wNotifyCode) {
+						height = max(4, min(tl->sensor_height, GetDlgItemIntEx(hdlg, wID)));
+						SetDlgItemInt(hdlg, wID, height, FALSE);
+						SendMessage(hdlg, WMP_UPDATE_LIMITS, 0, 0);
+					}
+					rcode = TRUE; break;
+
+				case IDV_X_OFFSET:
+					if (EN_KILLFOCUS == wNotifyCode) {
+						width = GetDlgItemIntEx(hdlg, IDV_WIDTH);
+						ixoff = GetDlgItemIntEx(hdlg, wID);
+						if (ixoff < -(tl->sensor_width-width)/2) ixoff = -(tl->sensor_width-width)/2;
+						if (ixoff >  (tl->sensor_width-width)/2) ixoff =  (tl->sensor_width-width)/2;
+						SetDlgItemInt(hdlg, wID, ixoff, TRUE);
+					}
+					rcode = TRUE; break;
+
+				case IDV_Y_OFFSET:
+					if (EN_KILLFOCUS == wNotifyCode) {
+						height = GetDlgItemIntEx(hdlg, IDV_HEIGHT);
+						iyoff = GetDlgItemIntEx(hdlg, wID);
+						if (iyoff < -(tl->sensor_height-height)/2) iyoff = -(tl->sensor_height-height)/2;
+						if (iyoff >  (tl->sensor_height-height)/2) iyoff =  (tl->sensor_height-height)/2;
+						SetDlgItemInt(hdlg, wID, iyoff, TRUE);
+					}
+					rcode = TRUE; break;
+
+				case IDB_FULL_FRAME:
+					SendMessage(hdlg, WMP_SET_ROI, 0, 0); rcode = TRUE; break;
+				case IDB_HALF_FRAME:
+					SendMessage(hdlg, WMP_SET_ROI, 0, 1); rcode = TRUE; break;
+				case IDB_QUARTER_FRAME:
+					SendMessage(hdlg, WMP_SET_ROI, 0, 2); rcode = TRUE; break;
+				case IDB_EIGHTH_FRAME:
+					SendMessage(hdlg, WMP_SET_ROI, 0, 3); rcode = TRUE; break;
+				case IDB_SIXTEENTH_FRAME:
+					SendMessage(hdlg, WMP_SET_ROI, 0, 4); rcode = TRUE; break;
+				case IDB_TINY:
+					SendMessage(hdlg, WMP_SET_ROI, 0, 5); rcode = TRUE; break;
+					
+				default:
+					printf("Unused wID in %s: %d\n", rname, wID); fflush(stdout);
+					break;
+			}
+
+			return rcode;
+	}
+	return 0;
+}
+
 
 #ifdef USE_NUMATO
 
@@ -2965,11 +3362,15 @@ BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lP
 				SetDlgItemText(hdlg, IDT_CAMERA_MODEL,          camera->model);
 				SetDlgItemText(hdlg, IDT_CAMERA_FIRMWARE,			camera->firmware);
 
-				sprintf_s(szTmp, sizeof(szTmp), "%d x %d",      camera->width, camera->height);
-				SetDlgItemText(hdlg, IDT_CAMERA_IMAGE_SIZE, szTmp);
+				sprintf_s(szTmp, sizeof(szTmp), "%d x %d",      camera->sensor_width, camera->sensor_height);
+				SetDlgItemText(hdlg, IDT_CAMERA_SENSOR_SIZE, szTmp);
 				sprintf_s(szTmp, sizeof(szTmp), "%.2f x %.2f",  camera->pixel_width_um, camera->pixel_height_um);
 				SetDlgItemText(hdlg, IDT_CAMERA_PIXEL_PITCH, szTmp);
+
 				SetDlgItemInt(hdlg, IDT_CAMERA_BIT_DEPTH, camera->bit_depth, TRUE);
+
+				sprintf_s(szTmp, sizeof(szTmp), "%d x %d",      camera->width, camera->height);
+				SetDlgItemText(hdlg, IDT_CAMERA_IMAGE_SIZE, szTmp);
 
 				SetDlgItemDouble(hdlg, IDT_CAMERA_EXPOSE_MIN, "%.3f", 0.001*camera->us_expose_min);
 				SetDlgItemDouble(hdlg, IDT_CAMERA_EXPOSE_MAX, "%.0f", 0.001*camera->us_expose_max);
@@ -3009,6 +3410,7 @@ BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lP
 				case IDT_CAMERA_SERIAL_NO:
 				case IDT_CAMERA_MODEL:
 				case IDT_CAMERA_IMAGE_SIZE:
+				case IDT_CAMERA_SENSOR_SIZE:
 				case IDT_CAMERA_PIXEL_PITCH:
 				case IDT_CAMERA_BIT_DEPTH:
 				case IDT_CAMERA_EXPOSE_MIN:
@@ -3036,15 +3438,24 @@ BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lP
 
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
 
+	FILE *fdebug;
+
 	/* If not done, make sure we are loaded.  Assume safe to call multiply */
 	InitCommonControls();
 	LoadLibrary("RICHED20.DLL");
+
+	if ( (fopen_s(&fdebug, "c:/lsa/ZooCam.log", "a")) != 0) {
+		MessageBox(NULL, "Failed to open the debug log file.  No debug data will be collected", "ZooCam.log open fail", MB_OK | MB_ICONERROR);
+		fdebug = NULL;
+	} else {
+		TL_SetDebugLog(fdebug);
+	}
 
 	/* Load the class for the graph window */
 	Graph_StartUp(hThisInstance);					/* Initialize the graphics control */
 
 //	_beginthread(test_thread, 0, NULL);
-
+	
 	/* And show the dialog box */
 	hInstance = hThisInstance;
 	DialogBox(hInstance, "ZOOCAM_DIALOG", HWND_DESKTOP, (DLGPROC) CameraDlgProc);
@@ -3090,7 +3501,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = TRUE;
-	cv->npt = npt;
+	cv->nptmax = cv->npt = npt;
 	cv->x = calloc(sizeof(*cv->x), npt);
 	cv->y = calloc(sizeof(*cv->y), npt);
 	for (i=0; i<npt; i++) { cv->x[i] = i; cv->y[i] = 0; }
@@ -3107,7 +3518,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = TRUE;
-	cv->npt = npt;
+	cv->nptmax = cv->npt = npt;
 	cv->x = calloc(sizeof(*cv->x), npt);
 	cv->y = calloc(sizeof(*cv->y), npt);
 	for (i=0; i<npt; i++) { cv->x[i] = i; cv->y[i] = 0; }
@@ -3124,7 +3535,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = TRUE;
-	cv->npt = npt;
+	cv->nptmax = cv->npt = npt;
 	cv->x = calloc(sizeof(*cv->x), npt);
 	cv->y = calloc(sizeof(*cv->y), npt);
 	for (i=0; i<npt; i++) { cv->x[i] = i; cv->y[i] = 0; }
@@ -3160,7 +3571,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->nptmax = cv->npt = 1920;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->x[i] = i; cv->y[i] = 0; }
@@ -3176,7 +3587,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->nptmax = cv->npt = 1920;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
@@ -3192,7 +3603,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->nptmax = cv->npt = 1920;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
@@ -3208,7 +3619,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->nptmax = cv->npt = 1920;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
@@ -3224,7 +3635,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->nptmax = cv->npt = 1920;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
@@ -3250,7 +3661,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->nptmax = cv->npt = 1600;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
@@ -3266,7 +3677,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->nptmax = cv->npt = 1600;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
@@ -3282,7 +3693,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->nptmax = cv->npt = 1600;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
@@ -3298,7 +3709,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->nptmax = cv->npt = 1600;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
@@ -3314,7 +3725,7 @@ int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd) {
 	cv->draw_x_axis   = cv->draw_y_axis   = FALSE;
 	cv->force_scale_x = cv->force_scale_y = FALSE;
 	cv->autoscale_x   = FALSE;	cv->autoscale_y = FALSE;
-	cv->npt = 1280;									/* Normally large enough, but will expand when set */
+	cv->nptmax = cv->npt = 1600;									/* Normally large enough, but will expand when set */
 	cv->x = calloc(sizeof(*cv->x), cv->npt);
 	cv->y = calloc(sizeof(*cv->y), cv->npt);
 	for (i=0; i<cv->npt; i++) { cv->y[i] = i; cv->x[i] = 0; }
@@ -3720,7 +4131,7 @@ static int TL_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 	if (IsWindow(wnd->thumbnail)) {
 		TL_RenderFrame(tl, index, wnd->thumbnail);
 		GenerateCrosshair(wnd, wnd->thumbnail);
-		CalcStatistics(wnd, tl->width, tl->height, tl->IsSensorColor ? 3*tl->width : tl->width, tl->IsSensorColor, index, tl->rgb24, pSharp);
+		if (! CalcStatistics_Active) CalcStatistics(wnd, index, tl->rgb24, pSharp);
 
 		image = &tl->images[index];							/* Currently shown image (after render) */
 		sprintf_s(szBuf, sizeof(szBuf), "[%6d] %2.2d:%2.2d:%2.2d.%3.3d", image->imageID,
@@ -3739,7 +4150,6 @@ static int TL_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 static int DCx_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 	static char *rname = "DCx_ShowImage";
 
-	int rc, pitch;
 	int PID;
 	unsigned char *pMem;
 	char szBuf[256];
@@ -3782,8 +4192,7 @@ static int DCx_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 	if (IsWindow(wnd->thumbnail))   {
 		is_RenderBitmap(dcx->hCam, PID, wnd->thumbnail, IS_RENDER_FIT_TO_WINDOW);
 		GenerateCrosshair(wnd, wnd->thumbnail);
-		rc = is_GetImageMemPitch(dcx->hCam, &pitch);
-		CalcStatistics(wnd, wnd->width, wnd->height, pitch, wnd->dcx->IsSensorColor, 0, pMem, pSharp);
+		if (! CalcStatistics_Active) CalcStatistics(wnd, 0, pMem, pSharp);
 
 		is_GetImageInfo(dcx->hCam, PID, &ImageInfo, sizeof(ImageInfo));
 		sprintf_s(szBuf, sizeof(szBuf), "[%6lld] %2.2d:%2.2d:%2.2d.%3.3d", ImageInfo.u64FrameNumber,
@@ -4012,6 +4421,8 @@ static int TL_CameraOpen(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl) {
 	static char *rname = "TL_CameraOpen";
 
 	int i;
+	char szBuf[256];
+	
 	static struct {
 		int wID;
 		BOOL enable;
@@ -4022,8 +4433,10 @@ static int TL_CameraOpen(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl) {
 		{IDB_LOAD_PARAMETERS, FALSE}, {IDB_SAVE_PARAMETERS, FALSE}
 	};
 
-	/* Don't need the camera modes dialog box, so hide */
+	/* Don't need the camera modes dialog box, but do use ROI */
 	ShowDlgItem(hdlg, IDC_CAMERA_MODES, FALSE);
+	ShowDlgItem(hdlg, IDB_ROI, TRUE);			EnableDlgItem(hdlg, IDB_ROI, TRUE);
+	ShowDlgItem(hdlg, IDT_ROI_INFO, TRUE);		EnableDlgItem(hdlg, IDT_ROI_INFO, TRUE);
 
 	/* Open the requested camera */
 	if (TL_OpenCamera(tl, 10) != 0) {
@@ -4078,6 +4491,10 @@ static int TL_CameraOpen(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl) {
 	tl->trigger.capabilities.bExtTrigSlope = TRUE;
 
 	SendMessage(hdlg, WMP_UPDATE_TRIGGER_BUTTONS, 0, 0);
+
+	/* Encode current ROI info */
+	sprintf_s(szBuf, sizeof(szBuf), "%dx%d @ (%d,%d)", tl->width, tl->height, tl->roi.dx, tl->roi.dy);
+	SetDlgItemText(hdlg, IDT_ROI_INFO, szBuf);
 
 	/* Camera now active in freerun triggering - tell window */
 	wnd->LiveVideo = TRUE;
@@ -4138,20 +4555,35 @@ static void TL_ImageThread(void *arglist) {
 		if ( (wnd = main_wnd) == NULL) continue;	/* Recover most current wnd */
 		wnd->Image_Count++;								/* Increment number of images (we think) */
 
+		/* Has user enable autosave? */
+		if (wnd->autosave.enable) {
+			rc = Camera_GetTriggerMode(wnd, NULL);	/* But only if not LiveVideo */
+			if (rc == TRIG_SOFTWARE || rc == TRIG_EXTERNAL || rc == TRIG_SS) {
+				char fname[PATH_MAX];
+				sprintf_s(fname, sizeof(fname), "%s_%3.3d.raw", wnd->autosave.template, wnd->autosave.next_index);
+				SetDlgItemText(wnd->hdlg, IDT_AUTOSAVE_FNAME, fname);
+				sprintf_s(fname, sizeof(fname), "%s/%s_%3.3d.raw", wnd->autosave.directory, wnd->autosave.template, wnd->autosave.next_index);
+				if (TL_SaveImage(tl, fname, -1, FILE_RAW) != 0) SetDlgItemText(wnd->hdlg, IDT_AUTOSAVE_FNAME, "-- failed --");
+				wnd->autosave.next_index++;
+			}
+		}
+
 		/* Skip processing if (i) so requested or (ii) too many per second */
 		if (wnd->PauseImageRendering) continue;
 		if (HiResTimerDelta(timer) < 1.0/MAX_FRAME_DISPLAY_HZ) continue;
+
 
 		/* Reset timer to control overall allowed display rate */
 		HiResTimerReset(timer, 0.00);
 
 		/* Show image with crosshairs */
 		Camera_ShowImage(wnd, -1, &delta_max);				/* Call to ShowImage adds cross-hairs for me */
-		if (! IsWindow(wnd->hdlg)) continue;
-
-#ifdef USE_FOCUS
-		Update_Focus_Dialog(delta_max);
-#endif
+		
+		if (IsWindow(wnd->hdlg)) {
+			#ifdef USE_FOCUS
+				Update_Focus_Dialog(delta_max);
+			#endif
+		}
 	}
 	TL_Process_Image_Thread_Active = FALSE;				/* Once out of loop, no more chance of lockup */
 

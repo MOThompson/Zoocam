@@ -89,6 +89,9 @@ int Init_ZooCam_Server(void) {
 
 /* Create mutex for work */
 	if (ZooCam_Server_Mutex == NULL && (ZooCam_Server_Mutex = CreateMutex(NULL, FALSE, NULL)) == NULL) {
+		if (fdebug != NULL) {
+			fprintf(fdebug, "ERROR[%s]: Unable to create the server access semaphores\n", rname); fflush(fdebug);
+		}
 		fprintf(stderr, "ERROR[%s]: Unable to create the server access semaphores\n", rname); fflush(stderr);
 		return 1;
 	}
@@ -98,6 +101,9 @@ int Init_ZooCam_Server(void) {
 
 /* Bring up the message based server */
 	if ( ! (ZooCam_Msg_Server_Up = (RunServerThread("ZooCam", ZOOCAM_ACCESS_PORT, server_msg_handler, NULL) == 0)) ) {
+		if (fdebug != NULL) {
+			fprintf(fdebug, "ERROR[%s]: Unable to start the ZooCam message based remote server\n", rname); fflush(fdebug);
+		}
 		fprintf(stderr, "ERROR[%s]: Unable to start the ZooCam message based remote server\n", rname); fflush(stderr);
 		return 2;
 	}
@@ -118,6 +124,10 @@ int Init_ZooCam_Server(void) {
 -- Return:  0 if successful, !0 otherwise
 =========================================================================== */
 int Shutdown_ZooCam_Server(void) {
+
+	if (fdebug != NULL) { 
+		fprintf(fdebug, "ZooCam Server: Request to shutdown the server\n"); fflush(fdebug);
+	}
 
 	return 0;
 }
@@ -142,10 +152,12 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 	void *received_data, *reply_data;
 	BOOL ServerActive;
 	size_t length;
+	FILE *logfile;
 
 	/* These refer to the last captured image */
 	IMAGE_INFO image_info;
 	void *image_data;
+	BOOL free_reply_data;
 
 	/* And more information buffers that get transferred - some need to be kept */
 	CAMERA_INFO camera_info;
@@ -157,67 +169,79 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 	ServerActive = TRUE;
 	while (ServerActive && GetStandardServerRequest(block, &request, &received_data) == 0) {	/* Exit if client disappears */
 
-		/* Create a default reply message */
+		/* Where should logging information go? */
+		logfile = (fdebug != NULL) ? fdebug : stderr;
+
+		/* Debug standard message received */
+		fprintf(logfile, "%s: Received standard request: msg=%d option=%d data_len=%d data=%p\n", rname, request.msg, request.option, request.data_len, received_data); fflush(logfile);
+
+		/* Create a default reply message - by default don't release reply_data */
 		memcpy(&reply, &request, sizeof(reply));
 		reply.rc = reply.data_len = 0;			/* All okay and no extra data */
 		reply_data = NULL;							/* No extra data on return */
+		free_reply_data = FALSE;
 
 		/* Be very careful ... only allow one socket message to be in process at any time */
 		/* The code should already protect, but not sure how interleaved messages may impact operations */
 		if (WaitForSingleObject(ZooCam_Server_Mutex, ZOOCAM_SERVER_WAIT) != WAIT_OBJECT_0) {
-			fprintf(stderr, "ERROR[%s]: Timeout waiting for the DCx semaphore\n", rname); fflush(stderr);
+			fprintf(logfile, "ERROR[%s]: Timeout waiting for the DCx semaphore\n", rname); fflush(logfile);
 			reply.msg = -1; reply.rc = -1;
 
 		} else switch (request.msg) {
 			case SERVER_END:
-				fprintf(stderr, "  ZooCam msg server: SERVER_END\n"); fflush(stderr);
+				fprintf(logfile, "%s: SERVER_END\n", rname); fflush(logfile);
 				ServerActive = FALSE;
 				break;
 
 			case ZOOCAM_QUERY_VERSION:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_QUERY_VERSION()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_QUERY_VERSION()\n", rname); fflush(logfile);
 				reply.rc = ZOOCAM_CLIENT_SERVER_VERSION;
 				break;
 
 			case ZOOCAM_GET_CAMERA_INFO:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_GET_CAMERA_INFO()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_GET_CAMERA_INFO()\n", rname); fflush(logfile);
 				reply.rc = Remote_Get_Camera_Info(&camera_info);			/* Get the information */
 				reply.data_len = sizeof(camera_info);
 				reply_data = (void *) &camera_info;
 				break;
 
 			case ZOOCAM_GET_EXPOSURE_PARMS:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_GET_EXPOSURE_PARMS()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_GET_EXPOSURE_PARMS()\n", rname); fflush(logfile);
 				reply.rc = Remote_Set_Exposure_Parms(0, NULL, &exposure);
 				reply.data_len = sizeof(exposure);
 				reply_data = (void *) &exposure;
 				break;
 
 			case ZOOCAM_SET_EXPOSURE_PARMS:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_SET_EXPOSURE_PARMS()\n");	fflush(stderr);
-				if (request.data_len < sizeof(EXPOSURE_PARMS)) received_data = NULL;
+				fprintf(logfile, "%s: ZOOCAM_SET_EXPOSURE_PARMS(%d)\n", rname, request.option); fflush(logfile);
+				if (request.data_len < sizeof(EXPOSURE_PARMS)) {
+					fprintf(logfile, "%s: data_len < sizeof(EXPOSURE_PARMS).  Ignoring set.\n", rname); fflush(logfile);
+					received_data = NULL;
+				}
 				reply.rc = Remote_Set_Exposure_Parms(request.option, received_data, &exposure);
 				reply.data_len = sizeof(exposure);
 				reply_data = (void *) &exposure;
 				break;
 
 			case ZOOCAM_GET_IMAGE_INFO:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_GET_IMAGE_INFO()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_GET_IMAGE_INFO(%d)\n", rname, request.option); fflush(logfile);
 				reply.rc = Remote_Get_Image_Info(request.option, &image_info);
 				reply.data_len = sizeof(image_info);
 				reply_data = (void *) &image_info;
 				break;
 
 			case ZOOCAM_GET_IMAGE_DATA:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_GET_IMAGE_DATA()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_GET_IMAGE_DATA(%d)\n", rname, request.option); fflush(logfile);
 				reply.rc = Remote_Get_Image_Data(request.option, &image_data, &length);
 				reply.data_len = length;
 				reply_data = (void *) image_data;
+				free_reply_data = TRUE;
 				break;
 
 			case ZOOCAM_SAVE_FRAME:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_SAVE_FRAME()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_SAVE_FRAME()\n", rname); fflush(logfile);
 				if (request.data_len < sizeof(FILE_SAVE_PARMS)) {
+					fprintf(logfile, "%s: data_len < sizeof(FILE_SAVE_PARMS). Skipping save.\n", rname); fflush(logfile);
 					reply.rc = 1;
 				} else {
 					FILE_SAVE_PARMS *parms;
@@ -227,8 +251,9 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				break;
 
 			case ZOOCAM_SAVE_ALL:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_SAVE_ALL()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_SAVE_ALL()\n", rname); fflush(logfile);
 				if (request.data_len < sizeof(FILE_SAVE_PARMS)) {
+					fprintf(logfile, "%s: data_len < sizeof(FILE_SAVE_PARMS). Skipping save.\n", rname); fflush(logfile);
 					reply.rc = 1;
 				} else {
 					FILE_SAVE_PARMS *parms;
@@ -238,20 +263,21 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				break;
 
 			case ZOOCAM_ARM:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_TRIGGER()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_TRIGGER(%d)\n", rname, request.option); fflush(logfile);
 				reply.rc = Camera_Arm(NULL, request.option);
 				break;
 
 			case ZOOCAM_GET_TRIGGER_MODE:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_GET_TRIGGER_MODE()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_GET_TRIGGER_MODE()\n", rname); fflush(logfile);
 				reply.rc = Camera_GetTriggerMode(NULL, &trigger_info);
 				reply.data_len = sizeof(trigger_info);
 				reply_data = (void *) &trigger_info;
 				break;
 
 			case ZOOCAM_SET_TRIGGER_MODE:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_SET_TRIGGER_MODE()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_SET_TRIGGER_MODE(%d)\n", rname, request.option); fflush(logfile);
 				if (request.data_len < sizeof(TRIGGER_INFO)) {
+					fprintf(logfile, "%s: data_len < sizeof(TRIGGER_INFO). Setting to zeros.\n", rname); fflush(logfile);
 					memset(&trigger_info, 0, sizeof(trigger_info));
 				} else {
 					memcpy(&trigger_info, received_data, sizeof(trigger_info));
@@ -262,67 +288,67 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				break;
 
 			case ZOOCAM_TRIGGER:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_TRIGGER()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_TRIGGER()\n", rname); fflush(logfile);
 				reply.rc = Camera_Trigger(NULL);
 				break;
 
 			case ZOOCAM_RING_GET_INFO:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_RING_GET_INFO()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_RING_GET_INFO()\n", rname); fflush(logfile);
 				reply.rc = Remote_Ring_Actions(RING_GET_INFO, 0, &ring_info);
 				reply.data_len   = sizeof(ring_info);
 				reply_data = (void *) &ring_info;
 				break;
 				
 			case ZOOCAM_RING_GET_SIZE:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_RING_GET_SIZE()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_RING_GET_SIZE()\n", rname); fflush(logfile);
 				reply.rc = Remote_Ring_Actions(RING_GET_SIZE, 0, NULL);
 				break;
 
 			case ZOOCAM_RING_SET_SIZE:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_RING_SET_SIZE(%d)\n", request.option);	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_RING_SET_SIZE(%d)\n", rname, request.option); fflush(logfile);
 				reply.rc = Remote_Ring_Actions(RING_SET_SIZE, request.option, NULL);
 				break;
 
 			case ZOOCAM_RING_RESET_COUNT:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_RING_RESET_COUNT\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_RING_RESET_COUNT\n", rname); fflush(logfile);
 				Camera_ResetRingCounters(NULL);
 				break;
 				
 			case ZOOCAM_RING_GET_FRAME_CNT:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_RING_GET_FRAME_CNT()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_RING_GET_FRAME_CNT()\n", rname); fflush(logfile);
 				reply.rc = Remote_Ring_Actions(RING_GET_ACTIVE_CNT, 0, NULL);
 				break;
 
 			case ZOOCAM_BURST_ARM:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_BURST_ARM()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_BURST_ARM()\n", rname); fflush(logfile);
 				Burst_Actions(BURST_ARM, 0, &reply.rc);			/* Arm the burst */
 				break;
 
 			case ZOOCAM_BURST_ABORT:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_BURST_ABORT()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_BURST_ABORT()\n", rname); fflush(logfile);
 				Burst_Actions(BURST_ABORT, 0, &reply.rc);		/* Abort existing request */
 				break;
 
 			case ZOOCAM_BURST_STATUS:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_BURST_STATUS()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_BURST_STATUS()\n", rname); fflush(logfile);
 				Burst_Actions(BURST_STATUS, 0, &reply.rc);		/* Query the status */
 				break;
 				
 			case ZOOCAM_BURST_WAIT:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_BURST_WAIT()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_BURST_WAIT(%d)\n", rname, request.option); fflush(logfile);
 				Burst_Actions(BURST_WAIT, request.option, &reply.rc);	/* Wait for stripe to occur */
 				break;
 				
 			/* 0 => off, 1 => on, otherwise no change; returns current on/off BOOL state */
 			case ZOOCAM_LED_SET_STATE:
-				fprintf(stderr, "  ZooCam msg server: ZOOCAM_LED_SET_STATE()\n");	fflush(stderr);
+				fprintf(logfile, "%s: ZOOCAM_LED_SET_STATE(%d)\n", rname, request.option); fflush(logfile);
 				reply.rc = Keith224_Output(request.option);
 				break;
 
 			default:
-				fprintf(stderr, "ERROR: ZooCam server message received (%d) that was not recognized.\n"
+				fprintf(logfile, "ERROR: ZooCam server message received (%d) that was not recognized.\n"
 						  "       Will be ignored with rc=-1 return code.\n", request.msg);
-				fflush(stderr);
+			 fflush(logfile);
 				reply.rc = -1;
 				break;
 		}
@@ -330,10 +356,13 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 		if (received_data != NULL) { free(received_data); received_data = NULL; }
 
 		/* Send the standard response and any associated data */
+		fprintf(logfile, "%s: Standard block return  rc=%d data_len=%d data=%p\n", rname, reply.rc, reply.data_len, reply_data); fflush(logfile);
 		if (SendStandardServerResponse(block, reply, reply_data) != 0) {
-			fprintf(stderr, "ERROR: ZooCam server failed to send response we requested.\n");
-			fflush(stderr);
+			fprintf(logfile, "ERROR: ZooCam server failed to send response we requested.\n");
+		 fflush(logfile);
 		}
+		if (free_reply_data && reply_data != NULL) free(reply_data);
+		fprintf(logfile, "%s: Transaction complete\n", rname); fflush(logfile);
 	}
 
 	EndServerHandler(block);								/* Cleanly exit the server structure always */

@@ -5,7 +5,7 @@
 /* Maximum number of threads that can request a signal when new frame available */
 #define	TL_MAX_SIGNALS				(10)
 #define	TL_MAX_RING_SIZE			(1000)
-#define	TL_IMAGE_ACCESS_TIMEOUT	(200)		/* Never delay for more than 200 ms (ensure 5 fps) for access to image buffers */
+#define	TL_IMAGE_ACCESS_TIMEOUT	(200)			/* Never delay for more than 200 ms (ensure 5 fps) for access to image buffers */
 
 #define	TL_CAMERA_MAGIC	0x8A46
 
@@ -19,7 +19,7 @@ typedef struct _TL_IMAGE {
 	int imageID;										/* Unique ID of image (# since start) */
 	unsigned short *raw;								/* Buffer with the raw data		*/
 	double camera_time;								/* Camera pixel clock timestamp	*/
-	time_t timestamp;									/* time() value						*/
+	__time64_t timestamp;							/* time() value						*/
 	SYSTEMTIME system_time;							/* Include millisecond time		*/
 	double dB_gain;									/* Master gain in dB					*/
 	double ms_expose;									/* ms exposure (also us_expose)	*/
@@ -34,7 +34,7 @@ typedef struct _TL_RAW_FILE_HEADER {
 	int major_version, minor_version;	/* Header version (currently 1.0)							*/
 	double ms_expose;							/* Exposure time in ms											*/
 	double dB_gain;							/* Gain in dB for camera (RGB don't matter)				*/
-	time_t timestamp;							/* time() of image capture (relative Jan 1, 1970)		*/
+	__time64_t timestamp;					/* time() of image capture (relative Jan 1, 1970)		*/
 	double camera_time;						/* Image time based on pixel clock (arbitrary zero)	*/
 	int year, month, day;					/* Date of capture (human readable, 2024.02.29)			*/
 	int hour, min, sec, ms;					/* Time of capture (human readable, 18:00:59.372)		*/
@@ -73,9 +73,18 @@ typedef struct _TL_RAW_FILE_HEADER {
 		float color_correction[9];							/* Color correction matrix			*/
 		float white_balance[9];								/* Default white balance matrix	*/
 
-		int bit_depth;											/* Bit depth							*/
-		int width, height;									/* Image size							*/
+		/* Sensor size information */
+		int sensor_height, sensor_width;					/* Sensor dimensions */
 		double pixel_height_um, pixel_width_um;		/* Pixel size in um					*/
+
+		/* Image information (ROI dependent) */
+		struct {
+			int ulx, uly;										/* Upper left point					*/
+			int lrx, lry;										/* Lower right point					*/
+			int dx, dy;											/* ROI offset from center			*/
+		} roi;
+		int width, height;									/* Image size							*/
+		int bit_depth;											/* Bit depth							*/
 		
 		BOOL bGainControl;									/* Has master gain control?		*/
 		double db_min, db_max;								/* Min/max gain in dB */
@@ -96,6 +105,7 @@ typedef struct _TL_RAW_FILE_HEADER {
 		BOOL IsSensorColor;									/* TRUE color, FALSE monochrome	*/
 		
 		HANDLE image_mutex;									/* Access to modify/use data		*/
+		int suspend_image_processing;						/* If !0, don't process images	*/
 		
 		TRIGGER_INFO trigger;								/* Trigger details					*/
 
@@ -142,6 +152,7 @@ int tl_camera_count;
 /* Functions */
 int TL_Initialize(void);
 int TL_SetDebug(BOOL debug);
+int TL_SetDebugLog(FILE *fdebug);
 int TL_Shutdown(void);
 
 /* Find  initializes structures with minimal resources  */
@@ -152,6 +163,8 @@ TL_CAMERA *TL_FindCamera(char *ID, int *rcode);
 int TL_ForgetCamera(TL_CAMERA *tl);
 int TL_OpenCamera(TL_CAMERA *tl, int nBuf);
 int TL_CloseCamera(TL_CAMERA *tl);
+int TL_SetROIMode(TL_CAMERA *tl, int mode);
+int TL_SetROI(TL_CAMERA *tl, int ulx, int uly, int lrx, int lry);
 
 int TL_GetCameraName(TL_CAMERA *tl, char *name, size_t length);
 int TL_SetCameraName(TL_CAMERA *tl, char *name);
