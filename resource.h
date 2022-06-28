@@ -37,6 +37,7 @@
 #define IDT_COMPILE_VERSION             1999
 #define IDC_STATIC_ABOUT_COMPANY        2000
 #define IDC_STATIC_ABOUT_APPNAME        2001
+#define IDC_GPIB                        2002
 #define IDC_DISPLAY                     2003
 #define IDC_LIVE                        2004
 #define IDB_CAPTURE                     2006
@@ -180,21 +181,26 @@
 #define IDB_ROI                         2131
 #define IDB_FULL_FRAME                  2131
 #define IDT_ROI_INFO                    2132
-#define IDB_HALF_FRAME                  2132
-#define IDB_QUARTER_FRAME               2133
-#define IDB_EIGHTH_FRAME                2134
-#define IDB_SIXTEENTH_FRAME             2135
-#define IDB_TINY                        2136
-#define IDV_WIDTH                       2137
-#define IDV_HEIGHT                      2138
-#define IDV_X_OFFSET                    2139
-#define IDV_Y_OFFSET                    2140
-#define IDS_YMIN                        2141
-#define IDS_XMIN                        2142
-#define IDS_XRANGE                      2143
-#define IDS_YRANGE                      2144
-#define ID_SETROI                       2145
-#define IDC_GPIB                        2401
+#define IDB_RES_1                       2132
+#define IDB_RES_2                       2133
+#define IDB_RES_3                       2134
+#define IDB_RES_4                       2135
+#define IDB_RES_5                       2136
+#define IDB_RES_6                       2137
+#define IDB_RES_7                       2138
+#define IDB_RES_8                       2139
+#define IDB_RES_9                       2140
+#define IDV_WIDTH                       2141
+#define IDV_HEIGHT                      2142
+#define IDV_X_OFFSET                    2143
+#define IDV_Y_OFFSET                    2144
+#define IDS_YMIN                        2145
+#define IDS_XMIN                        2146
+#define IDS_XRANGE                      2147
+#define IDS_YRANGE                      2148
+#define ID_SETROI                       2149
+#define IDC_BUTTON2                     2150
+#define IDB_CENTER_CROSSHAIR            2150
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -204,7 +210,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        146
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2146
+#define _APS_NEXT_CONTROL_VALUE         2151
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

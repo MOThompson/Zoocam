@@ -165,11 +165,6 @@ static void TL_ImageThread(void *arglist);
 static HINSTANCE hInstance=NULL;
 static HWND float_image_hwnd;										/* Handle to free-floating image window */
 
-/* Structure returning values from ROIDlgProc */
-static struct {
-	int ulx, uly, lrx, lry;
-} setroi;
-
 /* This list must match order of radio buttons in resources.h (get index of stack) */
 static int ColorCorrectionModes[] = { COLOR_DISABLE, COLOR_ENABLE, COLOR_BG40, COLOR_HQ, COLOR_AUTO_IR };
 #define	N_COLOR_MODES	sizeof(ColorCorrectionModes)/sizeof(*ColorCorrectionModes)
@@ -2135,27 +2130,17 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					
 				case IDB_ROI:
 					if ( wnd != NULL && wnd->Camera.driver == TL && wnd->Camera.details != NULL) {
-						TL_CAMERA *tl;
-						tl = (TL_CAMERA *) wnd->Camera.details;
-
 						if (DialogBoxParam(hInstance, "IDD_ROI", HWND_DESKTOP, (DLGPROC) ROIDlgProc, (LPARAM) wnd) == IDOK) {
-#if 0
-							for (i=0; i<5 && TL_Process_Image_Thread_Active; i++) {
-								fprintf(stderr, "[%s] [%d] Aborting TL_Image_Thread.  Abort=%d  Active=%d\n", rname, i, TL_Process_Image_Thread_Abort, TL_Process_Image_Thread_Active); fflush(stderr);
-								TL_Process_Image_Thread_Abort = TRUE;	
-								SetEvent(TL_Process_Image_Thread_Trigger);	/* Re-trigger */
-								Sleep(100);
-							}
-							if (i >= 5) { fprintf(stderr, "[%s] Failed to see processing thread terminate\n", rname); fflush(stderr); }
-							_beginthread(TL_ImageThread, 0, (void *) tl);
-#else
-							TL_SetROI(tl, setroi.ulx, setroi.uly, setroi.lrx, setroi.lry);
-#endif
+							TL_CAMERA *tl;
+							tl = (TL_CAMERA *) wnd->Camera.details;		
+							/* Update the information display */
 							sprintf_s(szBuf, sizeof(szBuf), "%dx%d @ (%d,%d)", tl->width, tl->height, tl->roi.dx, tl->roi.dy);
 							SetDlgItemText(hdlg, IDT_ROI_INFO, szBuf);
-						}
-					}
 
+						}
+					} else {
+						Beep(300,200);
+					}
 					rcode = TRUE; break;
 					
 				case IDB_CAMERA_DETAILS:
@@ -2619,7 +2604,7 @@ BOOL CALLBACK AutoSaveInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPa
 /* ===========================================================================
 BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 =========================================================================== */
-#define	WMP_SET_ROI				(WM_APP+1)
+#define	WMP_SET_KNOWN			(WM_APP+1)
 #define	WMP_UPDATE_LIMITS		(WM_APP+2)
 
 BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -2627,6 +2612,7 @@ BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 	WND_INFO *wnd;
 	int i, width, height, ixoff, iyoff, wID, wNotifyCode, rcode;
+	int ulx, uly, lrx, lry, min_width, min_height;
 	char szBuf[256];
 	TL_CAMERA *tl;
 
@@ -2674,32 +2660,53 @@ BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			rcode = TRUE; break;
 
 		/* Set one of the default value sets */
-		case WMP_SET_ROI:
+		case WMP_SET_KNOWN:
 			static struct { 
 				int width, height;				/* Pixel start and width/height (will be centered) */
-				int ulx, uly, lrx, lry;			/* Actual positions of corners */
-				double fps_max;					/* Measured maximum frame rate */
-				int fps_scale;						/* Appropriate value for slider */
 			} roi[] = {
-				{ 1920, 1200,     0,    0, 1919, 1199,  39.68,  40 },
-				{  960,  600,   480,  300, 1439,  899,  75.75,  75 },
-				{  480,  302,   720,  448, 1199,  751, 137.35, 150 },
-				{  240,  152,   840,  524, 1079,  675, 235.85, 250 },
-				{  120,   80,   900,  560, 1019,  639, 357.10, 400 },
-				{   92,   40,   912,  580, 1003,  619, 499.97, 500 } };
+				{ 1920, 1200 },		/* Full frame */
+				{ 1600, 1200 },		/* UXGA   */
+				{ 1280, 1024 },		/* SXGA   */
+				{ 1024,  768 },		/* XGA    */
+				{  800,  600 },		/* SVGA   */
+				{  640,  480 },		/* VGA    */
+				{  400,  300 },		/* QSVGA  */
+				{  320,  240 },		/* QVGA   */
+				{  160,  120 },		/* QQVGA  */
+				{   92,   60 }			/* Tiny   */
+			};
 #define	N_ROI	(sizeof(roi)/sizeof(*roi))
-
 				i = max(0, min(N_ROI-1, (int) lParam));
-				setroi.ulx = roi[i].ulx;	setroi.uly = roi[i].uly;
-				setroi.lrx = roi[i].lrx;	setroi.lry = roi[i].lry;
-				EndDialog(hdlg, IDOK);
+				SetDlgItemInt(hdlg, IDV_WIDTH, roi[i].width, FALSE);
+				SetDlgItemInt(hdlg, IDV_HEIGHT, roi[i].height, FALSE);
+				SetDlgItemInt(hdlg, IDV_X_OFFSET, 0, TRUE);
+				SetDlgItemInt(hdlg, IDV_Y_OFFSET, 0, TRUE);
+				SendMessage(hdlg, WMP_UPDATE_LIMITS, 0, 0);
 				rcode = TRUE; break;
 
 		case WMP_UPDATE_LIMITS:
-			width = max(72, min(tl->sensor_width, GetDlgItemIntEx(hdlg, IDV_WIDTH)));
-			height = max(4, min(tl->sensor_height, GetDlgItemIntEx(hdlg, IDV_HEIGHT)));
+			min_width  = tl->roi.lr_min.x-tl->roi.ul_min.x;		/* minimums set smallest size */
+			min_height = tl->roi.lr_min.y-tl->roi.ul_min.y;
+
+			/* Get and validate the width */
+			width = GetDlgItemIntEx(hdlg, IDV_WIDTH);
+			if (width < min_width || width > tl->sensor_width) {
+				width  = max(min_width,  min(tl->sensor_width,  width));
+				SetDlgItemInt(hdlg, IDV_WIDTH, width, FALSE);
+			}
+
+			/* Get and validate the height */
+			height = GetDlgItemIntEx(hdlg, IDV_HEIGHT);
+			if (height < min_height || height > tl->sensor_height) {
+				height = max(min_height, min(tl->sensor_height, GetDlgItemIntEx(hdlg, IDV_HEIGHT)));
+				SetDlgItemInt(hdlg, IDV_HEIGHT, height, FALSE);
+			}
 
 			/* Fill in text limits for offset */
+			sprintf_s(szBuf, sizeof(szBuf), "minimum %d", min_width);
+			SetDlgItemText(hdlg, IDS_XMIN, szBuf);
+			sprintf_s(szBuf, sizeof(szBuf), "minimum %d", min_height);
+			SetDlgItemText(hdlg, IDS_YMIN, szBuf);
 			sprintf_s(szBuf, sizeof(szBuf), "%d < x < %d", -(tl->sensor_width-width)/2, (tl->sensor_width-width)/2);
 			SetDlgItemText(hdlg, IDS_XRANGE, szBuf);
 			sprintf_s(szBuf, sizeof(szBuf), "%d < y < %d", -(tl->sensor_height-height)/2, (tl->sensor_height-height)/2);
@@ -2712,7 +2719,7 @@ BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				SetDlgItemInt(hdlg, IDV_X_OFFSET, ixoff, TRUE);
 			}
 			iyoff = GetDlgItemIntEx(hdlg, IDV_Y_OFFSET);
-			if (abs(ixoff) > (tl->sensor_height-height)/2) {
+			if (abs(iyoff) > (tl->sensor_height-height)/2) {
 				iyoff = (iyoff < 0) ? -(tl->sensor_height-height)/2 : (tl->sensor_height-height)/2 ;
 				SetDlgItemInt(hdlg, IDV_Y_OFFSET, iyoff, TRUE);
 			}
@@ -2742,61 +2749,43 @@ BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					height = GetDlgItemIntEx(hdlg, IDV_HEIGHT);
 					ixoff  = GetDlgItemIntEx(hdlg, IDV_X_OFFSET);
 					iyoff  = GetDlgItemIntEx(hdlg, IDV_Y_OFFSET);
-					setroi.ulx = (tl->sensor_width  - width)  / 2 + ixoff;
-					setroi.uly = (tl->sensor_height - height) / 2 + iyoff;
-					setroi.lrx = setroi.ulx + width  - 1;
-					setroi.lry = setroi.uly + height - 1;
+					ulx = (tl->sensor_width  - width)  / 2 + ixoff;
+					uly = (tl->sensor_height - height) / 2 + iyoff;
+					lrx = ulx + width  - 1;
+					lry = uly + height - 1;
+					TL_SetROI(tl, ulx, uly, lrx, lry);
 					EndDialog(hdlg, IDOK);
 					rcode = TRUE; break;
 
+				/* The UPDATE_LIMITS will verify all values */
 				case IDV_WIDTH:
-					if (EN_KILLFOCUS == wNotifyCode) {
-						width = max(72, min(tl->sensor_width, GetDlgItemIntEx(hdlg, wID)));
-						SetDlgItemInt(hdlg, wID, width, FALSE);
-						SendMessage(hdlg, WMP_UPDATE_LIMITS, 0, 0);
-					}
+				case IDV_HEIGHT:
+				case IDV_X_OFFSET:
+				case IDV_Y_OFFSET:
+					if (EN_KILLFOCUS == wNotifyCode) SendMessage(hdlg, WMP_UPDATE_LIMITS, 0, 0);
 					rcode = TRUE; break;
 					
-				case IDV_HEIGHT:
-					if (EN_KILLFOCUS == wNotifyCode) {
-						height = max(4, min(tl->sensor_height, GetDlgItemIntEx(hdlg, wID)));
-						SetDlgItemInt(hdlg, wID, height, FALSE);
-						SendMessage(hdlg, WMP_UPDATE_LIMITS, 0, 0);
-					}
-					rcode = TRUE; break;
-
-				case IDV_X_OFFSET:
-					if (EN_KILLFOCUS == wNotifyCode) {
-						width = GetDlgItemIntEx(hdlg, IDV_WIDTH);
-						ixoff = GetDlgItemIntEx(hdlg, wID);
-						if (ixoff < -(tl->sensor_width-width)/2) ixoff = -(tl->sensor_width-width)/2;
-						if (ixoff >  (tl->sensor_width-width)/2) ixoff =  (tl->sensor_width-width)/2;
-						SetDlgItemInt(hdlg, wID, ixoff, TRUE);
-					}
-					rcode = TRUE; break;
-
-				case IDV_Y_OFFSET:
-					if (EN_KILLFOCUS == wNotifyCode) {
-						height = GetDlgItemIntEx(hdlg, IDV_HEIGHT);
-						iyoff = GetDlgItemIntEx(hdlg, wID);
-						if (iyoff < -(tl->sensor_height-height)/2) iyoff = -(tl->sensor_height-height)/2;
-						if (iyoff >  (tl->sensor_height-height)/2) iyoff =  (tl->sensor_height-height)/2;
-						SetDlgItemInt(hdlg, wID, iyoff, TRUE);
-					}
+				/* Set the offset so it will center the current crosshair position */
+				case IDB_CENTER_CROSSHAIR:
+					ixoff = (int) (tl->roi.dx + (wnd->cursor_posn.x-0.5)*tl->width  + 0.5);
+					iyoff = (int) (tl->roi.dy + (wnd->cursor_posn.y-0.5)*tl->height + 0.5);
+					SetDlgItemInt(hdlg, IDV_X_OFFSET, ixoff, TRUE);
+					SetDlgItemInt(hdlg, IDV_Y_OFFSET, iyoff, TRUE);
+					SendMessage(hdlg, WMP_UPDATE_LIMITS, 0, 0);
 					rcode = TRUE; break;
 
 				case IDB_FULL_FRAME:
-					SendMessage(hdlg, WMP_SET_ROI, 0, 0); rcode = TRUE; break;
-				case IDB_HALF_FRAME:
-					SendMessage(hdlg, WMP_SET_ROI, 0, 1); rcode = TRUE; break;
-				case IDB_QUARTER_FRAME:
-					SendMessage(hdlg, WMP_SET_ROI, 0, 2); rcode = TRUE; break;
-				case IDB_EIGHTH_FRAME:
-					SendMessage(hdlg, WMP_SET_ROI, 0, 3); rcode = TRUE; break;
-				case IDB_SIXTEENTH_FRAME:
-					SendMessage(hdlg, WMP_SET_ROI, 0, 4); rcode = TRUE; break;
-				case IDB_TINY:
-					SendMessage(hdlg, WMP_SET_ROI, 0, 5); rcode = TRUE; break;
+				case IDB_RES_1:
+				case IDB_RES_2:
+				case IDB_RES_3:
+				case IDB_RES_4:
+				case IDB_RES_5:
+				case IDB_RES_6:
+				case IDB_RES_7:
+				case IDB_RES_8:
+				case IDB_RES_9:
+					SendMessage(hdlg, WMP_SET_KNOWN, 0, wID-IDB_FULL_FRAME); rcode = TRUE; break;
+					rcode = TRUE; break;
 					
 				default:
 					printf("Unused wID in %s: %d\n", rname, wID); fflush(stdout);

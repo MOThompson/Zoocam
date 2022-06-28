@@ -82,6 +82,9 @@ typedef struct _TL_RAW_FILE_HEADER {
 			int ulx, uly;										/* Upper left point					*/
 			int lrx, lry;										/* Lower right point					*/
 			int dx, dy;											/* ROI offset from center			*/
+			struct {
+				int x,y;
+			} ul_min, ul_max, lr_min, lr_max;
 		} roi;
 		int width, height;									/* Image size							*/
 		int bit_depth;											/* Bit depth							*/

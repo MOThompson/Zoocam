@@ -515,6 +515,7 @@ int TL_SetROI(TL_CAMERA *tl, int x0, int y0, int x1, int y1) {
 
 	/* Query the actual ROI and image width/height.  Resize buffers if needed */
 	tl_camera_get_roi(handle, &tl->roi.ulx, &tl->roi.uly, &tl->roi.lrx, &tl->roi.lry);
+	tl_camera_get_roi_range(handle, &tl->roi.ul_min.x, &tl->roi.ul_min.y, &tl->roi.lr_min.x, &tl->roi.lr_min.y, &tl->roi.ul_max.x, &tl->roi.ul_max.y, &tl->roi.lr_max.x, &tl->roi.lr_max.y);
 	tl->roi.dx = (int) ((tl->roi.ulx+tl->roi.lrx-(tl->sensor_width-1))  / 2.0);
 	tl->roi.dy = (int) ((tl->roi.uly+tl->roi.lry-(tl->sensor_height-1)) / 2.0);
 
@@ -675,6 +676,7 @@ int TL_OpenCamera(TL_CAMERA *tl, int nBuf) {
 	/* Go full-frame and generate buffers */
 	tl_camera_set_roi(handle, 0, 0, tl->sensor_width, tl->sensor_height);
 	tl_camera_get_roi(handle, &tl->roi.ulx, &tl->roi.uly, &tl->roi.lrx, &tl->roi.lry);
+	tl_camera_get_roi_range(handle, &tl->roi.ul_min.x, &tl->roi.ul_min.y, &tl->roi.lr_min.x, &tl->roi.lr_min.y, &tl->roi.ul_max.x, &tl->roi.ul_max.y, &tl->roi.lr_max.x, &tl->roi.lr_max.y);
 	tl->roi.dx = (int) ((tl->roi.ulx+tl->roi.lrx-(tl->sensor_width-1))  / 2.0);
 	tl->roi.dy = (int) ((tl->roi.uly+tl->roi.lry-(tl->sensor_height-1)) / 2.0);
 
