@@ -773,11 +773,12 @@ double DCx_SetFPSControl(DCX_CAMERA *dcx, double fps) {
 }
 
 /* ===========================================================================
+-- Query the set frame rate and the estimate actual rate
 -- Query estimated frame rate based on image acquisition timestamps
 --
--- Usage: double DCx_GetFPSActual(DCX_CAMERA *dcx);
+-- Usage: double DCx_GetFPSControl(DCX_CAMERA *dcx);
 --
--- Inputs: camera - an opened DCx camera
+-- Inputs: dcx - an opened DCx camera
 --
 -- Output: none
 --
@@ -796,11 +797,11 @@ double DCx_GetFPSControl(DCX_CAMERA *dcx) {
 }
 
 /* ===========================================================================
--- Query actual frame rate based on image acquisition timestamps
+-- Query actual frame rate from the camera
 --
 -- Usage: double DCx_GetFPSActual(DCX_CAMERA *dcx);
 --
--- Inputs: camera - an opened DCx camera
+-- Inputs: dcx - an opened DCx camera
 --
 -- Output: none
 --
@@ -815,6 +816,54 @@ double DCx_GetFPSActual(DCX_CAMERA *dcx) {
 
 	is_GetFramesPerSecond(dcx->hCam, &fps);
 	return fps;
+}
+
+/* ===========================================================================
+-- Query the framerate limit (if implemented)
+--
+-- Usage: double DCx_GetFPSLimit(DCX_CAMERA *dcx);
+--
+-- Inputs: dcx - an opened DCx camera
+--
+-- Output: none
+--
+-- Return: Returns 0 if driver cannot limit FPS, or current vaiue 
+--                 <0 on errors
+=========================================================================== */
+double DCx_GetFPSLimit(DCX_CAMERA *dcx) {
+	static char *rname = "DCx_GetFPSLimit";
+
+	/* Make sure we are alive and the camera is connected (open) */
+	if (dcx == NULL || dcx->hCam <= 0) return -1.0;
+
+	/* Return - not implemented */
+	return 0;
+}
+
+/* ===========================================================================
+-- Set the framerate limit (if implemented)
+--
+-- Usage: double DCx_SetFPSLimit(DCX_CAMERA *dcx, double fps);
+--
+-- Inputs: dcx - an opened DCx camera
+--         fps - limit to saving of frames to buffers
+--
+-- Output: none
+--
+-- Return: Returns 0 if driver cannot limit FPS, or vaiue inserted
+--                <0 on errors
+--
+-- Note: This is different from setting the framerate of the camera.
+--       Image processing skipped for images arriving <1/fps since previous
+=========================================================================== */
+double DCx_SetFPSLimit(DCX_CAMERA *dcx, double fps) {
+	static char *rname = "DCx_SetFPSLimit";
+
+	/* Make sure we are alive and the camera is connected (open) */
+	if (dcx == NULL || dcx->hCam <= 0) return -1.0;
+
+	/* Return - not implemented */
+	return 0;
 }
 
 

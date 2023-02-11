@@ -179,6 +179,7 @@ typedef struct _WND_INFO {
 	int height, width;						/* Image height and width in pixels */
 	double fps_min, fps_max;				/* Minimum and maximum frame rates from drivers */
 	double has_fps_control;					/* Does this camera have fps control (from drivers) */
+	double framerate_limit;					/* Limiting framerate for saving to ring buffer */
 	BOOL bColor;								/* Sensor is color */
 
 	/* Cross-hair focus of windows */	
@@ -186,6 +187,9 @@ typedef struct _WND_INFO {
 		double x,y;								/* Fraction of [0,1) the way across image for the cursor (in screen coordinates) */
 		BOOL fullwidth;						/* Cursor should extend over full range of image */
 	} cursor_posn;
+	struct {										/* Values at the cursor position (of displayed image) */
+		int r,g,b;
+	} cursor_pixel;
 
 	struct {										/* Autosave files in external and SS modes? */
 		BOOL enable;							/* Enabled for autosave? */

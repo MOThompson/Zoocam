@@ -504,9 +504,19 @@ int SendSocketMsg(SOCKET socket, CS_MSG reply, void *data) {
 	reply.data_len = htonl(reply.data_len);
 	reply.crc32    = htonl(reply.crc32);
 	icnt = send(socket, (char *) &reply, sizeof(reply), 0);
+	if (icnt != sizeof(reply)) {
+		fprintf(stderr, "SendSocketMsg: send() tried to send %d bytes but return was only %d\n", sizeof(reply), icnt);
+		fflush(stderr);
+	}
 
 	/* If there is any additional data to send, do so now */
-	if (isend > 0) icnt = send(socket, data, isend, 0);
+	if (isend > 0) {
+		icnt = send(socket, data, isend, 0);
+		if (icnt != isend) {
+			fprintf(stderr, "SendSocketMsg: send() of additional data tried to send %d bytes but return was only %d\n", isend, icnt);
+			fflush(stderr);
+		}
+	}
 
 	return 0;
 }
@@ -574,41 +584,43 @@ int StandardServerExchange(CLIENT_DATA_BLOCK *block, CS_MSG request, void *send_
 --
 -- Return: 0 if successful, !0 for errors
 --
--- Notes: (1) It is safe to call Init_Sockets() multiple times.  Will simply
---            return 0 if already initialized
---        (2) For WIN32, calls WSAStartup() for socket interfaces and then
+-- Notes: (1) InitSockets() can be called multiple times with no impact
+--        (2) Current ShutdownSockets() does nothing
+--        (3) For WIN32, calls WSAStartup() for socket interfaces and then
 --            WSACleanup() at shutdown.  The WSACleanup() isn't really 
 --            necessary but good to implement to be clean
---        (3) For Linux, sockets are automagically available
+--        (4) For Linux, sockets are automagically available
 =========================================================================== */
 static BOOL Socket_Interface_Initialized = FALSE;
-static sig_atomic_t socket_init_count = 0;
 
-int InitSockets(void) {
+static int InitSockets(void) {
+	static char *rname = "InitSockets";
 
 #ifdef _WIN32
-	if (socket_init_count == 0) {
-		int iResult;
-		WSADATA wsaData;
+	int rc;
+	WSADATA wsaData;
+
+	/* Allow multiple calls with no effect */
+	if (Socket_Interface_Initialized) return 0;
 
 	/* Initialize Winsock. */
-		iResult = WSAStartup( MAKEWORD(2,2), &wsaData );
-		if ( iResult != NO_ERROR ) {
-			fprintf(stderr, "Error at WSAStartup()\n"); fflush(stderr);
-			return 1;
-		}
+	rc = WSAStartup( MAKEWORD(2,2), &wsaData );
+	if ( rc != NO_ERROR ) {
+		fprintf(stderr, "ERROR[%s]: Error at WSAStartup().  rc=%d\n", rname, rc); fflush(stderr);
+		return 1;
 	}
 #endif
 
-	socket_init_count++;				/* Keep track for shutdowns */
+	/* Either we don't have to worry about it (Linux), or is successful */
+	Socket_Interface_Initialized = TRUE;
 	return 0;
 }
 
 /* For moment, this just keeps track of the count.  For Win32, might
  * call WSACleanup() when nothing left needed */
 int ShutdownSockets(void) {
-
-	if (socket_init_count != 0) socket_init_count--;
+	static char *rname = "ShutdownSockets";
+//	WSACleanup();											/* Don't call ... just let occur on program termination */
 	return 0;
 }
 

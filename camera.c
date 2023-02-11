@@ -334,9 +334,10 @@ int Camera_SetGains(WND_INFO *wnd, GAIN_CHANNEL channel, ENTRY_TYPE entry, doubl
 
 
 /* ===========================================================================
--- Reset RGB gains to default values (original when camera opened)
+-- Reset RGB gains to either default color values (original when camera opened)
+-- or values that would be most "neutral" with respect to channel gains
 --
--- Usage: int Camera_ResetGains(WND_INFO *wnd);
+-- Usage: int Camera_ResetGains(WND_INFO *wnd, BOOL rgb);
 --
 -- Inputs: wnd     - handle to the main information structure
 --
@@ -345,7 +346,7 @@ int Camera_SetGains(WND_INFO *wnd, GAIN_CHANNEL channel, ENTRY_TYPE entry, doubl
 -- Return: 0 if successful; otherwise error code
 --           1 ==> camera is not active
 =========================================================================== */
-int Camera_ResetGains(WND_INFO *wnd) {
+int Camera_ResetGains(WND_INFO *wnd, GAIN_RESET_MODE rgb) {
 	static char *rname = "Camera_ResetGains";
 
 	int rc;
@@ -363,7 +364,11 @@ int Camera_ResetGains(WND_INFO *wnd) {
 			DCX_CAMERA *dcx;
 
 			dcx = wnd->dcx;
-			DCx_GetDfltRGBGains(dcx, &master, &red, &green, &blue);
+			if (RGB_GAIN == rgb) {
+				DCx_GetDfltRGBGains(dcx, &master, &red, &green, &blue);
+			} else {
+				master = 10; red = green = blue = 50;
+			}
 			DCx_SetRGBGains(dcx, master, red, green, blue);
 		}
 		break;
@@ -373,8 +378,15 @@ int Camera_ResetGains(WND_INFO *wnd) {
 			TL_CAMERA *camera;
 
 			camera = (TL_CAMERA *) wnd->Camera.details;
-			TL_GetMasterGainInfo(camera, NULL, &master, NULL, NULL);	TL_SetMasterGain(camera, master);
-			TL_GetDfltRGBGains(camera, &red, &green, &blue);			TL_SetRGBGains(camera, red, green, blue);
+			if (RGB_GAIN == rgb) {
+				TL_GetMasterGainInfo(camera, NULL, &master, NULL, NULL);
+				TL_GetDfltRGBGains(camera, &red, &green, &blue);
+			} else {
+				master = 0;
+				red = green = blue = 1.0;
+			}
+			TL_SetMasterGain(camera, master);
+			TL_SetRGBGains(camera, red, green, blue);
 		}
 		break;
 		default:
@@ -574,6 +586,89 @@ double Camera_GetFPSControl(WND_INFO *wnd) {
 
 	return fps;
 }	
+
+/* ===========================================================================
+-- Query the framerate limit (if implemented)
+--
+-- Usage: double Camera_GetFPSLimit(WND_INFO *wnd);
+--
+-- Inputs: wnd - handle to the main information structure
+--
+-- Output: none
+--
+-- Return: Returns 0 if driver cannot limit FPS, or current vaiue 
+--                <0 on errors
+=========================================================================== */
+double Camera_GetFPSLimit(WND_INFO *wnd) {
+	static char *rname = "Camera_GetFPSLimit";
+
+	TL_CAMERA *camera;
+	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
+	double fps;
+
+	/* Make sure we have valid structures and an active camera */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
+	if (wnd == NULL) return 0.0;
+
+	switch (wnd->Camera.driver) {
+		case DCX:
+			dcx = (DCX_CAMERA *) wnd->dcx;
+			fps = DCx_GetFPSLimit(dcx);
+			break;
+		case TL:
+			camera = (TL_CAMERA *) wnd->Camera.details;
+			fps = TL_GetFPSLimit(camera);
+			break;
+		default:
+			fps = 0.0;
+	}
+
+	return fps;
+}
+
+/* ===========================================================================
+-- Set the framerate limit (if implemented)
+--
+-- Usage: double Camera_SetFPSLimit(WND_INFO *wnd, double fps);
+--
+-- Inputs: wnd - handle to the main information structure
+--         fps - limit to saving of frames to buffers
+--
+-- Output: none
+--
+-- Return: Returns 0 if driver cannot limit FPS, or vaiue inserted
+--                <0 on errors
+--
+-- Note: This is different from setting the framerate of the camera.
+--       Image processing skipped for images arriving <1/fps since previous
+=========================================================================== */
+double Camera_SetFPSLimit(WND_INFO *wnd, double fps) {
+	static char *rname = "Camera_SetFPSLimit";
+
+	TL_CAMERA *camera;
+	DCX_CAMERA *dcx;
+	BOOL bServerRequest;
+
+	/* Make sure we have valid structures and an active camera */
+	if (bServerRequest = (wnd == NULL)) wnd = main_wnd;
+	if (wnd == NULL) return 0.0;
+
+	switch (wnd->Camera.driver) {
+		case DCX:
+			dcx = (DCX_CAMERA *) wnd->dcx;
+			fps = DCx_SetFPSLimit(dcx, fps);
+			break;
+		case TL:
+			camera = (TL_CAMERA *) wnd->Camera.details;
+			fps = TL_SetFPSLimit(camera, fps);
+			break;
+		default:
+			fps = 0.0;
+	}
+
+	return fps;
+}
 
 /* ===========================================================================
 -- Set the gamma factor on cameras supporting

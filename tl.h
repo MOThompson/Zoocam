@@ -99,9 +99,13 @@ typedef struct _TL_RAW_FILE_HEADER {
 		
 		BOOL bFrameRateControl;								/* Is framerate control possible	*/
 		double fps_min, fps_max;							/* Min and max frame rate			*/
-		
+		double fps_limit;										/* Limit processing rate of images */
+
 		int clock_Hz;											/* Camera clock frequency (or 0)	*/
 		
+		HIRES_TIMER *timer;									/* Timer to following image time	*/
+		double t_image;										/* Time of last processed image	*/
+
 		int pixel_bytes;										/* Number of bytes per pixel		*/
 		size_t image_bytes;									/* Number of bytes in an image	*/
 		void *color_processor;
@@ -217,6 +221,8 @@ double TL_GetExposure(TL_CAMERA *tl, BOOL bForceQuery);
 double TL_SetFPSControl(TL_CAMERA *tl, double fps);
 double TL_GetFPSControl(TL_CAMERA *tl);
 double TL_GetFPSActual(TL_CAMERA *tl);
+double TL_GetFPSLimit(TL_CAMERA *tl);
+double TL_SetFPSLimit(TL_CAMERA *tl, double fps);
 
 int TL_GetMasterGainInfo(TL_CAMERA *tl, BOOL *bGain, double *db_dflt, double *db_min, double *db_max);
 int TL_SetMasterGain(TL_CAMERA *tl, double dB_gain);

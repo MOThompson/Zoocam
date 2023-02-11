@@ -426,6 +426,10 @@ TL_CAMERA *TL_FindCamera(char *ID, int *rcode) {
 	} else if ( (rc = tl_camera_get_frame_rate_control_value_range(handle, &tl->fps_min, &tl->fps_max)) != 0) {
 		TL_CameraErrMsg(rc, "Error determining min/max frame rate for camera", rname);
 	} 
+	tl->fps_limit = 1000.0;								/* Deal with up to kHz rate */
+
+	tl->timer = HiResTimerCreate();					/* Timer to manage image times  */
+	tl->t_image = -10.0;									/* No image in last 100 seconds */
 
 	if ( (rc = tl_camera_close_camera(tl->handle)) != 0) TL_CameraErrMsg(rc, "Failed to close camera", rname);
 	tl->handle = NULL;
@@ -745,8 +749,8 @@ int TL_GetCameraInfo(TL_CAMERA *tl, CAMERA_INFO *info) {
 --
 -- Usage: int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf);
 --
--- Inputs: camera - a partially completed structure from TL_FindCamera()
---         nBuf   - number of buffers to allocate in the ring (TL_MAX_RING_SIZE)
+-- Inputs: tl   - a partially completed structure from TL_FindCamera()
+--         nBuf - number of buffers to allocate in the ring (TL_MAX_RING_SIZE)
 --
 -- Output: Stops processing for a moment, changes buffers, and restarts
 --
@@ -809,7 +813,7 @@ int TL_SetRingBufferSize(TL_CAMERA *tl, int nBuf) {
 --
 -- Usage: int TL_ResetRingCounters(TL_CAMERA *tl);
 --
--- Inputs: camera - pointer to valid opened camera
+-- Inputs: tl - pointer to valid opened camera
 --
 -- Output: Resets buffers so next image will be 0
 --
@@ -830,8 +834,8 @@ int TL_ResetRingCounters(TL_CAMERA *tl) {
 --
 -- Usage: int TL_CloseCamera(TL_CAMERA *tl);
 --
--- Inputs: camera - pointer to valid opened camera
---                  (if NULL, is a nop returning rc=1)
+-- Inputs: tl - pointer to valid opened camera
+--              (if NULL, is a nop returning rc=1)
 --
 -- Output: Closes camera and releases resources
 --         Camera remains in the list of known cameras however
@@ -901,8 +905,8 @@ int TL_CloseCamera(TL_CAMERA *tl) {
 --
 -- Usage: int TL_ForgetCamera(TL_CAMERA *tl);
 --
--- Inputs: camera - pointer to valid opened camera
---                  (if NULL, is a nop returning rc=1)
+-- Inputs: tl - pointer to valid opened camera
+--              (if NULL, is a nop returning rc=1)
 --
 -- Output: Closes camera, releases resources, and release the structure
 --         Camera no longer will be in the list of known cameras
@@ -930,6 +934,10 @@ int TL_ForgetCamera(TL_CAMERA *tl) {
 			break;
 		}
 	}
+
+	/* Delete the timer associated with this camera */
+	if (tl->timer != NULL) HiResTimerDestroy(tl->timer);
+	tl->timer = NULL;
 
 	/* Finally mark the structure invalid and release the structure itself */
 	tl->magic = 0;
@@ -1066,7 +1074,7 @@ int TL_EnumCameraList(int *pcount, TL_CAMERA **pinfo[]) {
 --
 -- Usage: BOOL TL_IsValidCamera(TL_CAMERA *tl);
 --
--- Inputs: camera - pointer to a TL_CAMERA structure ... hopefully opened
+-- Inputs: tl - pointer to a TL_CAMERA structure ... hopefully opened
 --
 -- Output: none
 --
@@ -1083,7 +1091,7 @@ BOOL TL_IsValidCamera(TL_CAMERA *tl) {
 --
 -- Usage: int TL_AddImageSignal(TL_CAMERA *tl, HANDLE signal);
 --
--- Inputs: camera - valid pointer to an existing opened camera
+-- Inputs: tl     - valid pointer to an existing opened camera
 --         signal - valid handle to an event semaphore
 --
 -- Output: Adds the signal to a list of signals that will be triggered
@@ -1124,7 +1132,7 @@ int TL_AddImageSignal(TL_CAMERA *tl, HANDLE signal) {
 --
 -- Usage: int TL_RemoveImageSignal(TL_CAMERA *tl, HANDLE signal);
 --
--- Inputs: camera - valid pointer to an existing opened camera
+-- Inputs: tl     - valid pointer to an existing opened camera
 --         signal - existing event semaphore signal to be removed
 --
 -- Output: Removes the signal from the list if it is there
@@ -1222,14 +1230,10 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 	} timestamp;
 	char tag[5];
 
-	static HIRES_TIMER *timer = NULL;
-
 /* Immediately increment to have this call's image ID */
 	imageID = image_count++;
 	
 /* Now start rest of the process */
-	if (timer == NULL) timer = HiResTimerCreate();
-
 	timestamp.value = 0;
 	for (i=0; i<metadata_size_in_bytes; i+=8) {
 		memcpy(&dval, metadata+i+4, 4);					/* Make a dval so can handle */
@@ -1257,6 +1261,10 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 	
 	/* Are we "suspended" from processing images */
 	if (tl->suspend_image_processing) return;
+
+	/* And are images coming faster than we want to handle? */
+	if (HiResTimerDelta(tl->timer)-tl->t_image < 1.0/tl->fps_limit) return;
+	tl->t_image = HiResTimerDelta(tl->timer);		/* This is now the last image time */
 
 	/* Take control of the memory buffers */
 	if (WAIT_OBJECT_0 == WaitForSingleObject(tl->image_mutex, TL_IMAGE_ACCESS_TIMEOUT)) {
@@ -1314,7 +1322,7 @@ static void frame_available_callback(void* sender, unsigned short* image_buffer,
 --
 -- Usage: int TL_ProcessRawSeparation(TL_CAMERA *tl, int frame);
 --
--- Inputs: camera - pointer to valid TL_CAMERA
+-- Inputs: tl     - pointer to valid TL_CAMERA
 --         frame  - frame to process from buffers (-1 ==> for most recent)
 --
 -- Output: fills in the ->red, ->green, ->blue buffers in camera
@@ -1379,7 +1387,7 @@ int TL_ProcessRawSeparation(TL_CAMERA *tl, int frame) {
 --
 -- Usage: int TL_ProcessRGB(TL_CAMERA *tl, int frame);
 --
--- Inputs: camera - pointer to valid TL_CAMERA
+-- Inputs: tl     - pointer to valid TL_CAMERA
 --         frame  - frame to process from buffers (-1 ==> for most recent)
 --
 -- Output: fills in the ->rgb24 buffer in camera
@@ -1445,7 +1453,7 @@ int TL_ProcessRGB(TL_CAMERA *tl, int frame) {
 -- 
 -- Usage: BITMAPINFOHEADER *TL_GenerateDIB(TL_CAMERA *tl, int frame, int *rc);
 --
--- Inputs: camera - an opened TL camera
+-- Inputs: tl     - an opened TL camera
 --         frame  - frame to process from buffers (-1 ==> for most recent)
 --         rc     - optional pointer to variable to retrieve specific error codes
 --
@@ -1801,7 +1809,7 @@ int TL_SaveBMPImage(TL_CAMERA *tl, char *path, int frame) {
 -- 
 -- Usage: int TL_SaveRawImage(TL_CAMERA *tl, char *path, int frame);
 --
--- Inputs: camera - an opened TL camera
+-- Inputs: tl     - an opened TL camera
 --         path   - pointer to name of a file to save data (or NULL for query)
 --         frame  - frame to process from buffers (-1 ==> for most recent)
 --
@@ -1955,7 +1963,7 @@ RetryFileOpen:
 -- 
 -- Usage: int TL_RenderFrame(TL_CAMERA *tl, int frame, HWND hwnd);
 --
--- Inputs: camera - an opened TL camera
+-- Inputs: tl     - an opened TL camera
 --         frame  - frame to process from buffers (-1 ==> for most recent)
 --         hwnd   - window to render the bitmap to
 --
@@ -2019,7 +2027,7 @@ int TL_RenderFrame(TL_CAMERA *tl, int frame, HWND hwnd) {
 --
 -- Usage: double TL_GetExposure(TL_CAMERA *tl, BOOL bForceQuery);
 --
--- Inputs: camera      - pointer to valid TL_CAMERA
+-- Inputs: tl          - pointer to valid TL_CAMERA
 --         bForceQuery - if TRUE, will query camera directly to update
 --                       the value in the TL_CAMERA structure.
 --
@@ -2054,7 +2062,7 @@ double TL_GetExposure(TL_CAMERA *tl, BOOL bForceQuery) {
 --
 -- Usage: int TL_GetExposureParms(TL_CAMErA *tl, double *ms_min, double *ms_max, double *ms_inc);
 --
--- Inputs: camera  - pointer to valid TL_CAMERA structure
+-- Inputs: tl      - pointer to valid TL_CAMERA structure
 --         *ms_min - pointer to get minimum allowed exposure time
 --         *ms_max - pointer to get maximum allowed exposure time
 --
@@ -2083,7 +2091,7 @@ int TL_GetExposureParms(TL_CAMERA *tl, double *ms_min, double *ms_max) {
 --
 -- Usage: double TL_SetExposure(TL_CAMERA *tl, double ms_expose);
 --
--- Inputs: camera    - an opened TL camera
+-- Inputs: tl        - an opened TL camera
 --         ms_expose - requested exposure in milliseconds
 --                     set to 0 or negative to just return current value
 --
@@ -2126,8 +2134,8 @@ double TL_SetExposure(TL_CAMERA *tl, double ms_expose) {
 --
 -- Usage: double TL_SetFPSControl(TL_CAMERA *tl, double fps);
 --
--- Inputs: camera - an opened TL camera
---         fps    - desired fps rate
+-- Inputs: tl  - an opened TL camera
+--         fps - desired fps rate
 --
 -- Output: none
 --
@@ -2164,7 +2172,7 @@ double TL_SetFPSControl(TL_CAMERA *tl, double fps) {
 --
 -- Usage: double TL_GetFPSControl(TL_CAMERA *tl);
 --
--- Inputs: camera - an opened TL camera
+-- Inputs: tl - an opened TL camera
 --
 -- Output: none
 --
@@ -2190,11 +2198,11 @@ double TL_GetFPSControl(TL_CAMERA *tl) {
 }
 
 /* ===========================================================================
--- Query estimated frame rate based on image acquisition timestamps
+-- Query actual frame rate from the camera
 --
 -- Usage: double TL_GetFPSActual(TL_CAMERA *tl);
 --
--- Inputs: camera - an opened TL camera
+-- Inputs: tl - an opened TL camera
 --
 -- Output: none
 --
@@ -2218,12 +2226,63 @@ double TL_GetFPSActual(TL_CAMERA *tl) {
 }
 
 /* ===========================================================================
+-- Query the framerate limit (if implemented)
+--
+-- Usage: double TL_GetFPSLimit(TL_CAMERA *tl);
+--
+-- Inputs: tl - an opened TL camera
+--
+-- Output: none
+--
+-- Return: Returns 0 if driver cannot limit FPS, or current vaiue 
+--                 <0 on errors
+=========================================================================== */
+double TL_GetFPSLimit(TL_CAMERA *tl) {
+	static char *rname = "TL_GetFPSLimit";
+
+	/* Make sure we are alive and the camera is connected (open) */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return -1.0;
+
+	/* Return value */
+	return tl->fps_limit;
+}
+
+/* ===========================================================================
+-- Set the framerate limit (if implemented)
+--
+-- Usage: double TL_SetFPSLimit(TL_CAMERA *tl, double fps);
+--
+-- Inputs: tl  - an opened TL camera
+--         fps - limit to saving of frames to buffers
+--
+-- Output: none
+--
+-- Return: Returns 0 if driver cannot limit FPS, or vaiue inserted
+--                <0 on errors
+--
+-- Note: This is different from setting the framerate of the camera.
+--       Image processing skipped for images arriving <1/fps since previous
+=========================================================================== */
+double TL_SetFPSLimit(TL_CAMERA *tl, double fps) {
+	static char *rname = "TL_SetFPSLimit";
+
+	/* Make sure we are alive and the camera is connected (open) */
+	if (tl == NULL || tl->magic != TL_CAMERA_MAGIC) return -1.0;
+
+	/* Use value if it is anything reasonable */
+	if (fps < 0 || fps < 1000000) tl->fps_limit = fps;
+
+	/* Return value */
+	return tl->fps_limit;
+}
+
+/* ===========================================================================
 -- Set the master gain for the camera (in dB)
 --
 -- Usage: int TL_SetMasterGain(TL_CAMERA *tl, double dB_gain);
 --
--- Inputs: camera      - pointer to valid TL_CAMERA
---         db_Gain     - desired gain in dB
+-- Inputs: tl      - pointer to valid TL_CAMERA
+--         db_Gain - desired gain in dB
 --
 -- Output: sets camera within range
 --
@@ -2271,7 +2330,7 @@ int TL_SetMasterGain(TL_CAMERA *tl, double dB_gain) {
 --
 -- Usage: double TL_GetMasterGain(TL_CAMERA *tl);
 --
--- Inputs: camera      - pointer to valid TL_CAMERA
+-- Inputs: tl - pointer to valid TL_CAMERA
 --
 -- Output: none
 --
@@ -2311,7 +2370,7 @@ int TL_GetMasterGain(TL_CAMERA *tl, double *db) {
 --
 -- Usage: int TL_GetMasterGainInfo(TL_CAMERA *tl, BOOL *bGain, double *db_dflt, double *db_min, double *db_max);
 --
--- Inputs: camera  - pointer to valid TL_CAMERA
+-- Inputs: tl      - pointer to valid TL_CAMERA
 --         bGain   - pointer for flag whether the camera implements gain
 --         db_dflt - pointer for default gain setting (dB)
 --         db_min  - pointer for lower limit for gain settings (dB)
@@ -2354,7 +2413,7 @@ int TL_GetMasterGainInfo(TL_CAMERA *tl, BOOL *bGain, double *db_dflt, double *db
 --
 -- Usage: double TL_GetRGBGains(TL_CAMERA *tl, double *red, double *green, double *blue);
 --
--- Inputs: camera - pointer to valid TL_CAMERA
+-- Inputs: tl - pointer to valid TL_CAMERA
 --         red, green, blue - pointers to variable to receive gain values
 --
 -- Output: none
@@ -2405,7 +2464,7 @@ int TL_GetRGBGains(TL_CAMERA *tl, double *red, double *green, double *blue) {
 --
 -- Usage: double TL_GetDfltRGBGains(TL_CAMERA *tl, double *red, double *green, double *blue);
 --
--- Inputs: camera - pointer to valid TL_CAMERA
+-- Inputs: tl - pointer to valid TL_CAMERA
 --         red, green, blue - pointers to variable to receive gain values
 --
 -- Output: none
@@ -2439,7 +2498,7 @@ int TL_GetDfltRGBGains(TL_CAMERA *tl, double *red, double *green, double *blue) 
 --
 -- Usage: double TL_SetRGBGains(TL_CAMERA *tl, double red, double green, double blue);
 --
--- Inputs: camera - pointer to valid TL_CAMERA
+-- Inputs: tl - pointer to valid TL_CAMERA
 --         red, green, blue - gain values
 --            if TL_IGNORE_GAIN is used, the channel gain will be left unchanged
 --
@@ -2538,7 +2597,7 @@ TRIG_ARM_ACTION TL_Arm(TL_CAMERA *tl, TRIG_ARM_ACTION action) {
 --
 -- Usage: int TL_Trigger(TL_CAMERA *tl);
 --
--- Inputs: camera - structure associated with a camera
+-- Inputs: tl - structure associated with a camera
 --
 -- Output: Triggers camera immediately if in an armed state
 --

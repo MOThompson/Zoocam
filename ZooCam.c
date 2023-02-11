@@ -192,12 +192,13 @@ int AllCameraControls[] = {
 	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
 	IDR_TRIG_POS, IDR_TRIG_NEG, IDB_BURST_ARM,
 	IDB_SAVE, IDB_SAVE_BURST,
-	IDV_RING_SIZE, IDB_RESET_RING, IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
+	IDV_RING_SIZE, IDB_RESET_RING, IDS_FRAMERATE, IDV_FRAMERATE, IDV_FRAMERATE_LIMIT, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDB_SHARPNESS_DIALOG, IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDR_COLOR_DISABLE, IDR_COLOR_ENABLE, IDR_COLOR_BG40, IDR_COLOR_HQ, IDR_COLOR_AUTO_IR, 
 	IDG_COLOR_CORRECTION, IDV_COLOR_CORRECT_FACTOR, IDS_TEXT_0,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
-	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN, IDB_RESET_GAINS,
+	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN, 
+	IDB_RESET_GAINS_RGB, IDB_RESET_GAINS_NEUTRAL,
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
 	IDC_SHOW_INTENSITY, IDC_SHOW_RGB, IDC_SHOW_SUM, IDC_TRACK_CENTROID,
 	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
@@ -213,12 +214,13 @@ int CameraOffControls[] = {
 	IDR_TRIG_POS, IDR_TRIG_NEG, IDB_BURST_ARM,
 	IDR_TRIG_FREERUN, IDR_TRIG_SOFTWARE, IDR_TRIG_EXTERNAL, IDR_TRIG_SS, IDR_TRIG_BURST, IDT_TRIG_COUNT, IDV_TRIG_COUNT,
 	IDB_SAVE, IDB_SAVE_BURST,
-	IDV_RING_SIZE, IDB_RESET_RING, IDS_FRAME_RATE, IDV_FRAME_RATE, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
+	IDV_RING_SIZE, IDB_RESET_RING, IDS_FRAMERATE, IDV_FRAMERATE, IDV_FRAMERATE_LIMIT, IDT_ACTUALFRAMERATE, IDS_EXPOSURE_TIME, IDV_EXPOSURE_TIME,
 	IDB_SHARPNESS_DIALOG, IDS_GAMMA, IDV_GAMMA, IDB_GAMMA_NEUTRAL,
 	IDR_COLOR_DISABLE, IDR_COLOR_ENABLE, IDR_COLOR_BG40, IDR_COLOR_HQ, IDR_COLOR_AUTO_IR, 
 	IDG_COLOR_CORRECTION, IDV_COLOR_CORRECT_FACTOR, IDS_TEXT_0,
 	IDT_RED_SATURATE, IDT_GREEN_SATURATE, IDT_BLUE_SATURATE, 
-	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN, IDB_RESET_GAINS,
+	IDS_MASTER_GAIN, IDV_MASTER_GAIN, IDS_RED_GAIN, IDV_RED_GAIN, IDS_GREEN_GAIN, IDV_GREEN_GAIN, IDS_BLUE_GAIN, IDV_BLUE_GAIN, 
+	IDB_RESET_GAINS_RGB, IDB_RESET_GAINS_NEUTRAL,
 	IDR_EXPOSURE_100US, IDR_EXPOSURE_1MS, IDR_EXPOSURE_10MS, IDR_EXPOSURE_100MS,
 	IDC_SHOW_INTENSITY, IDC_SHOW_RGB, IDC_SHOW_SUM, IDC_TRACK_CENTROID,
 	IDT_FRAME_COUNT, IDV_CURRENT_FRAME, IDT_FRAME_VALID, IDB_NEXT_FRAME, IDB_PREV_FRAME,
@@ -502,7 +504,7 @@ static void AutoExposureThread(void *arglist) {
 	Camera_GetExposureParms(wnd, &lower_bound, &upper_bound, &min_increment);
 
 	/* Set maximum number of saturated pixels to tolerate */
-	max_saturate = wnd->width*wnd->height / 1000;			/* Max tolerated as saturated */
+	max_saturate = wnd->width*wnd->height / 10000;			/* Max tolerated as saturated */
 
 	/* Do binary search ... Starting from 1000 ms, will get to within 0.03 ms */
 	fprintf(stderr, "iter\texposure \tlower bound\tupper bound\tnew expose\tlast expose\n"); fflush(stderr);
@@ -1044,6 +1046,12 @@ int CalcStatistics(WND_INFO *wnd, int index, unsigned char *rgb, int *pSharp) {
 			horz->y[i] = horz_r->y[i] = horz_g->y[i] = horz_b->y[i] = aptr[i];
 		}
 	}
+	/* And specifically get the pixel values at the cross hair (specific index i) */
+	i = (int) (width*wnd->cursor_posn.x+0.5);									/* and index for column */
+	wnd->cursor_pixel.r = (int) horz_r->y[i]; 
+	wnd->cursor_pixel.g = (int) horz_g->y[i]; 
+	wnd->cursor_pixel.b = (int) horz_b->y[i];
+
 	/* And do the sum of all pixels for profiling */
 	total_max = 0;
 	for (i=0; i<width; i++) {horz_sum->x[i] = i; horz_sum->y[i] = 0; }
@@ -1251,6 +1259,7 @@ static int Camera_Open(HWND hdlg, WND_INFO *wnd, CAMERA *request) {
 	TL_CAMERA  *tl;
 	DCX_CAMERA *dcx;
 	int i;
+	double fps;
 
 	if (request == NULL) return 1;
 
@@ -1301,6 +1310,11 @@ static int Camera_Open(HWND hdlg, WND_INFO *wnd, CAMERA *request) {
 		SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
 		SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);
 		SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);
+
+		fps = Camera_GetFPSLimit(wnd);
+		EnableDlgItem(hdlg, IDV_FRAMERATE_LIMIT, fps > 0);
+		if (fps <= 0) fps = 1000.0;
+		SetDlgItemDouble(hdlg, IDV_FRAMERATE_LIMIT, fps>=1000 ? "%.0f" : fps>=100 ? "%.1f" : fps>=10 ? "%.2f" : "%.3f", fps);
 
 		formats = Camera_GetSaveFormatFlag(wnd);
 		if ( (formats & (FL_BMP | FL_RAW | FL_JPG | FL_PNG)) == 0) formats = FL_BMP;
@@ -1452,7 +1466,7 @@ int Fill_Camera_List_Control(HWND hdlg, WND_INFO *wnd, int *pnvalid, CAMERA **pF
 
 /* ===========================================================================
 =========================================================================== */
-#define	TIMER_FRAME_RATE_UPDATE				(1)
+#define	TIMER_FRAMERATE_UPDATE				(1)
 #define	TIMER_STATS_UPDATE					(2)
 #define	TIMER_FRAMEINFO_UPDATE				(3)
 
@@ -1475,7 +1489,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 	/* List of controls which will respond to <ENTER> with a WM_NEXTDLGCTL message */
 	/* Make <ENTER> equivalent to losing focus */
 	static int DfltEnterList[] = {					
-		IDV_EXPOSURE_TIME, IDV_FRAME_RATE, IDV_GAMMA, IDV_CURSOR_X_PIXEL, IDV_CURSOR_Y_PIXEL,
+		IDV_EXPOSURE_TIME, IDV_FRAMERATE, IDV_FRAMERATE_LIMIT, IDV_GAMMA, IDV_CURSOR_X_PIXEL, IDV_CURSOR_Y_PIXEL,
 		IDV_RED_GAIN, IDV_GREEN_GAIN, IDV_BLUE_GAIN, IDV_MASTER_GAIN,
 		IDV_RING_SIZE, IDV_CURRENT_FRAME, IDV_TRIG_COUNT, IDV_COLOR_CORRECT_FACTOR,
 		ID_NULL };
@@ -1542,6 +1556,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			wnd->thumbnail = GetDlgItem(hdlg, IDC_DISPLAY);
 
 			/* Initialize ring buffer entries */
+			SetDlgItemText(hdlg, IDV_FRAMERATE_LIMIT, "999.0");
 			SetDlgItemInt(hdlg, IDV_RING_SIZE,     1, FALSE);
 			SetDlgItemInt(hdlg, IDT_FRAME_COUNT,   0, FALSE);
 			SetDlgItemInt(hdlg, IDT_FRAME_VALID,   0, FALSE);
@@ -1613,7 +1628,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			/* Update the cursor position to initial value (probably 0) */
 			SendMessage(hdlg, WMP_UPDATE_IMAGE_WITH_CURSOR, 0, 0);
 
-			SetTimer(hdlg, TIMER_FRAME_RATE_UPDATE, 1000, NULL);				/* Redraw at roughtly 1 Hz rate */
+			SetTimer(hdlg, TIMER_FRAMERATE_UPDATE, 1000, NULL);				/* Redraw at roughtly 1 Hz rate */
 			SetTimer(hdlg, TIMER_STATS_UPDATE, 200, NULL);						/* Update stats no more than 5 Hz */
 			SetTimer(hdlg, TIMER_FRAMEINFO_UPDATE, 100, NULL);					/* Make them go fast */
 			
@@ -1672,13 +1687,13 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 		case WM_TIMER:
 			switch (wParam) {
-				case TIMER_FRAME_RATE_UPDATE:
+				case TIMER_FRAMERATE_UPDATE:
 					fps = Camera_GetFPSActual(wnd);
 					SetDlgItemDouble(hdlg, IDT_ACTUALFRAMERATE, "%.2f", fps);
 					if (! wnd->has_fps_control) {
 						ival = nint(200.0*(fps-wnd->fps_min)/(wnd->fps_max-wnd->fps_min));
 						ival = max(0,min(200,ival));
-						SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPOS, TRUE, ival);
+						SendDlgItemMessage(hdlg, IDS_FRAMERATE, TBM_SETPOS, TRUE, ival);
 					}
 					break;
 
@@ -1790,7 +1805,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 		case WM_HSCROLL:
 			wID = ID_NULL;
 			/* Which scroll bar was moved */
-			if ((HWND) lParam == GetDlgItem(hdlg, IDS_FRAME_RATE))    wID = IDS_FRAME_RATE;
+			if ((HWND) lParam == GetDlgItem(hdlg, IDS_FRAMERATE))     wID = IDS_FRAMERATE;
 			if ((HWND) lParam == GetDlgItem(hdlg, IDS_EXPOSURE_TIME)) wID = IDS_EXPOSURE_TIME;
 			if ((HWND) lParam == GetDlgItem(hdlg, IDS_GAMMA))			 wID = IDS_GAMMA;
 			if (wID != ID_NULL) {
@@ -1821,7 +1836,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 				}
 				if (ipos != -99999) {
 					switch (wID) {
-						case IDS_FRAME_RATE:
+						case IDS_FRAMERATE:
 							Camera_SetFPSControl(wnd, wnd->fps_min+ipos/200.0*(wnd->fps_max-wnd->fps_min));			/* Range of the slider */
 							SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);		/* May have changed */
 							SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);		/* Show actual values */
@@ -1894,12 +1909,12 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			if (fps > 0.0) {
 				ival = nint(200.0*(fps-wnd->fps_min)/(wnd->fps_max-wnd->fps_min));
 				ival = max(0,min(200,ival));
-				SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPOS, TRUE, ival);
-				SetDlgItemDouble(hdlg, IDV_FRAME_RATE, "%.2f", fps);
+				SendDlgItemMessage(hdlg, IDS_FRAMERATE, TBM_SETPOS, TRUE, ival);
+				SetDlgItemDouble(hdlg, IDV_FRAMERATE, "%.2f", fps);
 			} else {
-				/* The IDS_FRAME_RATE control is used to display actual if there is no control */
-				if (wnd->has_fps_control) SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPOS, TRUE, 0);
-				SetDlgItemText(hdlg, IDV_FRAME_RATE, "N/A");
+				/* The IDS_FRAMERATE control is used to display actual if there is no control */
+				if (wnd->has_fps_control) SendDlgItemMessage(hdlg, IDS_FRAMERATE, TBM_SETPOS, TRUE, 0);
+				SetDlgItemText(hdlg, IDV_FRAMERATE, "N/A");
 			}
 			rcode = TRUE; break;
 
@@ -2018,8 +2033,8 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					hwndTest = GetFocus();							/* Just see if we use to change focus */
 					for (hptr=DfltEnterList; *hptr!=ID_NULL; hptr++) {
 						if (GetDlgItem(hdlg, *hptr) == hwndTest) {
-							if (*hptr == IDV_FRAME_RATE) {
-								Camera_SetFPSControl(wnd, GetDlgItemDouble(hdlg, IDV_FRAME_RATE));
+							if (*hptr == IDV_FRAMERATE) {
+								Camera_SetFPSControl(wnd, GetDlgItemDouble(hdlg, IDV_FRAMERATE));
 								SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);		/* May have changed */
 								SendMessage(hdlg, WMP_SHOW_FRAMERATE, 0, 0);		/* Show actual values */
 							} else if (*hptr == IDV_EXPOSURE_TIME) {
@@ -2219,7 +2234,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					}
 					rcode = TRUE; break;
 
-				case IDV_FRAME_RATE:
+				case IDV_FRAMERATE:
 					if (EN_KILLFOCUS == wNotifyCode) {
 						Camera_SetFPSControl(wnd, GetDlgItemDouble(hdlg, wID));
 						SendMessage(hdlg, WMP_SHOW_EXPOSURE, 0, 0);		/* May have changed */
@@ -2318,11 +2333,12 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					}
 					rcode = TRUE; break;
 
-				case IDB_RESET_GAINS:
-					Camera_ResetGains(wnd);
+				case IDB_RESET_GAINS_RGB:											/* Reset to RGB defaults */
+				case IDB_RESET_GAINS_NEUTRAL:										/* Set to most "neutral" values (unity gain everywhere) */
+					Camera_ResetGains(wnd, wID == IDB_RESET_GAINS_RGB ? RGB_GAIN : NEUTRAL_GAIN);
 					SendMessage(hdlg, WMP_SHOW_GAINS, 0, 0);
 					rcode = TRUE; break;
-					
+
 				case IDV_CURSOR_X_PIXEL:
 					if (EN_KILLFOCUS == wNotifyCode) {
 						rval = ((double) GetDlgItemIntEx(hdlg, wID)) / wnd->width + 0.5;
@@ -2338,6 +2354,15 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					}
 					rcode = TRUE; break;
 
+				case IDV_FRAMERATE_LIMIT:
+					if (EN_KILLFOCUS == wNotifyCode) {
+						double fps;
+						fps = GetDlgItemDouble(hdlg, wID);
+						fps = Camera_SetFPSLimit(wnd, fps);
+						SetDlgItemDouble(hdlg, wID, fps>=1000 ? "%.0f" : fps>=100 ? "%.1f" : fps>=10 ? "%.2f" : "%.3f", fps);
+					}
+					rcode = TRUE; break;
+					
 				case IDV_RING_SIZE:
 #ifdef USE_RINGS
 					if (EN_KILLFOCUS == wNotifyCode && wnd->Camera.driver != UNKNOWN) {
@@ -3427,16 +3452,16 @@ BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lP
 
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
 
-	FILE *fdebug;
-
 	/* If not done, make sure we are loaded.  Assume safe to call multiply */
 	InitCommonControls();
 	LoadLibrary("RICHED20.DLL");
 
+	/* OPen the system debug file */
 	if ( (fopen_s(&fdebug, "c:/lsa/ZooCam.log", "a")) != 0) {
 		MessageBox(NULL, "Failed to open the debug log file.  No debug data will be collected", "ZooCam.log open fail", MB_OK | MB_ICONERROR);
 		fdebug = NULL;
 	} else {
+		fprintf(fdebug, "-- ZooCam initialize --\n");
 		TL_SetDebugLog(fdebug);
 	}
 
@@ -3755,11 +3780,11 @@ int InitializeScrollBars(HWND hdlg, WND_INFO *wnd) {
 	int i, wID;
 
 	/* Set up the scroll bar for the frame rate */
-	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETRANGE, FALSE, MAKELPARAM(0,200));			/* In about 0.1 Hz increments */
-	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_CLEARTICS, FALSE, 0);
-	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETTICFREQ, 10, 0);
-	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETLINESIZE, 0, 10);
-	SendDlgItemMessage(hdlg, IDS_FRAME_RATE, TBM_SETPAGESIZE, 0, 20);
+	SendDlgItemMessage(hdlg, IDS_FRAMERATE, TBM_SETRANGE, FALSE, MAKELPARAM(0,200));			/* In about 0.1 Hz increments */
+	SendDlgItemMessage(hdlg, IDS_FRAMERATE, TBM_CLEARTICS, FALSE, 0);
+	SendDlgItemMessage(hdlg, IDS_FRAMERATE, TBM_SETTICFREQ, 10, 0);
+	SendDlgItemMessage(hdlg, IDS_FRAMERATE, TBM_SETLINESIZE, 0, 10);
+	SendDlgItemMessage(hdlg, IDS_FRAMERATE, TBM_SETPAGESIZE, 0, 20);
 
 	/* Set up the scroll bar for the exposure time */
 	SendDlgItemMessage(hdlg, IDS_EXPOSURE_TIME, TBM_SETRANGE, FALSE, MAKELPARAM(1,200));		/* 2 decades, 100 per decade */
@@ -4126,6 +4151,8 @@ static int TL_ShowImage(WND_INFO *wnd, int index, int *pSharp) {
 		sprintf_s(szBuf, sizeof(szBuf), "[%6d] %2.2d:%2.2d:%2.2d.%3.3d", image->imageID,
 					 image->system_time.wHour, image->system_time.wMinute, image->system_time.wSecond, image->system_time.wMilliseconds);
 		SetDlgItemText(wnd->hdlg, IDT_IMAGE_INFO, szBuf);
+		sprintf_s(szBuf, sizeof(szBuf), "(%.3d,%.3d,%.3d)", wnd->cursor_pixel.r, wnd->cursor_pixel.g, wnd->cursor_pixel.b);
+		SetDlgItemText(wnd->hdlg, IDT_PIXEL_INFO, szBuf);
 	}
 	tl->iShow = index;				/* Also done in the TL_RenderFrame code */
 
@@ -4355,10 +4382,11 @@ static int DCx_CameraOpen(HWND hdlg, WND_INFO *wnd, DCX_CAMERA *dcx, UC480_CAMER
 	EnableDlgItem(hdlg, IDS_GREEN_GAIN,  dcx->SensorInfo.bGGain);
 	EnableDlgItem(hdlg, IDV_BLUE_GAIN,   dcx->SensorInfo.bBGain);
 	EnableDlgItem(hdlg, IDS_BLUE_GAIN,   dcx->SensorInfo.bBGain);
-	EnableDlgItem(hdlg, IDB_RESET_GAINS, TRUE);
+	EnableDlgItem(hdlg, IDB_RESET_GAINS_RGB, TRUE);
+	EnableDlgItem(hdlg, IDB_RESET_GAINS_NEUTRAL, TRUE);
 
-	EnableDlgItem(hdlg, IDV_FRAME_RATE, TRUE);
-	EnableDlgItem(hdlg, IDS_FRAME_RATE, TRUE);
+	EnableDlgItem(hdlg, IDV_FRAMERATE, TRUE);
+	EnableDlgItem(hdlg, IDS_FRAMERATE, TRUE);
 
 	EnableDlgItem(hdlg, IDS_GAMMA, TRUE);
 	EnableDlgItem(hdlg, IDV_GAMMA, TRUE);
@@ -4456,9 +4484,10 @@ static int TL_CameraOpen(HWND hdlg, WND_INFO *wnd, TL_CAMERA *tl) {
 	EnableDlgItem(hdlg, IDS_RED_GAIN,    tl->IsSensorColor);
 	EnableDlgItem(hdlg, IDS_GREEN_GAIN,  tl->IsSensorColor);
 	EnableDlgItem(hdlg, IDS_BLUE_GAIN,   tl->IsSensorColor);
-	EnableDlgItem(hdlg, IDB_RESET_GAINS, tl->bGainControl || tl->IsSensorColor);
-	EnableDlgItem(hdlg, IDV_FRAME_RATE, tl->bFrameRateControl);
-	EnableDlgItem(hdlg, IDS_FRAME_RATE, tl->bFrameRateControl);
+	EnableDlgItem(hdlg, IDB_RESET_GAINS_RGB, tl->bGainControl || tl->IsSensorColor);
+	EnableDlgItem(hdlg, IDB_RESET_GAINS_NEUTRAL, tl->bGainControl || tl->IsSensorColor);
+	EnableDlgItem(hdlg, IDV_FRAMERATE, tl->bFrameRateControl);
+	EnableDlgItem(hdlg, IDS_FRAMERATE, tl->bFrameRateControl);
 
 	/* Now enable/disable those that don't depend on any camera characteristics */
 	for (i=0; i<sizeof(TL_Control_List)/sizeof(TL_Control_List[0]); i++)

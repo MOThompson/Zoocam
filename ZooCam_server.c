@@ -66,6 +66,18 @@ static int Remote_Get_Image_Data(int frame, void **data, size_t *length);
 /* ------------------------------- */
 
 /* ===========================================================================
+-- Encode the current time as a string for a printf statement
+=========================================================================== */
+char *EncodeLogTime(void) {
+	static char obuf[64];
+	SYSTEMTIME systime;
+
+	GetLocalTime(&systime);
+	sprintf_s(obuf, sizeof(obuf), "%.4d.%.2d%.2d:%.2d:%.2d.%.2d.%3d", systime.wYear, systime.wMonth, systime.wDay, systime.wHour, systime.wMinute, systime.wSecond, systime.wMilliseconds);
+	return obuf;
+}
+
+/* ===========================================================================
 -- Routine to initialize high level DCx remote socket server
 --
 -- Usage: void Init_DCx_Server(void)
@@ -90,9 +102,9 @@ int Init_ZooCam_Server(void) {
 /* Create mutex for work */
 	if (ZooCam_Server_Mutex == NULL && (ZooCam_Server_Mutex = CreateMutex(NULL, FALSE, NULL)) == NULL) {
 		if (fdebug != NULL) {
-			fprintf(fdebug, "ERROR[%s]: Unable to create the server access semaphores\n", rname); fflush(fdebug);
+			fprintf(fdebug, "%s ERROR[%s]: Unable to create the server access semaphores\n", EncodeLogTime(), rname); fflush(fdebug);
 		}
-		fprintf(stderr, "ERROR[%s]: Unable to create the server access semaphores\n", rname); fflush(stderr);
+		fprintf(stderr, "%s ERROR[%s]: Unable to create the server access semaphores\n", EncodeLogTime(), rname); fflush(stderr);
 		return 1;
 	}
 
@@ -102,9 +114,9 @@ int Init_ZooCam_Server(void) {
 /* Bring up the message based server */
 	if ( ! (ZooCam_Msg_Server_Up = (RunServerThread("ZooCam", ZOOCAM_ACCESS_PORT, server_msg_handler, NULL) == 0)) ) {
 		if (fdebug != NULL) {
-			fprintf(fdebug, "ERROR[%s]: Unable to start the ZooCam message based remote server\n", rname); fflush(fdebug);
+			fprintf(fdebug, "%s ERROR[%s]: Unable to start the ZooCam message based remote server\n", EncodeLogTime(), rname); fflush(fdebug);
 		}
-		fprintf(stderr, "ERROR[%s]: Unable to start the ZooCam message based remote server\n", rname); fflush(stderr);
+		fprintf(stderr, "%s ERROR[%s]: Unable to start the ZooCam message based remote server\n", EncodeLogTime(), rname); fflush(stderr);
 		return 2;
 	}
 
@@ -126,7 +138,7 @@ int Init_ZooCam_Server(void) {
 int Shutdown_ZooCam_Server(void) {
 
 	if (fdebug != NULL) { 
-		fprintf(fdebug, "ZooCam Server: Request to shutdown the server\n"); fflush(fdebug);
+		fprintf(fdebug, "%s ZooCam Server: Request to shutdown the server\n", EncodeLogTime()); fflush(fdebug);
 	}
 
 	return 0;
@@ -173,7 +185,7 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 		logfile = (fdebug != NULL) ? fdebug : stderr;
 
 		/* Debug standard message received */
-		fprintf(logfile, "%s: Received standard request: msg=%d option=%d data_len=%d data=%p\n", rname, request.msg, request.option, request.data_len, received_data); fflush(logfile);
+		fprintf(logfile, "%s %s: Received standard request: msg=%d option=%d data_len=%d data=%p\n", EncodeLogTime(), rname, request.msg, request.option, request.data_len, received_data); fflush(logfile);
 
 		/* Create a default reply message - by default don't release reply_data */
 		memcpy(&reply, &request, sizeof(reply));
@@ -184,38 +196,38 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 		/* Be very careful ... only allow one socket message to be in process at any time */
 		/* The code should already protect, but not sure how interleaved messages may impact operations */
 		if (WaitForSingleObject(ZooCam_Server_Mutex, ZOOCAM_SERVER_WAIT) != WAIT_OBJECT_0) {
-			fprintf(logfile, "ERROR[%s]: Timeout waiting for the DCx semaphore\n", rname); fflush(logfile);
+			fprintf(logfile, "%s ERROR[%s]: Timeout waiting for the ZooCam_Server_Mutex semaphore\n", EncodeLogTime(), rname); fflush(logfile);
 			reply.msg = -1; reply.rc = -1;
 
 		} else switch (request.msg) {
 			case SERVER_END:
-				fprintf(logfile, "%s: SERVER_END\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: SERVER_END\n", EncodeLogTime(), rname); fflush(logfile);
 				ServerActive = FALSE;
 				break;
 
 			case ZOOCAM_QUERY_VERSION:
-				fprintf(logfile, "%s: ZOOCAM_QUERY_VERSION()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_QUERY_VERSION()\n", EncodeLogTime(), rname); fflush(logfile);
 				reply.rc = ZOOCAM_CLIENT_SERVER_VERSION;
 				break;
 
 			case ZOOCAM_GET_CAMERA_INFO:
-				fprintf(logfile, "%s: ZOOCAM_GET_CAMERA_INFO()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_GET_CAMERA_INFO()\n", EncodeLogTime(), rname); fflush(logfile);
 				reply.rc = Remote_Get_Camera_Info(&camera_info);			/* Get the information */
 				reply.data_len = sizeof(camera_info);
 				reply_data = (void *) &camera_info;
 				break;
 
 			case ZOOCAM_GET_EXPOSURE_PARMS:
-				fprintf(logfile, "%s: ZOOCAM_GET_EXPOSURE_PARMS()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_GET_EXPOSURE_PARMS()\n", EncodeLogTime(), rname); fflush(logfile);
 				reply.rc = Remote_Set_Exposure_Parms(0, NULL, &exposure);
 				reply.data_len = sizeof(exposure);
 				reply_data = (void *) &exposure;
 				break;
 
 			case ZOOCAM_SET_EXPOSURE_PARMS:
-				fprintf(logfile, "%s: ZOOCAM_SET_EXPOSURE_PARMS(%d)\n", rname, request.option); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_SET_EXPOSURE_PARMS(%d)\n", EncodeLogTime(), rname, request.option); fflush(logfile);
 				if (request.data_len < sizeof(EXPOSURE_PARMS)) {
-					fprintf(logfile, "%s: data_len < sizeof(EXPOSURE_PARMS).  Ignoring set.\n", rname); fflush(logfile);
+					fprintf(logfile, "%s %s: data_len < sizeof(EXPOSURE_PARMS).  Ignoring set.\n", EncodeLogTime(), rname); fflush(logfile);
 					received_data = NULL;
 				}
 				reply.rc = Remote_Set_Exposure_Parms(request.option, received_data, &exposure);
@@ -224,14 +236,14 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				break;
 
 			case ZOOCAM_GET_IMAGE_INFO:
-				fprintf(logfile, "%s: ZOOCAM_GET_IMAGE_INFO(%d)\n", rname, request.option); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_GET_IMAGE_INFO(%d)\n", EncodeLogTime(), rname, request.option); fflush(logfile);
 				reply.rc = Remote_Get_Image_Info(request.option, &image_info);
 				reply.data_len = sizeof(image_info);
 				reply_data = (void *) &image_info;
 				break;
 
 			case ZOOCAM_GET_IMAGE_DATA:
-				fprintf(logfile, "%s: ZOOCAM_GET_IMAGE_DATA(%d)\n", rname, request.option); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_GET_IMAGE_DATA(%d)\n", EncodeLogTime(), rname, request.option); fflush(logfile);
 				reply.rc = Remote_Get_Image_Data(request.option, &image_data, &length);
 				reply.data_len = length;
 				reply_data = (void *) image_data;
@@ -241,7 +253,7 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 			case ZOOCAM_SAVE_FRAME:
 				fprintf(logfile, "%s: ZOOCAM_SAVE_FRAME()\n", rname); fflush(logfile);
 				if (request.data_len < sizeof(FILE_SAVE_PARMS)) {
-					fprintf(logfile, "%s: data_len < sizeof(FILE_SAVE_PARMS). Skipping save.\n", rname); fflush(logfile);
+					fprintf(logfile, "%s %s: data_len < sizeof(FILE_SAVE_PARMS). Skipping save.\n", EncodeLogTime(), rname); fflush(logfile);
 					reply.rc = 1;
 				} else {
 					FILE_SAVE_PARMS *parms;
@@ -253,7 +265,7 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 			case ZOOCAM_SAVE_ALL:
 				fprintf(logfile, "%s: ZOOCAM_SAVE_ALL()\n", rname); fflush(logfile);
 				if (request.data_len < sizeof(FILE_SAVE_PARMS)) {
-					fprintf(logfile, "%s: data_len < sizeof(FILE_SAVE_PARMS). Skipping save.\n", rname); fflush(logfile);
+					fprintf(logfile, "%s %s: data_len < sizeof(FILE_SAVE_PARMS). Skipping save.\n", EncodeLogTime(), rname); fflush(logfile);
 					reply.rc = 1;
 				} else {
 					FILE_SAVE_PARMS *parms;
@@ -263,21 +275,21 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				break;
 
 			case ZOOCAM_ARM:
-				fprintf(logfile, "%s: ZOOCAM_TRIGGER(%d)\n", rname, request.option); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_TRIGGER(%d)\n", EncodeLogTime(), rname, request.option); fflush(logfile);
 				reply.rc = Camera_Arm(NULL, request.option);
 				break;
 
 			case ZOOCAM_GET_TRIGGER_MODE:
-				fprintf(logfile, "%s: ZOOCAM_GET_TRIGGER_MODE()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_GET_TRIGGER_MODE()\n", EncodeLogTime(), rname); fflush(logfile);
 				reply.rc = Camera_GetTriggerMode(NULL, &trigger_info);
 				reply.data_len = sizeof(trigger_info);
 				reply_data = (void *) &trigger_info;
 				break;
 
 			case ZOOCAM_SET_TRIGGER_MODE:
-				fprintf(logfile, "%s: ZOOCAM_SET_TRIGGER_MODE(%d)\n", rname, request.option); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_SET_TRIGGER_MODE(%d)\n", EncodeLogTime(), rname, request.option); fflush(logfile);
 				if (request.data_len < sizeof(TRIGGER_INFO)) {
-					fprintf(logfile, "%s: data_len < sizeof(TRIGGER_INFO). Setting to zeros.\n", rname); fflush(logfile);
+					fprintf(logfile, "%s %s: data_len < sizeof(TRIGGER_INFO). Setting to zeros.\n", EncodeLogTime(), rname); fflush(logfile);
 					memset(&trigger_info, 0, sizeof(trigger_info));
 				} else {
 					memcpy(&trigger_info, received_data, sizeof(trigger_info));
@@ -288,66 +300,66 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 				break;
 
 			case ZOOCAM_TRIGGER:
-				fprintf(logfile, "%s: ZOOCAM_TRIGGER()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_TRIGGER()\n", EncodeLogTime(), rname); fflush(logfile);
 				reply.rc = Camera_Trigger(NULL);
 				break;
 
 			case ZOOCAM_RING_GET_INFO:
-				fprintf(logfile, "%s: ZOOCAM_RING_GET_INFO()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_RING_GET_INFO()\n", EncodeLogTime(), rname); fflush(logfile);
 				reply.rc = Remote_Ring_Actions(RING_GET_INFO, 0, &ring_info);
 				reply.data_len   = sizeof(ring_info);
 				reply_data = (void *) &ring_info;
 				break;
 				
 			case ZOOCAM_RING_GET_SIZE:
-				fprintf(logfile, "%s: ZOOCAM_RING_GET_SIZE()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_RING_GET_SIZE()\n", EncodeLogTime(), rname); fflush(logfile);
 				reply.rc = Remote_Ring_Actions(RING_GET_SIZE, 0, NULL);
 				break;
 
 			case ZOOCAM_RING_SET_SIZE:
-				fprintf(logfile, "%s: ZOOCAM_RING_SET_SIZE(%d)\n", rname, request.option); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_RING_SET_SIZE(%d)\n", EncodeLogTime(), rname, request.option); fflush(logfile);
 				reply.rc = Remote_Ring_Actions(RING_SET_SIZE, request.option, NULL);
 				break;
 
 			case ZOOCAM_RING_RESET_COUNT:
-				fprintf(logfile, "%s: ZOOCAM_RING_RESET_COUNT\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_RING_RESET_COUNT\n", EncodeLogTime(), rname); fflush(logfile);
 				Camera_ResetRingCounters(NULL);
 				break;
 				
 			case ZOOCAM_RING_GET_FRAME_CNT:
-				fprintf(logfile, "%s: ZOOCAM_RING_GET_FRAME_CNT()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_RING_GET_FRAME_CNT()\n", EncodeLogTime(), rname); fflush(logfile);
 				reply.rc = Remote_Ring_Actions(RING_GET_ACTIVE_CNT, 0, NULL);
 				break;
 
 			case ZOOCAM_BURST_ARM:
-				fprintf(logfile, "%s: ZOOCAM_BURST_ARM()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_BURST_ARM()\n", EncodeLogTime(), rname); fflush(logfile);
 				Burst_Actions(BURST_ARM, 0, &reply.rc);			/* Arm the burst */
 				break;
 
 			case ZOOCAM_BURST_ABORT:
-				fprintf(logfile, "%s: ZOOCAM_BURST_ABORT()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_BURST_ABORT()\n", EncodeLogTime(), rname); fflush(logfile);
 				Burst_Actions(BURST_ABORT, 0, &reply.rc);		/* Abort existing request */
 				break;
 
 			case ZOOCAM_BURST_STATUS:
-				fprintf(logfile, "%s: ZOOCAM_BURST_STATUS()\n", rname); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_BURST_STATUS()\n", EncodeLogTime(), rname); fflush(logfile);
 				Burst_Actions(BURST_STATUS, 0, &reply.rc);		/* Query the status */
 				break;
 				
 			case ZOOCAM_BURST_WAIT:
-				fprintf(logfile, "%s: ZOOCAM_BURST_WAIT(%d)\n", rname, request.option); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_BURST_WAIT(%d)\n", EncodeLogTime(), rname, request.option); fflush(logfile);
 				Burst_Actions(BURST_WAIT, request.option, &reply.rc);	/* Wait for stripe to occur */
 				break;
 				
 			/* 0 => off, 1 => on, otherwise no change; returns current on/off BOOL state */
 			case ZOOCAM_LED_SET_STATE:
-				fprintf(logfile, "%s: ZOOCAM_LED_SET_STATE(%d)\n", rname, request.option); fflush(logfile);
+				fprintf(logfile, "%s %s: ZOOCAM_LED_SET_STATE(%d)\n", EncodeLogTime(), rname, request.option); fflush(logfile);
 				reply.rc = Keith224_Output(request.option);
 				break;
 
 			default:
-				fprintf(logfile, "ERROR: ZooCam server message received (%d) that was not recognized.\n"
-						  "       Will be ignored with rc=-1 return code.\n", request.msg);
+				fprintf(logfile, "%s ERROR: ZooCam server message received (%d) that was not recognized.\n"
+						  "       Will be ignored with rc=-1 return code.\n", EncodeLogTime(), request.msg);
 			 fflush(logfile);
 				reply.rc = -1;
 				break;
@@ -356,13 +368,13 @@ static int server_msg_handler(SERVER_DATA_BLOCK *block) {
 		if (received_data != NULL) { free(received_data); received_data = NULL; }
 
 		/* Send the standard response and any associated data */
-		fprintf(logfile, "%s: Standard block return  rc=%d data_len=%d data=%p\n", rname, reply.rc, reply.data_len, reply_data); fflush(logfile);
+		fprintf(logfile, "%s %s: Standard block return  rc=%d data_len=%d data=%p\n", EncodeLogTime(), rname, reply.rc, reply.data_len, reply_data); fflush(logfile);
 		if (SendStandardServerResponse(block, reply, reply_data) != 0) {
-			fprintf(logfile, "ERROR: ZooCam server failed to send response we requested.\n");
+			fprintf(logfile, "%s ERROR: ZooCam server failed to send response we requested.\n", EncodeLogTime());
 		 fflush(logfile);
 		}
 		if (free_reply_data && reply_data != NULL) free(reply_data);
-		fprintf(logfile, "%s: Transaction complete\n", rname); fflush(logfile);
+		fprintf(logfile, "%s %s: Transaction complete\n", EncodeLogTime(), rname); fflush(logfile);
 	}
 
 	EndServerHandler(block);								/* Cleanly exit the server structure always */

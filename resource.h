@@ -59,10 +59,10 @@
 #define IDT_CAMERA_SENSOR_SIZE          2019
 #define IDT_CAMERA_DATE                 2020
 #define IDT_CAMERA_COLOR_MODE           2021
-#define IDS_FRAME_RATE                  2022
 #define IDT_PIXEL_CLOCK_MIN             2022
-#define IDV_FRAME_RATE                  2023
+#define IDS_FRAMERATE                   2022
 #define IDT_PIXEL_CLOCK_DEFAULT         2023
+#define IDV_FRAMERATE                   2023
 #define IDT_PIXEL_CLOCK_CURRENT         2024
 #define IDT_ACTUALFRAMERATE             2024
 #define IDS_EXPOSURE_TIME               2025
@@ -123,6 +123,7 @@
 #define IDC_ENABLE                      2073
 #define IDV_TRIG_COUNT                  2073
 #define IDV_LED_ON                      2074
+#define IDV_FRAMERATE_LIMIT             2074
 #define IDV_LED_OFF                     2075
 #define IDR_LED_OFF                     2076
 #define IDR_LED_ON                      2077
@@ -150,7 +151,7 @@
 #define IDG_COLOR_CORRECTION            2101
 #define IDS_TEXT_0                      2102
 #define IDC_SHOW_SUM                    2103
-#define IDB_RESET_GAINS                 2104
+#define IDB_RESET_GAINS_RGB             2104
 #define IDT_IMAGE_INFO                  2105
 #define IDR_TRIG_FREERUN                2106
 #define IDR_TRIG_SOFTWARE               2107
@@ -177,7 +178,6 @@
 #define IDV_NEXT_INDEX                  2128
 #define IDV_DIRECTORY                   2129
 #define IDB_BROWSE                      2130
-#define IDC_BUTTON1                     2131
 #define IDB_ROI                         2131
 #define IDB_FULL_FRAME                  2131
 #define IDT_ROI_INFO                    2132
@@ -199,8 +199,9 @@
 #define IDS_XRANGE                      2147
 #define IDS_YRANGE                      2148
 #define ID_SETROI                       2149
-#define IDC_BUTTON2                     2150
 #define IDB_CENTER_CROSSHAIR            2150
+#define IDB_RESET_GAINS_NEUTRAL			 2151
+#define IDT_PIXEL_INFO                  2152
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -210,7 +211,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        146
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         2151
+#define _APS_NEXT_CONTROL_VALUE         2153
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

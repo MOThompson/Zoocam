@@ -117,6 +117,8 @@ double DCx_GetExposure(DCX_CAMERA *dcx, BOOL bForceQuery);
 double DCx_SetFPSControl(DCX_CAMERA *dcx, double fps);
 double DCx_GetFPSControl(DCX_CAMERA *dcx);
 double DCx_GetFPSActual(DCX_CAMERA *dcx);
+double DCx_GetFPSLimit(DCX_CAMERA *dcx);
+double DCx_SetFPSLimit(DCX_CAMERA *dcx, double fps);
 
 #define	DCX_IGNORE_GAIN		(-999)
 int DCx_SetRGBGains    (DCX_CAMERA *dcx, int  master, int  red, int  green, int  blue);
