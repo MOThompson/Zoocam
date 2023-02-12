@@ -420,10 +420,13 @@ LRESULT CALLBACK FloatImageWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 -- Return: estimate of sharpness (in some units) or 0 on error
 =========================================================================== */
 int CalcSharpness(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor, unsigned char *pMem) {
+	static char *rname = "CalcSharpness";
+	
 	int ix0, iy0, col, line, delta, delta_max, xspan, yspan;
 	unsigned char *aptr;
 
 	if (wnd == NULL || pMem == NULL) return 0;
+//	fprintf(stderr, "[%s] Entering routine.  w/h/p = %d/%d/%d color: %d\n",	rname, width, height, pitch, iscolor); fflush(stderr);
 
 #define	SCAN_BLOCK	(128)																	/* edge of box measured */
 
@@ -433,11 +436,17 @@ int CalcSharpness(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor,
 
 	ix0 = ((int) (width *wnd->cursor_posn.x+0.5)) - xspan/2;						/* First column of test */
 	if (ix0 < 0) ix0 = 0;
-	if ((ix0 + xspan) > width)  ix0 = width-xspan;
+	if ((ix0 + xspan) > width-1)  ix0 = width-1-xspan;
+	if (ix0 < 0) { ix0 = 0; xspan = width-1; }
 
 	iy0 = ((int) (height*wnd->cursor_posn.y+0.5)) - yspan/2;						/* First row of test */
 	if (iy0 < 0) iy0 = 0;
-	if ((iy0 + yspan) > height) iy0 = height-yspan;
+	if ((iy0 + yspan) > height-1) iy0 = height-1-yspan;
+	if (iy0 < 0) { iy0 = 0; yspan = height-1; }
+
+	if (xspan == 0 || yspan == 0) return 0;											/* Can't do anything */
+
+//	fprintf(stderr, "[%s] xspan,yspan: %d/%d  ix0,iy0: %d/%d\n",	rname, xspan, yspan, ix0, iy0); fflush(stderr);
 
 	delta_max = 0;
 	for (col=ix0; col<ix0+xspan; col++) {
@@ -459,6 +468,8 @@ int CalcSharpness(WND_INFO *wnd, int width, int height, int pitch, BOOL iscolor,
 			if (abs(delta) > delta_max) delta_max = abs(delta);
 		}
 	}
+
+//	fprintf(stderr, "[%s] Returning from routine\n",	rname); fflush(stderr);
 	return delta_max;
 }
 
@@ -874,6 +885,7 @@ int CalcStatistics(WND_INFO *wnd, int index, unsigned char *rgb, int *pSharp) {
 	/* If the main window isn't a window, don't bother with the histogram calculations */
 	if (wnd == NULL || ! IsWindow(wnd->hdlg)) return 1;
 	CalcStatistics_Active = TRUE;
+//	fprintf(stderr, "[%s] Entering routine\n", rname); fflush(stderr);
 
 	/* Split based on RGB or only monochrome */
 	red    = wnd->red_hist;
@@ -961,6 +973,7 @@ int CalcStatistics(WND_INFO *wnd, int index, unsigned char *rgb, int *pSharp) {
 	}
 
 	/* Now process the information */
+//	fprintf(stderr, "[%s] Processing information\n", rname); fflush(stderr);
 	if (is_color) {
 		stats.R_sat = (100.0*red->y[255]  )/(1.0*height*width);
 		stats.G_sat = (100.0*green->y[255])/(1.0*height*width);
@@ -1013,6 +1026,7 @@ int CalcStatistics(WND_INFO *wnd, int index, unsigned char *rgb, int *pSharp) {
 	}
 
 	/* Do the horizontal profile at centerline */
+//	fprintf(stderr, "[%s] Horizontal profile\n", rname); fflush(stderr);
 	horz     = wnd->horz_w;
 	horz_r   = wnd->horz_r;
 	horz_g   = wnd->horz_g;
@@ -1080,6 +1094,7 @@ int CalcStatistics(WND_INFO *wnd, int index, unsigned char *rgb, int *pSharp) {
 	/* TIMER_STATS_UPDATE sends WMP_SET_SCALES and WMP_REDRAW messages */
 
 	/* Do the vertical profiles at centerline and total */
+//	fprintf(stderr, "[%s] Vertical profile\n", rname); fflush(stderr);
 	vert     = wnd->vert_w;
 	vert_r   = wnd->vert_r;
 	vert_g   = wnd->vert_g;
@@ -1132,6 +1147,7 @@ int CalcStatistics(WND_INFO *wnd, int index, unsigned char *rgb, int *pSharp) {
 	for (i=0; i<height; i++) vert_sum->x[i] = 256 - nint(255.0*vert_sum->x[i]/total_max);
 
 	/* Redraw them now */
+//	fprintf(stderr, "[%s] Redrawing profiles\n", rname); fflush(stderr);
 	scales = &stats.vert_scales;
 	memset(scales, 0, sizeof(*scales));
 	scales->xmin = 0; scales->xmax = 256;
@@ -1142,11 +1158,13 @@ int CalcStatistics(WND_INFO *wnd, int index, unsigned char *rgb, int *pSharp) {
 	/* TIMER_STATS_UPDATE sends WMP_SET_SCALES and WMP_REDRAW messages */
 
 	/* Calculate the sharpness - largest delta between pixels */
+//	fprintf(stderr, "[%s] Calculating Sharpness at cursor\n", rname); fflush(stderr);
 	stats.sharpness = sharpness = CalcSharpness(wnd, width, height, pitch, is_color, rgb);
 	if (pSharp != NULL) *pSharp = sharpness;
 	
 	stats.updated = TRUE;
 
+//	fprintf(stderr, "[%s] Returning from routine\n", rname); fflush(stderr);
 	CalcStatistics_Active = FALSE;
 	return 0;
 }
