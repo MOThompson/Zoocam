@@ -2607,6 +2607,7 @@ BOOL CALLBACK AutoSaveInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPa
 					if (BN_CLICKED == wNotifyCode) {
 
 						strcpy_m(pathname, sizeof(pathname), "dummy");	/* Pathname must be initialized with a value */
+						memset(%ofn, 0, sizeof(ofn));							/* Not static, must be set to zeros */
 						ofn.lStructSize       = sizeof(OPENFILENAME);
 						ofn.hwndOwner         = hdlg;
 						ofn.lpstrTitle        = "Choose directory via dummy file";

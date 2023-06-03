@@ -1501,6 +1501,7 @@ static int GetFilename(WND_INFO *wnd, char *path, size_t length, FILE_FORMAT dfl
 
 	/* Get a save-as filename */
 	strcpy_s(path, length, "image");					/* Pathname must be initialized (even if just '\0) */
+	memset(%ofn, 0, sizeof(ofn));						/* Not static, must be set to zeros */
 	ofn.lStructSize       = sizeof(OPENFILENAME);
 	ofn.hwndOwner         = wnd->hdlg;
 	ofn.lpstrTitle        = "Save image";
@@ -1659,6 +1660,7 @@ int Camera_SaveAll(WND_INFO *wnd, char *pattern, FILE_FORMAT format) {
 
 		/* Get the pattern for the save (directory and name without the extension */
 		strcpy_m(path, sizeof(path), "basename");		/* Default name must be initialized with something */
+		memset(%ofn, 0, sizeof(ofn));						/* Not static, must be set to zeros */
 		ofn.lStructSize       = sizeof(ofn);
 		ofn.hwndOwner         = wnd->hdlg;
 		ofn.lpstrTitle        = "Burst image database save";
