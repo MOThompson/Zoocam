@@ -7,44 +7,45 @@
 	#define	IDB_CLEAR						(40001)				/* From popup menu */
 
 	#define	WMP_REDRAW						(WM_APP+1)			/* Redraw, updating only curves marked modified */
-	#define	WMP_FULL_REDRAW				(WM_APP+2)			/* Redraw assuming all curves may have changed data */
-	#define	WMP_ADD_CURVE					(WM_APP+3)			/* Add WPARAM curve to list of curves */
-	#define	WMP_ADD_MESH					(WM_APP+4)			/* Add a list of triangles to draw */
-	#define	WMP_ADD_POINT					(WM_APP+5)
-	#define	WMP_ADD_FUNCTION				(WM_APP+6)			/* Add WPARAM function to list of functions */
-	#define	WMP_GET_NUM_CURVES			(WM_APP+7)			/* Return value is # of curves stored */
-	#define	WMP_GET_CURVE					(WM_APP+8)			/* WPARAM is curve # (1 based) and LPARAM must be pointer to variable to get GRAPH_CURVE *cv value */
-	#define	WMP_GET_NUM_FUNCTIONS		(WM_APP+9)			/* Return value is # of curves stored */
-	#define	WMP_GET_FUNCTION				(WM_APP+10)			/* WPARAM is function # (1 based) and LPARAM must be pointer to variable to get GRAPH_FNC *fnc value */
-	#define	WMP_CLEAR						(WM_APP+11)			/* Clear all graphs and functions */
-	#define	WMP_CLEAR_FUNCTIONS			(WM_APP+12)
-	#define	WMP_CLEAR_MESHES				(WM_APP+13)
-	#define	WMP_CLEAR_CURVES				(WM_APP+14)
-	#define	WMP_CLEAR_CURVE_BY_POINTER	(WM_APP+15)			/* Delete curve with GRAPH_CURVE *cv in WPARAM */
-	#define	WMP_CLEAR_CURVE_BY_INDEX	(WM_APP+16)			/* Delete curve i (i=1 = first) */
-	#define	WMP_CLEAR_CURVE_BY_ID		(WM_APP+17)			/* Delete first curve with specified ID */
-	#define	WMP_CLEAR_CURVES_KEEP_LAST	(WM_APP+18)			/* Delete all but last curve */
-	#define	WMP_SET_CURVE_VISIBILITY	(WM_APP+19)
-	#define	WMP_SET_FNC_VISIBILITY		(WM_APP+20)
-	#define	WMP_SET_NO_MARGINS			(WM_APP+21)			/* If wParam != 0, sets minimal (1 pixel) margins around graph area */
-	#define	WMP_SET_BACKGROUND_COLOR	(WM_APP+22)			/* wParam has the RGB value of the desired background */
-	#define	WMP_SET_SCALES					(WM_APP+23)
-	#define	WMP_SET_ZFORCE					(WM_APP+24)
-	#define	WMP_SET_AXIS_PARMS			(WM_APP+25)
-	#define	WMP_SET_MESH_VISIBILITY		(WM_APP+26)
-	#define	WMP_LOGMODE						(WM_APP+27)
-	#define	WMP_SET_X_TITLE				(WM_APP+28)
-	#define	WMP_SET_Y_TITLE				(WM_APP+29)
-	#define	WMP_SET_LABEL_VISIBILITY	(WM_APP+30)
+	#define	WMP_CENTER_GRAPH_WINDOW		(WM_APP+2)			/* Center graph window in specified lParam window (NULL = desktop) */
+	#define	WMP_FULL_REDRAW				(WM_APP+3)			/* Redraw assuming all curves may have changed data */
+	#define	WMP_ADD_CURVE					(WM_APP+4)			/* Add WPARAM curve to list of curves */
+	#define	WMP_ADD_MESH					(WM_APP+5)			/* Add a list of triangles to draw */
+	#define	WMP_ADD_POINT					(WM_APP+6)
+	#define	WMP_ADD_FUNCTION				(WM_APP+7)			/* Add WPARAM function to list of functions */
+	#define	WMP_GET_NUM_CURVES			(WM_APP+8)			/* Return value is # of curves stored */
+	#define	WMP_GET_CURVE					(WM_APP+9)			/* WPARAM is curve # (1 based) and LPARAM must be pointer to variable to get GRAPH_CURVE *cv value */
+	#define	WMP_GET_NUM_FUNCTIONS		(WM_APP+10)			/* Return value is # of curves stored */
+	#define	WMP_GET_FUNCTION				(WM_APP+11)			/* WPARAM is function # (1 based) and LPARAM must be pointer to variable to get GRAPH_FNC *fnc value */
+	#define	WMP_CLEAR						(WM_APP+12)			/* Clear all graphs and functions */
+	#define	WMP_CLEAR_FUNCTIONS			(WM_APP+13)
+	#define	WMP_CLEAR_MESHES				(WM_APP+14)
+	#define	WMP_CLEAR_CURVES				(WM_APP+15)
+	#define	WMP_CLEAR_CURVE_BY_POINTER	(WM_APP+16)			/* Delete curve with GRAPH_CURVE *cv in WPARAM */
+	#define	WMP_CLEAR_CURVE_BY_INDEX	(WM_APP+17)			/* Delete curve i (i=1 = first) */
+	#define	WMP_CLEAR_CURVE_BY_ID		(WM_APP+18)			/* Delete first curve with specified ID */
+	#define	WMP_CLEAR_CURVES_KEEP_LAST	(WM_APP+19)			/* Delete all but last curve */
+	#define	WMP_SET_CURVE_VISIBILITY	(WM_APP+20)
+	#define	WMP_SET_FNC_VISIBILITY		(WM_APP+21)
+	#define	WMP_SET_NO_MARGINS			(WM_APP+22)			/* If wParam != 0, sets minimal (1 pixel) margins around graph area */
+	#define	WMP_SET_BACKGROUND_COLOR	(WM_APP+23)			/* wParam has the RGB value of the desired background */
+	#define	WMP_SET_SCALES					(WM_APP+24)
+	#define	WMP_SET_ZFORCE					(WM_APP+25)
+	#define	WMP_SET_AXIS_PARMS			(WM_APP+26)
+	#define	WMP_SET_MESH_VISIBILITY		(WM_APP+27)
+	#define	WMP_LOGMODE						(WM_APP+28)
+	#define	WMP_SET_X_TITLE				(WM_APP+29)
+	#define	WMP_SET_Y_TITLE				(WM_APP+30)
+	#define	WMP_SET_LABEL_VISIBILITY	(WM_APP+31)
 	#define	  GRAPH_X_LABELS				(0x01)
 	#define	  GRAPH_Y_LABELS				(0x02)
-	#define	WMP_SET_TITLE_VISIBILITY	(WM_APP+31)
+	#define	WMP_SET_TITLE_VISIBILITY	(WM_APP+32)
 	#define	  GRAPH_X_TITLE				(0x01)
 	#define	  GRAPH_Y_TITLE				(0x02)
-	#define	WMP_CURSOR_CALLBACK			(WM_APP+32)			/* Registers routine to get messages on cursor presses */
-	#define	WMP_PAINT_CALLBACK			(WM_APP+33)			/* Registers routine to get messages after drawing WM_PAING messages */
-	#define	WMP_GRAPH_CONVERT_COORDS	(WM_APP+34)			/* Returns ix,iy <==> x,y value ... see GRAPH_CONVERT_COORDS structure */
-	#define	WMP_SET_SLAVE					(WM_APP+35)			/* Mark this as a slave ... careful on close with memory release */
+	#define	WMP_CURSOR_CALLBACK			(WM_APP+33)			/* Registers routine to get messages on cursor presses */
+	#define	WMP_PAINT_CALLBACK			(WM_APP+34)			/* Registers routine to get messages after drawing WM_PAING messages */
+	#define	WMP_GRAPH_CONVERT_COORDS	(WM_APP+35)			/* Returns ix,iy <==> x,y value ... see GRAPH_CONVERT_COORDS structure */
+	#define	WMP_SET_SLAVE					(WM_APP+36)			/* Mark this as a slave ... careful on close with memory release */
 
 	#define	GRAPH_MAX_FNCS					(10)
 	#define	GRAPH_MAX_CURVES				(10)

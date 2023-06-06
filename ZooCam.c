@@ -99,6 +99,8 @@
 /* ------------------------------- */
 /* My internal function prototypes */
 /* ------------------------------- */
+static int ParseCmdLine(char *token, int tlen, char *aptr, char **rptr);
+
 int InitializeScrollBars(HWND hdlg, WND_INFO *wnd);
 int InitializeHistogramCurves(HWND hdlg, WND_INFO *wnd);
 void FreeCurve(GRAPH_CURVE *cv);
@@ -111,6 +113,7 @@ BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lP
 BOOL CALLBACK NUMATODlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 BOOL CALLBACK AutoSaveInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
+BOOL CALLBACK CameraIDConfigDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
 
 /* Camera functionsn ... just split to handle the multiple optional drivers */
 static int Camera_Open(HWND hdlg, WND_INFO *wnd, CAMERA *camera);
@@ -152,6 +155,8 @@ WND_INFO *main_wnd = NULL;
 /* ------------------------------- */
 /* Locally defined global vars     */
 /* ------------------------------- */
+char ConfigIniFile[PATH_MAX] = "./ZooCam.ini";
+
 BOOL abort_all_threads = FALSE;										/* Global signal on shutdown to abort everything */
 
 static sig_atomic_t CalcStatistics_Active = FALSE;				/* Are we already processing statistics ... just skip call */
@@ -1437,10 +1442,12 @@ int Fill_Camera_List_Control(HWND hdlg, WND_INFO *wnd, int *pnvalid, CAMERA **pF
 	for (i=0; i<count; i++) {
 		dcx_info = dcx_details + i;
 		camera.driver = DCX;
-		sprintf_s(camera.id,          sizeof(camera.id),          "[DCX %d]:%s (%s)", dcx_details[i].dwCameraID, dcx_details[i].Model, dcx_details[i].SerNo);
-		sprintf_s(camera.description, sizeof(camera.description), "Some DCX camera");
+		sprintf_s(camera.ini_name, sizeof(camera.ini_name),  "DCX_%s", dcx_details[i].SerNo);
+		sprintf_s(camera.id, sizeof(camera.id), "[DCX %d]:%s (%s)", dcx_details[i].dwCameraID, dcx_details[i].Model, dcx_details[i].SerNo);
+		strcpy_s(camera.alias, sizeof(camera.alias), camera.id);																		/* Default alias */
+		sprintf_s(camera.description, sizeof(camera.description), "DCX camera ID: %d", dcx_details[i].dwCameraID);	/* Default description */
 		camera.details = (void *) (dcx_details+i);
-		CameraList_Add(&camera, NULL);
+		CameraList_Add(&camera, NULL);										/* Put camera is the master camera_list/camera_count structure  */
 		printf("DCX_Camera %d:  CameraID: %d  DeviceID: %d  SensorID: %d  InUse: %d S/N: %s  Model: %s  Status: %d\n", i, dcx_details[i].dwCameraID, dcx_details[i].dwDeviceID, dcx_details[i].dwSensorID, dcx_details[i].dwInUse, dcx_details[i].SerNo, dcx_details[i].Model, dcx_details[i].dwStatus); fflush(stdout);
 	}
 
@@ -1450,17 +1457,25 @@ int Fill_Camera_List_Control(HWND hdlg, WND_INFO *wnd, int *pnvalid, CAMERA **pF
 	for (i=0; i<count; i++) {
 		tl_camera = tl_list[i];
 		camera.driver = TL;
-		sprintf_s(camera.id,          sizeof(camera.id),          "[TL %s]:%s (%s)", tl_camera->ID, tl_camera->model, tl_camera->serial);
-		sprintf_s(camera.description, sizeof(camera.description), "Some TL camera");
+		sprintf_s(camera.ini_name, sizeof(camera.ini_name),  "TL_%s", tl_camera->serial);
+		sprintf_s(camera.id, sizeof(camera.id), "[TL %s]:%s (%s)", tl_camera->ID, tl_camera->model, tl_camera->serial);
+		strcpy_s(camera.alias, sizeof(camera.alias), camera.id);																		/* Default alias */
+		sprintf_s(camera.description, sizeof(camera.description), "TL camera ID: %s", tl_camera->ID);					/* Default description */
 		camera.details = (void *) tl_camera;
 		CameraList_Add(&camera, NULL);
 		printf("TL_Camera %d:  CameraID: %s  S/N: %s  Model: %s\n", i, tl_camera->ID, tl_camera->serial, tl_camera->model); fflush(stdout);
 	}
 
+	/* Fill in any additional details from the inifile (alias, descriptions) */
+	for (i=0; i<camera_count; i++) {
+		ReadPrivateProfileStr(camera_list[i].ini_name, "Alias",       camera_list[i].alias,       sizeof(camera_list[i].alias),       ConfigIniFile);				/* No change if not there */
+		ReadPrivateProfileStr(camera_list[i].ini_name, "Description", camera_list[i].description, sizeof(camera_list[i].description), ConfigIniFile);
+	}
+
 	/* Clear combo selection boxes and mark camera invalid now */
 	combolist = calloc(camera_count, sizeof(*combolist));
 	for (i=0; i<camera_count; i++) {
-		combolist[i].id = camera_list[i].id;
+		combolist[i].id = camera_list[i].alias;
 		combolist[i].value = camera_list+i;
 	}
 	ComboBoxClearList(hdlg, IDC_CAMERA_LIST);
@@ -2231,6 +2246,12 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 					}
 					rcode = TRUE; break;
 
+				case IDB_ID_CONFIG:
+					if (BN_CLICKED == wNotifyCode) {
+						DialogBox(hInstance, "IDD_CAMERA_CONFIG", hdlg, (DLGPROC) CameraIDConfigDlgProc);
+					}
+					rcode = TRUE; break;
+					
 				case IDB_LOAD_PARAMETERS:
 					if (BN_CLICKED == wNotifyCode) {
 						if (wnd->Camera.driver == DCX) {
@@ -2607,7 +2628,7 @@ BOOL CALLBACK AutoSaveInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPa
 					if (BN_CLICKED == wNotifyCode) {
 
 						strcpy_m(pathname, sizeof(pathname), "dummy");	/* Pathname must be initialized with a value */
-						memset(%ofn, 0, sizeof(ofn));							/* Not static, must be set to zeros */
+						memset(&ofn, 0, sizeof(ofn));							/* Not static, must be set to zeros */
 						ofn.lStructSize       = sizeof(OPENFILENAME);
 						ofn.hwndOwner         = hdlg;
 						ofn.lpstrTitle        = "Choose directory via dummy file";
@@ -2644,6 +2665,259 @@ BOOL CALLBACK AutoSaveInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lPa
 	return 0;
 }
 
+
+/* ===========================================================================
+BOOL CALLBACK CameraIDConfigDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
+=========================================================================== */
+BOOL CALLBACK CameraIDConfigDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+	static char *rname = "CameraIDConfigDlgProc";
+
+	#define	MAX_CAMERAS	(10)
+	static struct _CAMERA_ID_INFO {
+		BOOL modified;								/* Has information been changed */
+		char alias[64];							/* Alias name for use in the combobox */
+		char description[256];					/* Optional description for help	*/
+	} hold[MAX_CAMERAS];
+
+	char szBuf[256];
+	int wID, wNotifyCode;
+	int i, ncams;
+	BOOL rcode;
+
+	HWND hwndTest;
+	int *hptr;
+
+	TL_CAMERA *tl;
+	UC480_CAMERA_INFO *dcx_details;
+	static int DfltEnterList[] = {					
+		IDV_ALIAS_0, IDV_ALIAS_1, IDV_ALIAS_2, IDV_ALIAS_3, IDV_ALIAS_4, IDV_ALIAS_5, IDV_ALIAS_6, IDV_ALIAS_7, IDV_ALIAS_8, IDV_ALIAS_9,
+		IDV_DESCRIPTION_0, IDV_DESCRIPTION_1, IDV_DESCRIPTION_2, IDV_DESCRIPTION_3, IDV_DESCRIPTION_4, IDV_DESCRIPTION_5, IDV_DESCRIPTION_6, IDV_DESCRIPTION_7, IDV_DESCRIPTION_8, IDV_DESCRIPTION_9,
+		ID_NULL
+	};
+
+	/* The message loop */
+	rcode = FALSE;
+	switch (msg) {
+
+		case WM_INITDIALOG:
+			/* Center the window for working */
+			DlgCenterWindowEx(hdlg, main_wnd->hdlg);
+
+			/* Clear any old information */
+			memset(hold, 0, MAX_CAMERAS*sizeof(hold[0]));
+
+			/* Copy over the current camera information */
+			ncams = min(camera_count, MAX_CAMERAS);
+			for (i=0; i<ncams; i++) {
+				strcpy_s(hold[i].alias, sizeof(hold[i].alias), camera_list[i].alias);
+				SetDlgItemText(hdlg, IDV_ALIAS_0+i, hold[i].alias);
+				strcpy_s(hold[i].description, sizeof(hold[i].description), camera_list[i].description);
+				SetDlgItemText(hdlg, IDV_DESCRIPTION_0+i, hold[i].description);
+				EnableDlgItem(hdlg, IDV_ALIAS_0+i,    TRUE);
+				EnableDlgItem(hdlg, IDV_DESCRIPTION_0+i, TRUE);
+				switch (camera_list[i].driver) {
+					case DCX:
+						dcx_details = (UC480_CAMERA_INFO *) camera_list[i].details;
+						sprintf_s(szBuf, sizeof(szBuf), "%d", dcx_details->dwCameraID); 
+						SetDlgItemText(hdlg, IDT_CLASS_0+i,  "DCX");
+						SetDlgItemText(hdlg, IDT_ID_0+i,     szBuf);
+						SetDlgItemText(hdlg, IDT_MODEL_0+i,  dcx_details->Model);
+						SetDlgItemText(hdlg, IDT_SERIAL_0+i, dcx_details->SerNo);
+						break;
+					case TL:
+						tl = (TL_CAMERA *) camera_list[i].details;
+						SetDlgItemText(hdlg, IDT_CLASS_0+i,  "TL");
+						SetDlgItemText(hdlg, IDT_ID_0+i,     tl->ID);
+						SetDlgItemText(hdlg, IDT_MODEL_0+i,  tl->model);
+						SetDlgItemText(hdlg, IDT_SERIAL_0+i, tl->serial);
+						break;
+					default:
+						SetDlgItemText(hdlg, IDT_CLASS_0+i,  "???");
+						SetDlgItemText(hdlg, IDT_MODEL_0+i,  "???");
+						SetDlgItemText(hdlg, IDT_SERIAL_0+i, "???");
+						SetDlgItemText(hdlg, IDT_ID_0+i,     "???");
+						break;
+				}
+			}
+			for (i=ncams; i<MAX_CAMERAS; i++) {
+				EnableDlgItem(hdlg, IDV_ALIAS_0+i,       FALSE);
+				EnableDlgItem(hdlg, IDV_DESCRIPTION_0+i, FALSE);
+			}
+			for (i=0; i<MAX_CAMERAS; i++) ShowDlgItem(hdlg, IDB_RESET_0+i, FALSE);
+
+			rcode = TRUE; break;
+
+		case WM_CLOSE:
+			rcode = FALSE;
+			for (i=0; i<min(camera_count, MAX_CAMERAS); i++) { rcode = TRUE; break; }
+			if (! rcode) {
+				EndDialog(hdlg, IDOK);
+			} else {
+				switch (MessageBox(hdlg, "Save changes before exiting?", "Parameters changed", MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON1)) {
+					case IDYES:
+						SendMessage(hdlg, WMP_SAVE_CHANGES, 0, 0);
+						EndDialog(hdlg, IDOK);
+						break;
+					default:
+						EndDialog(hdlg, IDCANCEL);
+						break;
+				}
+			}
+			rcode = TRUE; break;
+
+		case WMP_SAVE_CHANGES:
+			for (i=0; i<min(camera_count, MAX_CAMERAS); i++) {
+				if (hold[i].modified) {
+					strcpy_s(camera_list[i].alias, sizeof(camera_list[i].alias), hold[i].alias);
+					strcpy_s(camera_list[i].description, sizeof(camera_list[i].description), hold[i].description);
+					hold[i].modified = FALSE;
+					WritePrivateProfileStr(camera_list[i].ini_name, "Alias",       camera_list[i].alias,       ConfigIniFile);
+					WritePrivateProfileStr(camera_list[i].ini_name, "Description", camera_list[i].description, ConfigIniFile);
+				}
+			}
+			rcode = TRUE; break;
+			
+		case WM_COMMAND:
+			wID = LOWORD(wParam);									/* Control sending message	*/
+			wNotifyCode = HIWORD(wParam);							/* Type of notification		*/
+
+			switch (wID) {
+				case IDOK:
+					hwndTest = GetFocus();							/* Just see if we use to change focus */
+					for (hptr=DfltEnterList; *hptr!=ID_NULL; hptr++) {
+						if (GetDlgItem(hdlg, *hptr) == hwndTest) {
+							PostMessage(hdlg, WM_NEXTDLGCTL, 0, 0L);
+							break;
+						}
+					}
+					rcode = 0; break;
+
+				case IDCANCEL:
+					EndDialog(hdlg, IDCANCEL);
+					rcode = TRUE; break;
+
+				case IDB_OK:
+					SendMessage(hdlg, WMP_SAVE_CHANGES, 0, 0);
+					EndDialog(hdlg, IDOK);
+					rcode = TRUE; break;
+					
+				case IDB_RESET_0:
+				case IDB_RESET_1:
+				case IDB_RESET_2:
+				case IDB_RESET_3:
+				case IDB_RESET_4:
+				case IDB_RESET_5:
+				case IDB_RESET_6:
+				case IDB_RESET_7:
+				case IDB_RESET_8:
+				case IDB_RESET_9:
+					if (BN_CLICKED == wNotifyCode) {
+						i = wID-IDB_RESET_0;
+						strcpy_s(hold[i].alias, sizeof(hold[i].alias), camera_list[i].alias);
+						SetDlgItemText(hdlg, IDV_ALIAS_0+i, hold[i].alias);
+						strcpy_s(hold[i].description, sizeof(hold[i].description), camera_list[i].description);
+						SetDlgItemText(hdlg, IDV_DESCRIPTION_0+i, hold[i].description);
+						hold[i].modified = FALSE;
+						ShowDlgItem(hdlg, IDB_RESET_0+i, FALSE);
+					}
+					rcode = TRUE; break;
+					
+				case IDV_ALIAS_0:
+				case IDV_ALIAS_1:
+				case IDV_ALIAS_2:
+				case IDV_ALIAS_3:
+				case IDV_ALIAS_4:
+				case IDV_ALIAS_5:
+				case IDV_ALIAS_6:
+				case IDV_ALIAS_7:
+				case IDV_ALIAS_8:
+				case IDV_ALIAS_9:
+					if (EN_KILLFOCUS == wNotifyCode) {
+						i = wID-IDV_ALIAS_0;
+						GetDlgItemText(hdlg, wID, szBuf, sizeof(szBuf));
+						if (strcmp(szBuf, hold[i].alias) != 0) {
+							strcpy_s(hold[i].alias, sizeof(hold[i].alias), szBuf);
+							SetDlgItemText(hdlg, wID, hold[i].alias);
+							hold[i].modified = TRUE;
+							ShowDlgItem(hdlg, IDB_RESET_0+i, TRUE);
+						}
+					}
+					rcode = TRUE; break;
+
+				case IDV_DESCRIPTION_0:
+				case IDV_DESCRIPTION_1:
+				case IDV_DESCRIPTION_2:
+				case IDV_DESCRIPTION_3:
+				case IDV_DESCRIPTION_4:
+				case IDV_DESCRIPTION_5:
+				case IDV_DESCRIPTION_6:
+				case IDV_DESCRIPTION_7:
+				case IDV_DESCRIPTION_8:
+				case IDV_DESCRIPTION_9:
+					if (EN_KILLFOCUS == wNotifyCode) {
+						i = wID-IDV_DESCRIPTION_0;
+						GetDlgItemText(hdlg, wID, szBuf, sizeof(szBuf));
+						if (strcmp(szBuf, hold[i].description) != 0) {
+							strcpy_s(hold[i].description, sizeof(hold[i].description), szBuf);
+							SetDlgItemText(hdlg, wID, hold[i].description);
+							hold[i].modified = TRUE;
+							ShowDlgItem(hdlg, IDB_RESET_0+i, TRUE);
+						}
+					}
+					rcode = TRUE; break;
+
+				/* Known ignore controls */
+				case IDT_CLASS_0:
+				case IDT_CLASS_1:
+				case IDT_CLASS_2:
+				case IDT_CLASS_3:
+				case IDT_CLASS_4:
+				case IDT_CLASS_5:
+				case IDT_CLASS_6:
+				case IDT_CLASS_7:
+				case IDT_CLASS_8:
+				case IDT_CLASS_9:
+				case IDT_ID_0:
+				case IDT_ID_1:
+				case IDT_ID_2:
+				case IDT_ID_3:
+				case IDT_ID_4:
+				case IDT_ID_5:
+				case IDT_ID_6:
+				case IDT_ID_7:
+				case IDT_ID_8:
+				case IDT_ID_9:
+				case IDT_MODEL_0:
+				case IDT_MODEL_1:
+				case IDT_MODEL_2:
+				case IDT_MODEL_3:
+				case IDT_MODEL_4:
+				case IDT_MODEL_5:
+				case IDT_MODEL_6:
+				case IDT_MODEL_7:
+				case IDT_MODEL_8:
+				case IDT_MODEL_9:
+				case IDT_SERIAL_0:
+				case IDT_SERIAL_1:
+				case IDT_SERIAL_2:
+				case IDT_SERIAL_3:
+				case IDT_SERIAL_4:
+				case IDT_SERIAL_5:
+				case IDT_SERIAL_6:
+				case IDT_SERIAL_7:
+				case IDT_SERIAL_8:
+				case IDT_SERIAL_9:
+					rcode = TRUE; break;
+
+				default:
+					printf("Unused wID in %s: %d\n", rname, wID); fflush(stdout);
+					break;
+			}
+
+			return rcode;
+	}
+	return 0;
+}
 
 /* ===========================================================================
 BOOL CALLBACK ROIDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -3469,26 +3743,79 @@ BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lP
 =========================================================================== */
 #ifdef	STANDALONE
 
+/* ===========================================================================
+-- Main entry point of program.  Simply loads the dialog box and goes
+--
+-- Usage: ZooCam [[-ini] <.ini file>]
+=========================================================================== */
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+	static char *rname = "WinMain";
+
+	char *tokenlist, token[PATH_MAX];
+	BOOL debug;
 
 	/* If not done, make sure we are loaded.  Assume safe to call multiply */
 	InitCommonControls();
 	LoadLibrary("RICHED20.DLL");
 
-	/* OPen the system debug file */
-	if ( (fopen_s(&fdebug, "c:/lsa/ZooCam.log", "a")) != 0) {
-		MessageBox(NULL, "Failed to open the debug log file.  No debug data will be collected", "ZooCam.log open fail", MB_OK | MB_ICONERROR);
-		fdebug = NULL;
-	} else {
-		fprintf(fdebug, "-- ZooCam initialize --\n");
-		TL_SetDebugLog(fdebug);
-	}
-
 	/* Load the class for the graph window */
 	Graph_StartUp(hThisInstance);					/* Initialize the graphics control */
 
-//	_beginthread(test_thread, 0, NULL);
-	
+	/* Scan for options */
+	debug = FALSE;
+	tokenlist = lpCmdLine;
+	while (ParseCmdLine(token, sizeof(token), tokenlist, &tokenlist)) {
+		if (_stricmp(token, "-help") == 0 || _stricmp(token, "/help") == 0 || _stricmp(token, "-?") == 0 || _stricmp(token, "/?") == 0) {
+			MessageBox(NULL,
+						  "Usage: ZooCam [-options] [config_file.ini]\n"
+						  "   Options\n"
+						  "     -?      This help information\n"
+						  "     -debug  Create a c:/lsa/ZooCam.log debug file\n"
+						  "     -ini <config_file.ini>\n"
+						  "Notes:\n"
+						  " 1) If only one argument, -ini assumed\n"
+						  " 2) Default config, if not specified, is ./ZooCam.ini\n"
+						  " 3) .ini assumed in current working directory if not full path\n"
+						  " 4) debug creates c:/lsa/ZooCam.log file\n",
+						  "ZooCam Usage", MB_ICONINFORMATION | MB_OK);
+			return 0;
+		} else if (_stricmp(token, "-debug") == 0 || _stricmp(token, "/debug") == 0) {
+			debug = TRUE;
+		} else if (_stricmp(token, "-ini") == 0 || _stricmp(token, "/ini") == 0) {
+			ParseCmdLine(ConfigIniFile, sizeof(ConfigIniFile), tokenlist, &tokenlist);
+		} else if (*ConfigIniFile == '\0') {
+			strcpy_s(ConfigIniFile, sizeof(ConfigIniFile), token);
+		} else {
+			char szBuf[256];
+			sprintf_s(szBuf, sizeof(szBuf), "Unrecognized command line option\n\t%s\nUse -? for help", token);
+			MessageBox(NULL, szBuf, "ZooCam Error", MB_ICONERROR | MB_OK);
+			fprintf(stderr, "Unrecognized command line option: %s\n", token); fflush(stderr);
+		}
+	}
+
+	/* Generate the full .ini file name */
+	if (*ConfigIniFile == '\0') {
+		strcpy_s(ConfigIniFile, sizeof(ConfigIniFile), "./ZooCam.ini");
+	} else if (strpbrk(ConfigIniFile, "/\\:") == NULL) {
+		char szBuf[PATH_MAX];
+		strcpy_s(szBuf, sizeof(szBuf), ConfigIniFile);
+		strcpy_s(ConfigIniFile, sizeof(ConfigIniFile), "./");
+		strcpy_s(ConfigIniFile+2, sizeof(ConfigIniFile)-2, szBuf);
+	}
+
+	/* Open the system debug file */
+	if (debug) {
+		if ( (fopen_s(&fdebug, "c:/lsa/ZooCam.log", "a")) != 0) {
+			MessageBox(NULL, "Failed to open the debug log file.  No debug data will be collected", "ZooCam.log open fail", MB_OK | MB_ICONERROR);
+			fdebug = NULL;
+		} else {
+			fprintf(fdebug, "-- ZooCam initialize --\n");
+			TL_SetDebugLog(fdebug);
+		}
+	} else {
+		fdebug = NULL;
+	}
+
 	/* And show the dialog box */
 	hInstance = hThisInstance;
 	DialogBox(hInstance, "ZOOCAM_DIALOG", HWND_DESKTOP, (DLGPROC) CameraDlgProc);
@@ -5008,4 +5335,34 @@ static int DCx_AllocRingBuffers(WND_INFO *wnd, int nRequest) {
 	wnd->PauseImageRendering = FALSE;
 
 	return rc;
+}
+
+
+/* ===========================================================================
+-- Routine to parse tokens off a passed command line
+=========================================================================== */
+static int ParseCmdLine(char *token, int tlen, char *aptr, char **rptr) {
+	BOOL quote;
+	char *optr, achr;
+
+	/* Default conditions */
+	while (isspace(*aptr)) aptr++;								/* Skip over any whitespace */
+	if (*aptr == '\0') {
+		if (token != NULL && tlen > 0) *token = '\0';
+		if (rptr != NULL) *rptr = aptr;
+		return 0;
+	}
+
+	optr = token;														/* Where to save string */
+	if (quote = (*aptr == '\"')) aptr++;
+	while ( (achr = *aptr) != '\0') {
+		if (quote && achr == '\"' || ! quote && isspace(achr)) { aptr++; break; }
+		if (tlen > 1 && token != NULL) { *(optr++) = achr; tlen--; }
+		aptr++;
+	}
+	if (token != NULL && tlen > 0) *optr = '\0';
+
+	while (isspace(*aptr)) aptr++;
+	if (rptr != NULL) *rptr = aptr;
+	return 1;
 }

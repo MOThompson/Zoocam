@@ -791,6 +791,53 @@ void PutInt( HWND hdlg, int wID, char *fmt, int value ) {
 }
 
 /* ============================================================================
+Routine to encode and put a hex value into a dialog box by user format.
+
+Usage: void SetDlgItemHex(HWND hdlg, int wID, char *fmt, unsigned int value)
+       unsigned int GetDlgItemHex(HWND hdlg, int wID, int value);
+Inputs: hdlg   - dialog box handle
+        wID    - ID of control within hdlg
+        fmt    - format to use (typically "0x%4.4x")
+        value  - value to encode
+
+Output: Sets text of specified dialog control
+
+Return: nothing
+============================================================================ */
+void SetDlgItemHex(HWND hdlg, int wID, char *fmt, unsigned int value) {
+	char szBuf[80];
+
+	if ( fmt == NULL ) fmt = "0x%4.4x";
+	sprintf_s(szBuf, sizeof(szBuf), fmt, value );
+	SetDlgItemText( hdlg, wID, szBuf );
+
+	return;
+}
+	
+unsigned int GetDlgItemHex(HWND hdlg, int wID, int value) {
+	char szBuf[80], *endptr, *aptr;
+	unsigned int ival;
+
+	/* get number from string */
+	GetDlgItemText(hdlg, wID, szBuf, sizeof(szBuf));
+	aptr = szBuf;
+	if (_strnicmp(szBuf, "0x", 2) == 0) aptr = aptr+2;
+
+	ival = strtol(aptr, &endptr, 16);
+
+	/* search for and eliminate garbage after last valid point */
+	aptr = endptr;
+	while (isspace(*endptr)) endptr++;
+	if (*aptr != '\0') {
+		*endptr = '\0';
+		SetDlgItemText(hdlg, wID, szBuf);
+	}
+
+	/* return the number */
+	return ival;
+}
+
+/* ============================================================================
    Routine to encode and put a real value into a dialog box by user format.
   
    Usage: void PutDouble(HWND hdlg, int wID, char *fmt, double value)

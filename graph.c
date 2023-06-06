@@ -1201,6 +1201,10 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			InvalidateRect(hwnd, NULL, ERASE_BACKGROUND_ON_INVALIDATE);
 			rc = 0; break;
 
+		case WMP_CENTER_GRAPH_WINDOW:
+			DlgCenterWindowEx(hwnd, (HWND) lParam);
+			rc = 0; break;
+
 		case WM_SIZE:
 			rc = 0; break;
 
@@ -1509,6 +1513,7 @@ LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam
 					PostMessage(hwnd, WMP_CLEAR, 0, 0);
 					break;
 				case IDB_SAVE:
+					memset(%ofn, 0, sizeof(ofn));						/* Not static, must be set to zeros */
 					ofn.lStructSize       = sizeof(OPENFILENAME);
 					ofn.hwndOwner         = hwnd;
 					ofn.lpstrTitle        = "Save Timeline data";

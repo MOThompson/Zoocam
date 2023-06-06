@@ -113,6 +113,24 @@ void PutInt(HWND hdlg, int wID, char *fmt, int value);
 
 
 /* ============================================================================
+Routine to encode and put a hex value into a dialog box by user format.
+
+Usage: void SetDlgItemHex(HWND hdlg, int wID, char *fmt, unsigned int value)
+		 unsigned int GetDlgItemHex(HWND hdlg, int wID, int value);
+
+Inputs: hdlg   - dialog box handle
+		  wID    - ID of control within hdlg
+		  fmt    - format to use (typically "0x%4.4x")
+		  value  - value to encode
+
+Output: Sets text of specified dialog control
+
+Return: nothing
+============================================================================ */
+void SetDlgItemHex(HWND hdlg, int wID, char *fmt, unsigned int value);
+unsigned int GetDlgItemHex(HWND hdlg, int wID, int value);
+
+/* ============================================================================
    Routine to encode and put a real value into a dialog box by user format.
   
    Usage: void PutDouble(HWND hdlg, int wID, char *fmt, double value)

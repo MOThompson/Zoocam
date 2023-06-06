@@ -1681,7 +1681,7 @@ int TL_GetSaveName(char *path, size_t length, FILE_FORMAT *format) {
 
 	/* Get a save-as filename */
 	strcpy_s(path, length, "image");					/* Pathname must be initialized with a value (even if just '\0) */
-	memset(%ofn, 0, sizeof(ofn));						/* Not static, must be set to zeros */
+	memset(&ofn, 0, sizeof(ofn));						/* Not static, must be set to zeros */
 	ofn.lStructSize       = sizeof(OPENFILENAME);
 	ofn.hwndOwner         = HWND_DESKTOP;
 	ofn.lpstrTitle        = "Save image";

@@ -15,6 +15,7 @@ WND_INFO *main_wnd;
 FILE *fdebug;
 
 /* Special calls to the display thread */
+#define	WMP_SAVE_CHANGES					(WM_APP+1)				/* In camera alias / description dialog box */
 #define	WMP_SHOW_FRAMERATE				(WM_APP+3)
 #define	WMP_SHOW_EXPOSURE					(WM_APP+4)
 #define	WMP_SHOW_GAMMA						(WM_APP+6)
@@ -148,10 +149,12 @@ int DCx_Enable_Live_Video(int state);
 
 /* Upper level camera information encoded in the combobox dropdown and ActiveCamera pointer */
 typedef struct _CAMERA {
-	enum {UNKNOWN=0, DCX=1, TL=2} driver;		/* empty initialization points to none */
-	char id[64];										/* Up to 32 char id for combobox */
-	char description[256];							/* Optional description for help	*/
-	void *details;										/* Camera driver specific detail */
+	enum {UNKNOWN=0, DCX=1, TL=2} driver;	/* empty initialization points to none */
+	char id[64];								/* Unique camera id based on camera information (default alias) */
+	char ini_name[32];						/* Initialization file name (CAM_S/N) */
+	char alias[64];							/* Alias name for use in the combobox */
+	char description[256];					/* Optional description for help	*/
+	void *details;								/* Camera driver specific detail */
 } CAMERA;
 
 typedef struct _WND_INFO {
