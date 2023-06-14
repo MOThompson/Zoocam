@@ -403,6 +403,7 @@ int DCx_Select_Camera(DCX_CAMERA *dcx, int CameraID, int *nBestFormat) {
 	dcx->CameraID = CameraID;
 	printf("  hCAM: %u  (for Camera %d)\n", hCam, CameraID); fflush(stdout);
 
+	/* Reset can take more than a second to complete on some cameras */
 	rc = is_ResetToDefault(hCam);
 	rc = is_SetDisplayMode(hCam, IS_SET_DM_DIB);
 	rc = is_GetCameraInfo(hCam, &camInfo);

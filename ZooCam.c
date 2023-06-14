@@ -155,7 +155,7 @@ WND_INFO *main_wnd = NULL;
 /* ------------------------------- */
 /* Locally defined global vars     */
 /* ------------------------------- */
-char ConfigIniFile[PATH_MAX] = "./ZooCam.ini";
+char ConfigIniFile[PATH_MAX] = "";
 
 BOOL abort_all_threads = FALSE;										/* Global signal on shutdown to abort everything */
 
@@ -1502,13 +1502,42 @@ int Fill_Camera_List_Control(HWND hdlg, WND_INFO *wnd, int *pnvalid, CAMERA **pF
 #define	TIMER_FRAMERATE_UPDATE				(1)
 #define	TIMER_STATS_UPDATE					(2)
 #define	TIMER_FRAMEINFO_UPDATE				(3)
+#define	TIMER_INITIALIZE_CAMERAS			(4)
+
+/* Thread called during WM_INITDIALOG to open first camera and fill in the list */
+/* It may take several seconds, so remove from message loop path */
+static void initialize_cameras_thread(void *arglist) {
+	static char *rname = "initialize_cameras_thread";
+
+	WND_INFO *wnd;
+	HWND hdlg;
+	int nfree;
+	CAMERA *nfirst;
+
+	/* Recover the parameters from the passed arguments */
+	wnd = (WND_INFO *) arglist;
+	hdlg = wnd->hdlg;
+
+	/* Fill in the list of cameras, possibly return one to initialize */
+	Fill_Camera_List_Control(hdlg, wnd, &nfree, &nfirst);
+
+	/* If only one possible camera, go ahead and initialize it */
+	if (nfree == 1 && nfirst != NULL) {		/* If only one free, then open it */
+		ComboBoxSetByPtrValue(hdlg, IDC_CAMERA_LIST, nfirst);
+		if (Camera_Open(hdlg, wnd, nfirst) != 0) {
+			ComboBoxClearSelection(hdlg, IDC_CAMERA_LIST);		/* Should be "unselect" */
+			fprintf(stderr, "Failed to open first camera\n"); fflush(stderr);
+		}
+	}
+	return;
+}					
+
 
 BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 	static char *rname = "CameraDlgProc";
 
 	BOOL rcode, bFlag;
-	int i, ival, ineed, nfree, ichan, rc, mode;
-	CAMERA *nfirst;
+	int i, ival, ineed, ichan, rc, mode;
 	int wID, wNotifyCode;
 	char szBuf[256];
 
@@ -1629,18 +1658,6 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			TL_SetDebug(wnd->EnableErrorReports);
 			SetDlgItemCheck(hdlg, IDC_ENABLE_DCX_ERRORS, wnd->EnableErrorReports);
 
-			/* Fill in the list of cameras, possibly return one to initialize */
-			Fill_Camera_List_Control(hdlg, wnd, &nfree, &nfirst);
-
-			/* If only one possible camera, go ahead and initialize it */
-			if (nfree == 1 && nfirst != NULL) {		/* If only one free, then open it */
-				ComboBoxSetByPtrValue(hdlg, IDC_CAMERA_LIST, nfirst);
-				if (Camera_Open(hdlg, wnd, nfirst) != 0) {
-					ComboBoxClearSelection(hdlg, IDC_CAMERA_LIST);		/* Should be "unselect" */
-					fprintf(stderr, "Failed to open first camera\n"); fflush(stderr);
-				}
-			}
-
 #ifdef USE_NUMATO
 			if (wnd->numato.on == 0) wnd->numato.on = 1;
 			wnd->numato.total = wnd->numato.on + wnd->numato.off;
@@ -1671,8 +1688,12 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 			/* Enable a floating window */
 			EnableDlgItem(hdlg, IDC_FLOAT, TRUE);
 
+			/* Start a thread to initialize camera list and potentially open only existing camera */
+			_beginthread(initialize_cameras_thread, 0, (void *) wnd);
+			
 			/* Have a random button on screen for debug ... bottom left of dialog box */
 			ShowDlgItem(hdlg, IDB_DEBUG, TRUE);		/* Uncomment for debug work ... can be anything */
+
 			rcode = TRUE; break;
 
 		case WM_CLOSE:
@@ -1714,7 +1735,7 @@ BOOL CALLBACK CameraDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 			/* Need to release memory associated with the curves */
 			printf(" calling EndDialog ..."); fflush(stdout);
-			EndDialog(hdlg,0);
+			EndDialog(hdlg, 0);
 			printf(" returning\n"); fflush(stdout);
 			rcode = TRUE; break;
 
@@ -3751,8 +3772,13 @@ BOOL CALLBACK TL_CameraInfoDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lP
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
 	static char *rname = "WinMain";
 
+	int isize;
 	char *tokenlist, token[PATH_MAX];
+	char szBuf[PATH_MAX];
 	BOOL debug;
+
+	/* debug info */
+	fprintf(stderr, "\nWinMain() initializing\n"); fflush(stderr);
 
 	/* If not done, make sure we are loaded.  Assume safe to call multiply */
 	InitCommonControls();
@@ -3767,16 +3793,17 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 	while (ParseCmdLine(token, sizeof(token), tokenlist, &tokenlist)) {
 		if (_stricmp(token, "-help") == 0 || _stricmp(token, "/help") == 0 || _stricmp(token, "-?") == 0 || _stricmp(token, "/?") == 0) {
 			MessageBox(NULL,
-						  "Usage: ZooCam [-options] [config_file.ini]\n"
-						  "   Options\n"
-						  "     -?      This help information\n"
-						  "     -debug  Create a c:/lsa/ZooCam.log debug file\n"
-						  "     -ini <config_file.ini>\n"
+						  "Usage: ZooCam [-options [<args>]] [config.ini]\n"
+						  "\n"
+						  "Options\n"
+						  "  -?\t\tthis help information\n"
+						  "  -debug\t\tcreate c:/lsa/ZooCam.log debug file\n"
+						  "  -ini <config.ini>\talternate .ini file\n"
+						  "\n"
 						  "Notes:\n"
-						  " 1) If only one argument, -ini assumed\n"
-						  " 2) Default config, if not specified, is ./ZooCam.ini\n"
-						  " 3) .ini assumed in current working directory if not full path\n"
-						  " 4) debug creates c:/lsa/ZooCam.log file\n",
+						  " 1) For one argument with no -option, -ini is assumed\n"
+						  " 2) Default .ini is %LocalAppData%/ZooCam/ZooCam.ini\n"
+						  " 3) If unable to access AppData, default is ./ZooCam.ini\n", 
 						  "ZooCam Usage", MB_ICONINFORMATION | MB_OK);
 			return 0;
 		} else if (_stricmp(token, "-debug") == 0 || _stricmp(token, "/debug") == 0) {
@@ -3786,7 +3813,6 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 		} else if (*ConfigIniFile == '\0') {
 			strcpy_s(ConfigIniFile, sizeof(ConfigIniFile), token);
 		} else {
-			char szBuf[256];
 			sprintf_s(szBuf, sizeof(szBuf), "Unrecognized command line option\n\t%s\nUse -? for help", token);
 			MessageBox(NULL, szBuf, "ZooCam Error", MB_ICONERROR | MB_OK);
 			fprintf(stderr, "Unrecognized command line option: %s\n", token); fflush(stderr);
@@ -3795,13 +3821,17 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 
 	/* Generate the full .ini file name */
 	if (*ConfigIniFile == '\0') {
-		strcpy_s(ConfigIniFile, sizeof(ConfigIniFile), "./ZooCam.ini");
+		strcpy_s(ConfigIniFile, sizeof(ConfigIniFile), "./ZooCam.ini");		/* Default on any errors */
+		if (0 == getenv_s(&isize, szBuf, sizeof(szBuf), "LOCALAPPDATA")) {
+			strcat_s(szBuf, sizeof(szBuf), "/ZooCam");
+			if (0 == _mkdir(szBuf) || EEXIST == errno) sprintf_s(ConfigIniFile, sizeof(ConfigIniFile), "%s/ZooCam.ini", szBuf);
+		}
 	} else if (strpbrk(ConfigIniFile, "/\\:") == NULL) {
-		char szBuf[PATH_MAX];
 		strcpy_s(szBuf, sizeof(szBuf), ConfigIniFile);
 		strcpy_s(ConfigIniFile, sizeof(ConfigIniFile), "./");
 		strcpy_s(ConfigIniFile+2, sizeof(ConfigIniFile)-2, szBuf);
 	}
+	fprintf(stderr, "inifile configured as %s\n", ConfigIniFile); fflush(stderr);
 
 	/* Open the system debug file */
 	if (debug) {
@@ -3818,6 +3848,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpCmd
 
 	/* And show the dialog box */
 	hInstance = hThisInstance;
+	fprintf(stderr, "Starting main dialog box\n"); fflush(stderr);
 	DialogBox(hInstance, "ZOOCAM_DIALOG", HWND_DESKTOP, (DLGPROC) CameraDlgProc);
 
 	/* Shut down internet server service */

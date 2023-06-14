@@ -121,21 +121,22 @@ int TL_Initialize(void) {
 	rcode = 0;
 
 	/* Build the DLL link points for the sdk (painful) */
-	is_camera_dll_open = tl_camera_sdk_dll_initialize() == 0;
+	is_camera_dll_open = (0 == tl_camera_sdk_dll_initialize());
 	if (! is_camera_dll_open) { 
 		fprintf(stderr, "[%s] Failed to initialize the TL camera DLLs\n", rname); fflush(stderr);
 		rcode |= 0x01;
 	}
 
 	/* Open the SDK */
-	is_camera_sdk_open = tl_camera_open_sdk() == 0;
+	/* The TWAIN.dll error on lab computers comes from this call ... no idea how to fix */
+	is_camera_sdk_open = (0 == tl_camera_open_sdk());
 	if (! is_camera_sdk_open) { 
 		fprintf(stderr, "[%s] Failed to open the tl camera SDK\n", rname); fflush(stderr);
 		rcode |= 0x02;
 	}
 
 	/* Open the SDK for the mono to color processing (painful) */
-	is_mono_to_color_sdk_open = tl_mono_to_color_processing_initialize() == 0;
+	is_mono_to_color_sdk_open = (0 == tl_mono_to_color_processing_initialize());
 	if (! is_mono_to_color_sdk_open) { 
 		fprintf(stderr, "[%s] Failed to initialize mono to color processing sdk\n", rname); fflush(stderr);
 		rcode |= 0x04;
