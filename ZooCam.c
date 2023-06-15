@@ -2770,7 +2770,7 @@ BOOL CALLBACK CameraIDConfigDlgProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM l
 
 		case WM_CLOSE:
 			rcode = FALSE;
-			for (i=0; i<min(camera_count, MAX_CAMERAS); i++) { rcode = TRUE; break; }
+			for (i=0; i<min(camera_count, MAX_CAMERAS); i++) rcode = rcode || hold[i].modified;
 			if (! rcode) {
 				EndDialog(hdlg, IDOK);
 			} else {
