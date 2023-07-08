@@ -274,6 +274,16 @@
 #define IDV_DESCRIPTION_7               2221
 #define IDV_DESCRIPTION_8               2222
 #define IDV_DESCRIPTION_9               2223
+#define IDB_CLEAR_0                     2224
+#define IDB_CLEAR_1                     2225
+#define IDB_CLEAR_2                     2226
+#define IDB_CLEAR_3                     2227
+#define IDB_CLEAR_4                     2228
+#define IDB_CLEAR_5                     2229
+#define IDB_CLEAR_6                     2230
+#define IDB_CLEAR_7                     2231
+#define IDB_CLEAR_9                     2232
+#define IDB_CLEAR_10                    2233
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
